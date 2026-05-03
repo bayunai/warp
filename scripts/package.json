@@ -7,8 +7,7 @@
   },
   "dependencies": {
     "sharp": "^0.33.5",
-    "potrace": "^2.1.8",
-    "png-to-ico": "^2.1.8"
+    "potrace": "^2.1.8"
   },
   "devDependencies": {
     "@types/potrace": "^2.1.5",

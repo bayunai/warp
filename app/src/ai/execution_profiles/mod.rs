@@ -23,7 +23,7 @@ use warp_core::channel::ChannelState;
 use warp_core::features::FeatureFlag;
 use warpui::{AppContext, SingletonEntity};
 
-use super::llms::LLMId;
+use super::llms::{LLMContextWindow, LLMId, LLMPreferences};
 
 pub const PROFILE_NAME_MAX_LENGTH: usize = 50;
 
@@ -256,6 +256,8 @@ pub struct AIExecutionProfile {
     /// `None` 时回退到 `base_model`。低延迟敏感,建议选最便宜/最快的 BYOP 模型。
     pub next_command_model: Option<LLMId>,
 
+    pub context_window_limit: Option<u32>,
+
     /// Whether plans created by the agent should be automatically synced to Warp Drive
     pub autosync_plans_to_warp_drive: bool,
 
@@ -287,6 +289,7 @@ impl Default for AIExecutionProfile {
             title_model: None,
             active_ai_model: None,
             next_command_model: None,
+            context_window_limit: None,
             autosync_plans_to_warp_drive: true,
             web_search_enabled: true,
         }
@@ -341,6 +344,7 @@ impl AIExecutionProfile {
             title_model: None,
             active_ai_model: None,
             next_command_model: None,
+            context_window_limit: None,
             autosync_plans_to_warp_drive: false,
             web_search_enabled: true,
         }
@@ -398,9 +402,32 @@ impl AIExecutionProfile {
             title_model: None,
             active_ai_model: None,
             next_command_model: None,
+            context_window_limit: None,
             autosync_plans_to_warp_drive: FeatureFlag::SyncAmbientPlans.is_enabled(),
             web_search_enabled: true,
         }
+    }
+}
+
+impl AIExecutionProfile {
+    pub fn configurable_context_window(&self, app: &AppContext) -> Option<LLMContextWindow> {
+        let prefs = LLMPreferences::as_ref(app);
+        let cw = self
+            .base_model
+            .as_ref()
+            .and_then(|id| prefs.get_llm_info(id))
+            .map(|info| info.context_window.clone())
+            .unwrap_or_else(|| prefs.get_default_base_model().context_window.clone());
+        if cw.is_configurable && cw.max > 0 {
+            Some(cw)
+        } else {
+            None
+        }
+    }
+
+    pub fn context_window_display_value(&self, app: &AppContext) -> Option<u32> {
+        let cw = self.configurable_context_window(app)?;
+        Some(self.context_window_limit.unwrap_or(cw.default_max))
     }
 }
 

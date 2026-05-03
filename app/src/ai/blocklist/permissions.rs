@@ -209,6 +209,7 @@ impl BlocklistAIPermissions {
             title_model: profile_data.title_model.clone(),
             active_ai_model: profile_data.active_ai_model.clone(),
             next_command_model: profile_data.next_command_model.clone(),
+            context_window_limit: profile_data.context_window_limit,
             autosync_plans_to_warp_drive: profile_data.autosync_plans_to_warp_drive,
             web_search_enabled: profile_data.web_search_enabled,
         }
