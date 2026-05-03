@@ -415,16 +415,25 @@ impl InteractionMode {
     ) -> Result<(), UpdateInteractionModeError> {
         let Self::Agent(AgentInteractionMetadata {
             ref mut long_running_control_state,
+            ref requested_command_action_id,
             ..
         }) = self
         else {
             return Err(UpdateInteractionModeError::InvalidTakeOver);
         };
 
-        if !long_running_control_state
+        let agent_controls_via_subagent = long_running_control_state
             .as_ref()
-            .is_some_and(|state| state.is_agent_in_control())
-        {
+            .is_some_and(|state| state.is_agent_in_control());
+
+        // Block AI can run a long command (e.g. `ssh` waiting for a password) without ever
+        // going through the CLI subagent path that sets `long_running_control_state` to
+        // `Some(Agent { .. })` — see `Block::is_agent_driving_command`. In that case the block
+        // is still agent-driven and the user must be able to take the PTY for interactive input.
+        let agent_driving_before_subagent_state = requested_command_action_id.is_some()
+            && long_running_control_state.is_none();
+
+        if !agent_controls_via_subagent && !agent_driving_before_subagent_state {
             return Err(UpdateInteractionModeError::InvalidTakeOver);
         }
 

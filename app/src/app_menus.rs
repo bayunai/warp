@@ -100,7 +100,12 @@ fn custom_shortcut(action: CustomAction) -> Option<Keystroke> {
 fn default_name(action: CustomAction, ctx: &AppContext) -> String {
     ctx.description_for_custom_action(action.into(), bindings::MAC_MENUS_CONTEXT)
         .unwrap_or_else(|| {
-            debug_assert!(false, "action should have a name: {action:?}");
+            // Menu entries can outlive forked-out keybindings (e.g. OpenWarp dropping cloud-only
+            // actions). Never panic here: debug builds used to `debug_assert!` and crash on startup.
+            log::warn!(
+                "MAC_MENUS description missing for {action:?}; \
+                 add a binding with `with_custom_action` + `MAC_MENUS_CONTEXT`, or remove this menu item"
+            );
             "<NO DESCRIPTION>".into()
         })
 }

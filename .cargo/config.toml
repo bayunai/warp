@@ -8,8 +8,16 @@
 # `script/bundle`.
 MACOSX_DEPLOYMENT_TARGET = "10.14"
 
+# macOS-only link flags must not live in [build]: they apply to every target and
+# break Linux CI/containers (invalid ld flags; aws-lc-sys compiler probes).
 [build]
-rustflags = ["-C", "symbol-mangling-version=v0", "-C", "link-args=-Wl,-headerpad_max_install_names"]
+rustflags = ["-C", "symbol-mangling-version=v0"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-args=-Wl,-headerpad_max_install_names"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-args=-Wl,-headerpad_max_install_names"]
 
 [net]
 git-fetch-with-cli = true

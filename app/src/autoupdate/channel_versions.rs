@@ -33,6 +33,24 @@ pub async fn fetch_channel_versions(
     match channel_versions {
         channel_versions @ Ok(_) => channel_versions,
         Err(err) => {
+            let releases = ChannelState::releases_base_url();
+            if releases.trim().is_empty() {
+                match ChannelState::channel() {
+                    Channel::Dev | Channel::Preview => {
+                        log::error!("Failed to retrieve channel versions from Warp server: {err:#}");
+                    }
+                    _ => log::warn!(
+                        "Failed to retrieve channel versions from Warp server: {err:#}. \
+                         Skipping GCP fallback (releases_base_url unset, e.g. OSS build)."
+                    ),
+                }
+                log::info!(
+                    "Skipping GCP channel_versions fallback: releases_base_url is unset (common on OSS builds)."
+                );
+                return Err(err.context(
+                    "Cannot fall back to GCP channel_versions without releases_base_url",
+                ));
+            }
             match ChannelState::channel() {
                 // Only log an error on Dev and Preview -- if this is failing, its likely to be
                 // failing for all users, and Stable has too many users (this error would flood
@@ -56,13 +74,17 @@ async fn fetch_channel_versions_from_json_storage(
     client: &http_client::Client,
     nonce: &str,
 ) -> Result<ChannelVersions> {
+    let releases = ChannelState::releases_base_url();
+    let base = releases.trim().trim_end_matches('/');
+    if base.is_empty() {
+        anyhow::bail!("releases_base_url is empty; refusing relative GCP URL");
+    }
     log::info!("Fetching channel versions from GCP JSON storage");
     let res = client
         .get(
             format!(
                 "{}/channel_versions.json?r={}",
-                ChannelState::releases_base_url(),
-                nonce
+                base, nonce
             )
             .as_str(),
         )

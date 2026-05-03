@@ -64,3 +64,7 @@ __pycache__/
 
 # logo 生成脚本的依赖
 /scripts/node_modules/
+
+# Project notes
+.note/
+google-cloud-cli-462.0.1-linux-arm.tar.gz

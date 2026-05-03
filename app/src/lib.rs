@@ -47,7 +47,12 @@ pub mod i18n;
 mod input_classifier;
 mod interval_timer;
 mod linear;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+// In-app dropdown/context menus (crate::menu::Menu), not the macOS menu bar (app_menus).
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+))]
 mod menu;
 mod modal;
 mod network;

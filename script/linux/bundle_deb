@@ -84,7 +84,20 @@ source "$WORKSPACE_ROOT_DIR/script/linux/bundle_install" "$PKGDIR"
 
 # Move the Debian-specific package metadata into the package directory.
 DEBIAN_DIR="$PKGDIR/DEBIAN"
+# dpkg requires a non-empty Version field; bundle script normally sets GIT_RELEASE_TAG via --release-tag.
+if [ -z "${GIT_RELEASE_TAG:-}" ]; then
+  GIT_RELEASE_TAG="$(git -C "$WORKSPACE_ROOT_DIR" describe --tags --always --dirty 2>/dev/null)" || true
+fi
+if [ -z "${GIT_RELEASE_TAG:-}" ]; then
+  echo >&2 "warning: GIT_RELEASE_TAG is unset and git describe failed; using v0.1.0-local for deb Version (pass bundle --release-tag vX.Y.Z or export GIT_RELEASE_TAG)"
+  GIT_RELEASE_TAG="v0.1.0-local"
+fi
 VERSION="$(echo "$GIT_RELEASE_TAG" | sed -E "s/^v//; s/([a-z]+)_/\1./")"
+# Debian policy: version must start with a digit (bare git SHA describe output may not).
+if ! [[ "$VERSION" =~ ^[0-9] ]]; then
+  SAFE="$(echo "$GIT_RELEASE_TAG" | sed 's/^v//' | tr -c 'A-Za-z0-9.+' '-' | sed 's/-\+/-/g; s/^-//; s/-$//')"
+  VERSION="0.0.0+${SAFE:-local}"
+fi
 mkdir "$DEBIAN_DIR"
 sed \
     "s#@@CHANNEL_SUFFIX@@#$CHANNEL_SUFFIX#g; s#@@VERSION@@#$VERSION#g; s#@@ARCH@@#$ARCH#g" \

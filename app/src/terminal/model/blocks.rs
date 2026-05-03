@@ -1779,7 +1779,8 @@ impl BlockList {
     }
 
     pub fn block_for_ai_action_id(&self, id: &AIAgentActionId) -> Option<&Block> {
-        self.blocks.iter().find(|block| {
+        // Prefer the most recent matching block if integration ever duplicates metadata.
+        self.blocks.iter().rev().find(|block| {
             block.agent_interaction_metadata().is_some_and(|metadata| {
                 metadata
                     .requested_command_action_id()

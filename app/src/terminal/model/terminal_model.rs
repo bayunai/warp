@@ -3091,7 +3091,14 @@ impl ansi::Handler for TerminalModel {
                 self.is_receiving_in_band_command_output = IsReceivingInBandCommandOutput::No;
             }
             IsReceivingInBandCommandOutput::No => {
-                log::warn!("Received 'end_in_band_command_output' while not expecting to read in-band command output.");
+                // `write_command` calls `end_in_band_command_output(false)` before every PTY write to
+                // drop any half-open generator state; when not receiving in-band output that is an
+                // intentional no-op — only warn for an orphan OSC end marker from the shell.
+                if from_osc_sequence {
+                    log::warn!(
+                        "Received 'end_in_band_command_output' while not expecting to read in-band command output."
+                    );
+                }
             }
         }
 
