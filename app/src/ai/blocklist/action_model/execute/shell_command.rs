@@ -65,7 +65,15 @@ fn agent_shell_command_block_output(block: &Block) -> String {
         .unwrap_or_default()
 }
 
-fn block_shell_command_output_ready(block: &Block) -> bool {
+/// Gate for `BlockMetadataReceived` — matches upstream: command line grid has finished echoing.
+/// Interactive prompts (`sudo`, `ssh`, etc.) often keep the output grid open; using only
+/// [`Block::finished`] here would never wake the poll until the subprocess exits.
+fn block_ready_after_shell_metadata(block: &Block) -> bool {
+    block.is_command_finished()
+}
+
+/// Gate for [`ModelEvent::BlockCompleted`] — output grid is sealed (real command completion).
+fn block_ready_after_block_completed(block: &Block) -> bool {
     block.finished()
 }
 
@@ -120,27 +128,31 @@ impl ShellCommandExecutor {
             // fills the block — on some shells/OSes precmd/metadata arrives with timing where the
             // agent snapshot still sees an empty output grid.
             ModelEvent::BlockCompleted(completed) => {
-                self.maybe_notify_shell_command_finished(|block| block.id() == &completed.block_id);
+                self.maybe_notify_shell_command_finished(
+                    |block| block.id() == &completed.block_id,
+                    block_ready_after_block_completed,
+                );
             }
-            // Fallback: next prompt / metadata (cwd hooks); keep `finished()` gate.
+            // Fallback: precmd / cwd hooks — same readiness as upstream (`is_command_finished`).
             ModelEvent::BlockMetadataReceived(BlockMetadataReceivedEvent { .. }) => {
-                self.maybe_notify_shell_command_finished(|_| true);
+                self.maybe_notify_shell_command_finished(|_| true, block_ready_after_shell_metadata);
             }
             _ => {}
         }
     }
 
-    /// Wakes any pending `action_result_future` when the selected block is done and matches
+    /// Wakes any pending `action_result_future` when the selected block passes `ready` and
     /// `block_filter` (used to correlate `BlockCompleted` with the right block id).
     fn maybe_notify_shell_command_finished(
         &mut self,
         block_filter: impl Fn(&Block) -> bool,
+        ready: impl Fn(&Block) -> bool,
     ) {
         let model = self.terminal_model.lock();
         let block_finished_senders = self.block_finished_senders.drain().collect_vec();
         for (block_selector, block_finished_tx) in block_finished_senders.into_iter() {
             if let Some(block) = block_selector.get_block(&model) {
-                if block_shell_command_output_ready(block) && block_filter(block) {
+                if ready(block) && block_filter(block) {
                     if let Err(e) = block_finished_tx.send(()) {
                         log::warn!(
                             "Failed to notify block completion for running requested command: {e:?}"
