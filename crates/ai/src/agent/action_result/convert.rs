@@ -19,27 +19,23 @@ impl TryFrom<RequestCommandOutputResult> for api::request::input::tool_call_resu
                 output,
                 exit_code,
                 ..
-            } => {
-                let exit = exit_code.value();
-                Ok(
-                    api::request::input::tool_call_result::Result::RunShellCommand(
-                        #[allow(deprecated)]
-                        api::RunShellCommandResult {
-                            command,
-                            // Deprecated top-level fields: still serialized; mirror nested `result`.
-                            output: output.clone(),
-                            exit_code: exit,
-                            result: Some(api::run_shell_command_result::Result::CommandFinished(
-                                api::ShellCommandFinished {
-                                    command_id: block_id.to_string(),
-                                    output,
-                                    exit_code: exit,
-                                },
-                            )),
-                        },
-                    ),
-                )
-            }
+            } => Ok(
+                api::request::input::tool_call_result::Result::RunShellCommand(
+                    #[allow(deprecated)]
+                    api::RunShellCommandResult {
+                        command,
+                        output: Default::default(),
+                        exit_code: Default::default(),
+                        result: Some(api::run_shell_command_result::Result::CommandFinished(
+                            api::ShellCommandFinished {
+                                command_id: block_id.to_string(),
+                                output,
+                                exit_code: exit_code.value(),
+                            },
+                        )),
+                    },
+                ),
+            ),
             RequestCommandOutputResult::LongRunningCommandSnapshot {
                 command,
                 block_id,
@@ -51,7 +47,7 @@ impl TryFrom<RequestCommandOutputResult> for api::request::input::tool_call_resu
                     #[allow(deprecated)]
                     api::RunShellCommandResult {
                         command,
-                        output: grid_contents.clone(),
+                        output: Default::default(),
                         exit_code: Default::default(),
                         result: Some(
                             api::run_shell_command_result::Result::LongRunningCommandSnapshot(
