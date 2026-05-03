@@ -391,7 +391,7 @@ index ffb2a78..b77092f 100644
              self.block_list
                  .active_block_mut()
 diff --git a/app/src/terminal/view.rs b/app/src/terminal/view.rs
-index ad7666d..8520d48 100644
+index ad7666d..be935c8 100644
 --- a/app/src/terminal/view.rs
 +++ b/app/src/terminal/view.rs
 @@ -5475,6 +5475,21 @@ impl TerminalView {
@@ -416,7 +416,37 @@ index ad7666d..8520d48 100644
              }
              CLISubagentEvent::FinishedSubagent {
                  block_id,
-@@ -19167,13 +19182,26 @@ impl TerminalView {
+@@ -6829,6 +6844,21 @@ impl TerminalView {
+             }
+         }
+ 
++        let active_command_block = model.block_list().active_block();
++        // Agent handed the PTY to the user (ssh password, 2FA, etc.). Keep Steer / agent input
++        // hidden for the whole interval — not only while `has_expanded_running_commands` is true.
++        // Otherwise submitting the password (Enter) collapses the running-command header, that
++        // predicate becomes false, the steer field reappears, steals focus, and the session can
++        // wedge with client-side tool warnings.
++        if active_command_block.is_active_and_long_running()
++            && active_command_block
++                .long_running_control_state()
++                .and_then(|s| s.user_take_over_reason())
++                .is_some_and(UserTakeOverReason::is_transfer_from_agent)
++        {
++            return false;
++        }
++
+         let active_ai_block = self.active_ai_block(app);
+         if active_ai_block.is_some_and(|ai_block| {
+             let ai_block = ai_block.as_ref(app);
+@@ -6838,7 +6868,6 @@ impl TerminalView {
+             return false;
+         }
+ 
+-        let active_command_block = model.block_list().active_block();
+         let is_active_and_long_running = active_command_block.is_active_and_long_running();
+         let is_oz_env_startup_command = active_command_block.is_oz_environment_startup_command();
+         let is_running_in_band_command =
+@@ -19167,13 +19196,26 @@ impl TerminalView {
  
              let has_bootstrapped = model.block_list().is_bootstrapping_precmd_done();
  

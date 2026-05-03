@@ -6844,6 +6844,21 @@ impl TerminalView {
             }
         }
 
+        let active_command_block = model.block_list().active_block();
+        // Agent handed the PTY to the user (ssh password, 2FA, etc.). Keep Steer / agent input
+        // hidden for the whole interval — not only while `has_expanded_running_commands` is true.
+        // Otherwise submitting the password (Enter) collapses the running-command header, that
+        // predicate becomes false, the steer field reappears, steals focus, and the session can
+        // wedge with client-side tool warnings.
+        if active_command_block.is_active_and_long_running()
+            && active_command_block
+                .long_running_control_state()
+                .and_then(|s| s.user_take_over_reason())
+                .is_some_and(UserTakeOverReason::is_transfer_from_agent)
+        {
+            return false;
+        }
+
         let active_ai_block = self.active_ai_block(app);
         if active_ai_block.is_some_and(|ai_block| {
             let ai_block = ai_block.as_ref(app);
@@ -6853,7 +6868,6 @@ impl TerminalView {
             return false;
         }
 
-        let active_command_block = model.block_list().active_block();
         let is_active_and_long_running = active_command_block.is_active_and_long_running();
         let is_oz_env_startup_command = active_command_block.is_oz_environment_startup_command();
         let is_running_in_band_command =
