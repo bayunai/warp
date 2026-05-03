@@ -5446,6 +5446,21 @@ impl TerminalView {
                     *agent_has_control,
                     ctx,
                 );
+                if !agent_has_control {
+                    let should_focus_terminal_for_transfer = self
+                        .model
+                        .lock()
+                        .block_list()
+                        .active_block()
+                        .long_running_control_state()
+                        .and_then(|state| state.user_take_over_reason())
+                        .is_some_and(UserTakeOverReason::is_transfer_from_agent);
+                    if should_focus_terminal_for_transfer {
+                        // Password/passphrase prompts need the next keystrokes to go to the PTY,
+                        // not the agent input that may still be visible after the handoff.
+                        self.focus_terminal(ctx);
+                    }
+                }
             }
             CLISubagentEvent::FinishedSubagent {
                 block_id,
