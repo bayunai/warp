@@ -1,0 +1,631 @@
+diff --git a/.github/workflows/openwarp_release.yml b/.github/workflows/openwarp_release.yml
+index c49cdfe..3bdc2e1 100644
+--- a/.github/workflows/openwarp_release.yml
++++ b/.github/workflows/openwarp_release.yml
+@@ -9,11 +9,6 @@
+ # - 不签名:不传 --read-passwords-from-env(macOS) / 不设 SIGN_TOOL_CMD(Windows)
+ # - 不上传 GCS / Sentry / Slack / changelog,不调 channel-versions repository_dispatch
+ # - 复用 ./.github/actions/{prepare_environment,get_channel_config}
+-#
+-# 流水线结构(先打包后发布,避免出现空 Release):
+-#   prepare_metadata → release_{macos,windows,linux} (上传成 workflow artifact)
+-#                    → publish_release (全部 build 成功后下载 artifact 并创建 Release)
+-# 任意 build job 失败 → publish_release 因 needs 跳过 → 不会留下没有安装包的 Release。
+ 
+ name: OpenWarp Release
+ 
+@@ -38,14 +33,12 @@ env:
+   CHANNEL: oss
+ 
+ jobs:
+-  prepare_metadata:
+-    name: Prepare metadata
++  prepare_release:
++    name: Prepare release
+     runs-on: ubuntu-latest
+     outputs:
+       release_tag: ${{ steps.compute_tag.outputs.tag }}
+       release_branch: ${{ steps.compute_tag.outputs.branch }}
+-      release_name: ${{ steps.get-config.outputs.release_base_name }} ${{ steps.compute_tag.outputs.tag }}
+-      release_body: ${{ steps.get-config.outputs.release_body_text }}
+     steps:
+       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+ 
+@@ -73,10 +66,21 @@ jobs:
+           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+           echo "Release tag: $TAG / build ref: $BRANCH"
+ 
++      - name: Create GitHub release
++        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
++        with:
++          name: ${{ steps.get-config.outputs.release_base_name }} ${{ steps.compute_tag.outputs.tag }}
++          tag_name: ${{ steps.compute_tag.outputs.tag }}
++          body: ${{ steps.get-config.outputs.release_body_text }}
++          draft: false
++          prerelease: false
++          make_latest: "true"
++          token: ${{ secrets.GITHUB_TOKEN }}
++
+   release_macos:
+     name: Build Release (macOS ${{ matrix.dmg_name_suffix }})
+     runs-on: ${{ matrix.runner }}
+-    needs: prepare_metadata
++    needs: prepare_release
+     # macos-26 / macos-26-intel(Pro standard)无 sccache,full cargo build + bundle + create-dmg
+     # 实测 90min 卡在 cargo build 阶段被取消;参考 Windows standard 1h43m,留 buffer 设 180
+     timeout-minutes: 180
+@@ -90,7 +94,7 @@ jobs:
+     steps:
+       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+         with:
+-          ref: ${{ needs.prepare_metadata.outputs.release_branch }}
++          ref: ${{ needs.prepare_release.outputs.release_branch }}
+ 
+       - uses: ./.github/actions/prepare_environment
+         with:
+@@ -119,25 +123,24 @@ jobs:
+           script/bundle --channel "$CHANNEL" --arch ${{ matrix.arch }} --dmg-name-suffix "${{ matrix.dmg_name_suffix }}"
+         shell: bash
+         env:
+-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
++          GIT_RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+ 
+-      - name: Upload DMG artifact
+-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
++      - name: Add DMG to GitHub release assets
++        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+         with:
+-          name: openwarp-macos-${{ matrix.dmg_name_suffix }}
+-          path: ${{ steps.bundle_app.outputs.dmg_path }}
+-          if-no-files-found: error
+-          retention-days: 7
++          tag_name: ${{ needs.prepare_release.outputs.release_tag }}
++          files: ${{ steps.bundle_app.outputs.dmg_path }}
++          token: ${{ secrets.GITHUB_TOKEN }}
+ 
+   release_windows:
+     name: Build Release (Windows x64)
+     runs-on: windows-latest
+-    needs: prepare_metadata
++    needs: prepare_release
+     timeout-minutes: 180
+     steps:
+       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+         with:
+-          ref: ${{ needs.prepare_metadata.outputs.release_branch }}
++          ref: ${{ needs.prepare_release.outputs.release_branch }}
+ 
+       - uses: ./.github/actions/prepare_environment
+         with:
+@@ -151,27 +154,26 @@ jobs:
+         run: script/bundle -Channel $CHANNEL -skip_build_installer --arch x64
+         shell: bash
+         env:
+-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
++          GIT_RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+ 
+       - name: Bundle app (unsigned installer)
+         id: bundle_app
+         run: script/bundle -Channel $CHANNEL -skip_build_binary --arch x64
+         shell: bash
+         env:
+-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
++          GIT_RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+ 
+-      - name: Upload installer artifact
+-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
++      - name: Add installer to GitHub release assets
++        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+         with:
+-          name: openwarp-windows-x64
+-          path: ${{ steps.bundle_app.outputs.installer_path }}
+-          if-no-files-found: error
+-          retention-days: 7
++          tag_name: ${{ needs.prepare_release.outputs.release_tag }}
++          files: ${{ steps.bundle_app.outputs.installer_path }}
++          token: ${{ secrets.GITHUB_TOKEN }}
+ 
+   release_linux:
+     name: Build Release (Linux x86_64 AppImage)
+     runs-on: ubuntu-22.04
+-    needs: prepare_metadata
++    needs: prepare_release
+     # 用 22.04 (glibc 2.35) 而不是 ubuntu-latest (24.04, glibc 2.39),
+     # AppImage 用 host glibc 链接,22.04 产物能在更多旧发行版上跑
+     # (Debian 11 / Ubuntu 20.04 + 等)。
+@@ -179,7 +181,7 @@ jobs:
+     steps:
+       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+         with:
+-          ref: ${{ needs.prepare_metadata.outputs.release_branch }}
++          ref: ${{ needs.prepare_release.outputs.release_branch }}
+ 
+       - uses: ./.github/actions/prepare_environment
+         with:
+@@ -204,47 +206,14 @@ jobs:
+         run: script/bundle --channel "$CHANNEL" --arch x86_64 --packages appimage
+         shell: bash
+         env:
+-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
++          GIT_RELEASE_TAG: ${{ needs.prepare_release.outputs.release_tag }}
+           # ubuntu-22.04 默认有 libfuse2 但 24.04 没有;统一开 EXTRACT_AND_RUN
+           # 让 linuxdeploy/appimagetool 不依赖 FUSE 内核模块,跨 runner 版本都稳。
+           APPIMAGE_EXTRACT_AND_RUN: 1
+ 
+-      - name: Upload AppImage artifact
+-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+-        with:
+-          name: openwarp-linux-x86_64
+-          path: ${{ steps.bundle_app.outputs.appimage_path }}
+-          if-no-files-found: error
+-          retention-days: 7
+-
+-  publish_release:
+-    name: Publish GitHub Release
+-    runs-on: ubuntu-latest
+-    # 必须等所有平台都 build 成功才发布;任一失败 → 此 job 跳过 → 不会出现空 Release。
+-    needs:
+-      - prepare_metadata
+-      - release_macos
+-      - release_windows
+-      - release_linux
+-    steps:
+-      - name: Download all artifacts
+-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+-        with:
+-          path: dist
+-          merge-multiple: true
+-
+-      - name: List downloaded files
+-        run: ls -lh dist
+-        shell: bash
+-
+-      - name: Create GitHub release with all assets
++      - name: Add AppImage to GitHub release assets
+         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+         with:
+-          name: ${{ needs.prepare_metadata.outputs.release_name }}
+-          tag_name: ${{ needs.prepare_metadata.outputs.release_tag }}
+-          body: ${{ needs.prepare_metadata.outputs.release_body }}
+-          draft: false
+-          prerelease: false
+-          make_latest: "true"
+-          files: dist/*
++          tag_name: ${{ needs.prepare_release.outputs.release_tag }}
++          files: ${{ steps.bundle_app.outputs.appimage_path }}
+           token: ${{ secrets.GITHUB_TOKEN }}
+diff --git a/.gitignore b/.gitignore
+index 648fa2b..ed6c4e9 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -64,3 +64,6 @@ __pycache__/
+ 
+ # logo 生成脚本的依赖
+ /scripts/node_modules/
++
++# Project notes
++.note/
+diff --git a/app/channels/oss/dev.warp.OpenWarp.desktop b/app/channels/oss/dev.warp.OpenWarp.desktop
+index 4f64aa8..9d1c5f9 100644
+--- a/app/channels/oss/dev.warp.OpenWarp.desktop
++++ b/app/channels/oss/dev.warp.OpenWarp.desktop
+@@ -7,7 +7,7 @@ Type=Application
+ Name=OpenWarp
+ GenericName=TerminalEmulator
+ 
+-Exec=warp-oss %U
++Exec=warp-terminal-oss %U
+ StartupWMClass=dev.warp.OpenWarp
+ 
+ Keywords=shell;prompt;command;commandline;cmd;
+diff --git a/app/src/ai/blocklist/action_model/execute/shell_command.rs b/app/src/ai/blocklist/action_model/execute/shell_command.rs
+index 45fc504..112cf9a 100644
+--- a/app/src/ai/blocklist/action_model/execute/shell_command.rs
++++ b/app/src/ai/blocklist/action_model/execute/shell_command.rs
+@@ -40,6 +40,35 @@ use crate::{send_telemetry_from_ctx, TelemetryEvent};
+ 
+ use super::{ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessActionInput};
+ 
++/// Text returned to the agent for `run_shell_command` / related tools.
++///
++/// Prefer unobfuscated grid text; some shells / timing paths leave the primary serialization empty
++/// while `output_to_string()` (displayed-output path) or the force-full path still has bytes.
++fn agent_shell_command_block_output(block: &Block) -> String {
++    let primary = block.output_with_secrets_unobfuscated();
++    if !primary.trim().is_empty() {
++        return primary;
++    }
++    let displayed = block.output_to_string();
++    if !displayed.trim().is_empty() {
++        return displayed;
++    }
++    let forced = block.output_to_string_force_full_grid_contents();
++    if !forced.trim().is_empty() {
++        return forced;
++    }
++    let command_grid = block.command_with_secrets_unobfuscated(false);
++    command_grid
++        .split_once('\n')
++        .map(|(_, output)| output.to_owned())
++        .filter(|output| !output.trim().is_empty())
++        .unwrap_or_default()
++}
++
++fn block_shell_command_output_ready(block: &Block) -> bool {
++    block.finished()
++}
++
+ pub struct ShellCommandExecutor {
+     active_session: ModelHandle<ActiveSession>,
+     block_finished_senders: HashMap<BlockSelector, oneshot::Sender<()>>,
+@@ -54,6 +83,11 @@ pub struct ShellCommandExecutor {
+ }
+ 
+ impl ShellCommandExecutor {
++    /// When `finish()` races ahead of PTY parsing (common on some Linux sessions), first read can be
++    /// empty; polling briefly often picks up short stdout.
++    const EMPTY_OUTPUT_RETRY_ATTEMPTS: u32 = 12;
++    const EMPTY_OUTPUT_RETRY_INTERVAL_MS: u64 = 25;
++
+     pub const MAX_WAIT_DURATION: Duration = Duration::from_secs(2);
+     /// Maximum delay we will honor for any agent-requested wait. Applies both  
+     /// to finite `ShellCommandDelay::Duration` requests and to  
+@@ -80,25 +114,46 @@ impl ShellCommandExecutor {
+     }
+ 
+     fn handle_terminal_model_event(&mut self, event: &ModelEvent, _ctx: &mut ModelContext<Self>) {
+-        // We wait for precmd for the block _after_ the requested command's block so that
+-        // downstream checks for current working directory are fresh. The precmd hook is when
+-        // the shell relays current working directory to warp.
+-        if let ModelEvent::BlockMetadataReceived(BlockMetadataReceivedEvent { .. }) = event {
+-            let model = self.terminal_model.lock();
+-            let block_finished_senders = self.block_finished_senders.drain().collect_vec();
+-            for (block_selector, block_finished_tx) in block_finished_senders.into_iter() {
+-                if let Some(block) = block_selector.get_block(&model) {
+-                    if block.is_command_finished() {
+-                        if let Err(e) = block_finished_tx.send(()) {
+-                            log::warn!(
+-                                "Failed to notify block completion for running requested command: {e:?}"
+-                            )
+-                        }
+-                    } else {
+-                        self.block_finished_senders
+-                            .insert(block_selector, block_finished_tx);
++        match event {
++            // Primary signal: the shell block just finished (`finish()`), output grids are sealed.
++            // Prefer this over `BlockMetadataReceived` so we resolve after the same event that
++            // fills the block — on some shells/OSes precmd/metadata arrives with timing where the
++            // agent snapshot still sees an empty output grid.
++            ModelEvent::BlockCompleted(completed) => {
++                self.maybe_notify_shell_command_finished(|block| block.id() == &completed.block_id);
++            }
++            // Fallback: next prompt / metadata (cwd hooks); keep `finished()` gate.
++            ModelEvent::BlockMetadataReceived(BlockMetadataReceivedEvent { .. }) => {
++                self.maybe_notify_shell_command_finished(|_| true);
++            }
++            _ => {}
++        }
++    }
++
++    /// Wakes any pending `action_result_future` when the selected block is done and matches
++    /// `block_filter` (used to correlate `BlockCompleted` with the right block id).
++    fn maybe_notify_shell_command_finished(
++        &mut self,
++        block_filter: impl Fn(&Block) -> bool,
++    ) {
++        let model = self.terminal_model.lock();
++        let block_finished_senders = self.block_finished_senders.drain().collect_vec();
++        for (block_selector, block_finished_tx) in block_finished_senders.into_iter() {
++            if let Some(block) = block_selector.get_block(&model) {
++                if block_shell_command_output_ready(block) && block_filter(block) {
++                    if let Err(e) = block_finished_tx.send(()) {
++                        log::warn!(
++                            "Failed to notify block completion for running requested command: {e:?}"
++                        )
+                     }
++                } else {
++                    self.block_finished_senders
++                        .insert(block_selector, block_finished_tx);
+                 }
++            } else {
++                // e.g. `BlockSelector::Action` before the agent command block exists in the list
++                self.block_finished_senders
++                    .insert(block_selector, block_finished_tx);
+             }
+         }
+     }
+@@ -275,7 +330,10 @@ impl ShellCommandExecutor {
+                     command: decorated_command,
+                 });
+ 
+-                let block_selector = BlockSelector::RequestedCommandId(action_id.clone());
++                // Resolve stdout via `block_for_ai_action_id`, not `active_block_id`. On bash with
++                // precmd hooks, the active block at dispatch can be a synthetic `precmd-*` block
++                // that finishes with exit 0 and empty output before the real command block exists.
++                let block_selector = BlockSelector::Action(action_id.clone());
+                 let command = command.clone();
+                 drop(model);
+ 
+@@ -309,7 +367,7 @@ impl ShellCommandExecutor {
+                     );
+                 };
+                 if block.finished() {
+-                    let output: String = block.output_with_secrets_unobfuscated();
++                    let output: String = agent_shell_command_block_output(block);
+                     let exit_code = block.exit_code();
+                     return ActionExecution::Sync(
+                         AIAgentActionResultType::WriteToLongRunningShellCommand(
+@@ -362,7 +420,7 @@ impl ShellCommandExecutor {
+                 };
+                 if block.finished() {
+                     let command = block.command_with_secrets_unobfuscated(false);
+-                    let output: String = block.output_with_secrets_unobfuscated();
++                    let output: String = agent_shell_command_block_output(block);
+                     let exit_code = block.exit_code();
+                     return ActionExecution::Sync(AIAgentActionResultType::ReadShellCommandOutput(
+                         ReadShellCommandOutputResult::CommandFinished {
+@@ -453,7 +511,7 @@ impl ShellCommandExecutor {
+                                         if block.finished() {
+                                             ActionResult::CommandFinished {
+                                                 block_id: block.id().clone(),
+-                                                output: block.output_with_secrets_unobfuscated(),
++                                                output: agent_shell_command_block_output(block),
+                                                 exit_code: block.exit_code(),
+                                             }
+                                         } else {
+@@ -589,60 +647,123 @@ impl ShellCommandExecutor {
+ 
+             // At this point, we've either received block metadata or we've timed out.
+             // Check the current state of the block and produce a result accordingly.
+-            let model = terminal_model.lock();
+-            let result = match block_selector.get_block(&model) {
+-                Some(block) => {
+-                    if block.finished() {
+-                        ActionResult::CommandFinished {
+-                            block_id: block.id().clone(),
+-                            output: block.output_with_secrets_unobfuscated(),
+-                            exit_code: block.exit_code(),
+-                        }
+-                    } else {
+-                        let grid_contents = if model.is_alt_screen_active() {
+-                            formatted_terminal_contents_for_input(
+-                                model.alt_screen().grid_handler(),
+-                                None,
+-                                CURSOR_MARKER,
+-                            )
++            // Scope the lock so no `MutexGuard` overlaps `.await` (required for `Send`).
++            let result = {
++                let model = terminal_model.lock();
++                match block_selector.get_block(&model) {
++                    Some(block) => {
++                        if block.finished() {
++                            ActionResult::CommandFinished {
++                                block_id: block.id().clone(),
++                                output: agent_shell_command_block_output(block),
++                                exit_code: block.exit_code(),
++                            }
+                         } else {
+-                            formatted_terminal_contents_for_input(
+-                                block.output_grid().grid_handler(),
+-                                // TODO(vorporeal): This is probably too large.
+-                                Some(1000),
+-                                CURSOR_MARKER,
+-                            )
+-                        };
+-                        ActionResult::LongRunningCommandSnapshot {
+-                            block_id: block.id().clone(),
+-                            grid_contents,
+-                            cursor: CURSOR_MARKER,
+-                            is_alt_screen_active: model.is_alt_screen_active(),
+-                            is_preempted,
++                            let grid_contents = if model.is_alt_screen_active() {
++                                formatted_terminal_contents_for_input(
++                                    model.alt_screen().grid_handler(),
++                                    None,
++                                    CURSOR_MARKER,
++                                )
++                            } else {
++                                formatted_terminal_contents_for_input(
++                                    block.output_grid().grid_handler(),
++                                    // TODO(vorporeal): This is probably too large.
++                                    Some(1000),
++                                    CURSOR_MARKER,
++                                )
++                            };
++                            ActionResult::LongRunningCommandSnapshot {
++                                block_id: block.id().clone(),
++                                grid_contents,
++                                cursor: CURSOR_MARKER,
++                                is_alt_screen_active: model.is_alt_screen_active(),
++                                is_preempted,
++                            }
+                         }
+                     }
++                    None => ActionResult::BlockNotFound,
+                 }
+-                None => ActionResult::BlockNotFound,
+             };
+ 
+-            result
++            match result {
++                ActionResult::CommandFinished {
++                    output,
++                    exit_code,
++                    block_id,
++                } if output.trim().is_empty() && exit_code.was_successful() => {
++                    let mut resolved = ActionResult::CommandFinished {
++                        output,
++                        exit_code,
++                        block_id,
++                    };
++                    for _ in 0..Self::EMPTY_OUTPUT_RETRY_ATTEMPTS {
++                        Timer::after(Duration::from_millis(Self::EMPTY_OUTPUT_RETRY_INTERVAL_MS))
++                            .await;
++                        let model = terminal_model.lock();
++                        if let Some(block) = block_selector.get_block(&model) {
++                            if block.finished() {
++                                let retry = agent_shell_command_block_output(block);
++                                if !retry.trim().is_empty() {
++                                    resolved = ActionResult::CommandFinished {
++                                        block_id: block.id().clone(),
++                                        output: retry,
++                                        exit_code: block.exit_code(),
++                                    };
++                                    break;
++                                }
++                            }
++                        }
++                    }
++                    if let ActionResult::CommandFinished {
++                        ref output,
++                        exit_code,
++                        ref block_id,
++                    } = resolved
++                    {
++                        if output.trim().is_empty() && exit_code.was_successful() {
++                            log::warn!(
++                                "run_shell_command: empty output after {}ms retry; block_id={:?} exit={}",
++                                (Self::EMPTY_OUTPUT_RETRY_ATTEMPTS as u64)
++                                    .saturating_mul(Self::EMPTY_OUTPUT_RETRY_INTERVAL_MS),
++                                block_id,
++                                exit_code.value()
++                            );
++                        }
++                    }
++                    resolved
++                }
++                other => other,
++            }
+         }
+     }
+ 
+     pub(super) fn cancel_execution(&mut self, id: &AIAgentActionId, _ctx: &mut ModelContext<Self>) {
++        let by_action = BlockSelector::Action(id.clone());
++        let removed = self.block_finished_senders.remove(&by_action).is_some();
++        self.force_refresh_senders.remove(&by_action);
++        if removed {
++            return;
++        }
++
+         let terminal_model = self.terminal_model.lock();
+         let active_block = terminal_model.block_list().active_block();
+         if !active_block.is_active_and_long_running() {
+             return;
+         }
+ 
+-        let selector = if active_block
+-            .requested_command_action_id()
+-            .is_some_and(|requested_command_id| requested_command_id == id)
+-        {
+-            BlockSelector::RequestedCommandId(id.clone())
+-        } else {
+-            BlockSelector::Id(active_block.id().clone())
++        let selector = terminal_model
++            .block_list()
++            .block_for_ai_action_id(id)
++            .map(|b| BlockSelector::Id(b.id().clone()))
++            .or_else(|| {
++                active_block
++                    .requested_command_action_id()
++                    .is_some_and(|requested_command_id| requested_command_id == id)
++                    .then(|| BlockSelector::Id(active_block.id().clone()))
++            });
++        let Some(selector) = selector else {
++            return;
+         };
+         self.block_finished_senders.remove(&selector);
+         self.force_refresh_senders.remove(&selector);
+@@ -689,16 +810,17 @@ impl ShellCommandExecutor {
+ #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+ enum BlockSelector {
+     Id(BlockId),
+-    RequestedCommandId(AIAgentActionId),
++    /// Shell block that carries `requested_command_action_id` for this agent tool call.
++    Action(AIAgentActionId),
+ }
+ 
+ impl BlockSelector {
+     fn get_block<'a>(&self, model: &'a TerminalModel) -> Option<&'a Block> {
+         match self {
+             BlockSelector::Id(block_id) => model.block_list().block_with_id(block_id),
+-            BlockSelector::RequestedCommandId(requested_command_id) => model
+-                .block_list()
+-                .block_for_ai_action_id(requested_command_id),
++            BlockSelector::Action(action_id) => {
++                model.block_list().block_for_ai_action_id(action_id)
++            }
+         }
+     }
+ }
+diff --git a/app/src/lib.rs b/app/src/lib.rs
+index 34749b0..be2282e 100644
+--- a/app/src/lib.rs
++++ b/app/src/lib.rs
+@@ -47,7 +47,12 @@ pub mod i18n;
+ mod input_classifier;
+ mod interval_timer;
+ mod linear;
+-#[cfg(any(target_os = "macos", target_os = "windows"))]
++// In-app dropdown/context menus (crate::menu::Menu), not the macOS menu bar (app_menus).
++#[cfg(any(
++    target_os = "macos",
++    target_os = "windows",
++    target_os = "linux",
++))]
+ mod menu;
+ mod modal;
+ mod network;
+diff --git a/app/src/terminal/model/blocks.rs b/app/src/terminal/model/blocks.rs
+index a558622..74b4183 100644
+--- a/app/src/terminal/model/blocks.rs
++++ b/app/src/terminal/model/blocks.rs
+@@ -1779,7 +1779,10 @@ impl BlockList {
+     }
+ 
+     pub fn block_for_ai_action_id(&self, id: &AIAgentActionId) -> Option<&Block> {
+-        self.blocks.iter().find(|block| {
++        // Prefer the most recently appended matching block. Older entries can still carry the same
++        // action id if metadata wasn't cleared (or on shells where an intermediate block finishes
++        // with no execution before the real PTY block appears).
++        self.blocks.iter().rev().find(|block| {
+             block.agent_interaction_metadata().is_some_and(|metadata| {
+                 metadata
+                     .requested_command_action_id()
+diff --git a/app/src/terminal/model/terminal_model.rs b/app/src/terminal/model/terminal_model.rs
+index 8756633..f79863b 100644
+--- a/app/src/terminal/model/terminal_model.rs
++++ b/app/src/terminal/model/terminal_model.rs
+@@ -1705,7 +1705,6 @@ impl TerminalModel {
+     ) {
+         self.start_command_execution();
+ 
+-        // If this command has AI metadata, attach it to the active block.
+         if let Some(ai_metadata) = &agent_metadata {
+             self.block_list
+                 .active_block_mut()
+diff --git a/app/src/terminal/writeable_pty/pty_controller.rs b/app/src/terminal/writeable_pty/pty_controller.rs
+index 01fb12b..31f687f 100644
+--- a/app/src/terminal/writeable_pty/pty_controller.rs
++++ b/app/src/terminal/writeable_pty/pty_controller.rs
+@@ -546,7 +546,6 @@ impl<T: EventLoopSender> PtyController<T> {
+         {
+             let mut model = self.terminal_model.lock();
+ 
+-            // Explicitly start the block now that the command is executed.
+             match source {
+                 CommandExecutionSource::AI { metadata } => {
+                     model.start_command_execution_with_ai_metadata(metadata)
+@@ -562,10 +561,9 @@ impl<T: EventLoopSender> PtyController<T> {
+                 }
+             }
+ 
+-            // Ensure that the `TerminalModel` doesn't interpret any of the PTY output from the
+-            // following commands as in-band command output. If the in-band command output is not
+-            // currently being received by the `TerminalModel`, this is a no-op.
+-            model.end_in_band_command_output(false);
++            if model.is_receiving_in_band_command_output() {
++                model.end_in_band_command_output(false);
++            }
+         }
+ 
+         self.pending_writes.clear();
