@@ -1705,7 +1705,6 @@ impl TerminalModel {
     ) {
         self.start_command_execution();
 
-        // If this command has AI metadata, attach it to the active block.
         if let Some(ai_metadata) = &agent_metadata {
             self.block_list
                 .active_block_mut()

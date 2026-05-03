@@ -543,32 +543,28 @@ impl<T: EventLoopSender> PtyController<T> {
         source: CommandExecutionSource,
         ctx: &mut ModelContext<Self>,
     ) {
-        let terminal_model = self.terminal_model.clone();
-        let before_write_fn: Box<dyn Fn() + Send + 'static> = Box::new(move || {
-            let mut model = terminal_model.lock();
+        {
+            let mut model = self.terminal_model.lock();
 
-            match &source {
+            match source {
                 CommandExecutionSource::AI { metadata } => {
-                    model.start_command_execution_with_ai_metadata(metadata.clone())
+                    model.start_command_execution_with_ai_metadata(metadata)
                 }
                 CommandExecutionSource::SharedSession {
                     participant_id,
                     ai_metadata,
                     ..
-                } => model.start_command_execution_for_shared_session(
-                    participant_id.clone(),
-                    ai_metadata.clone(),
-                ),
+                } => model.start_command_execution_for_shared_session(participant_id, ai_metadata),
                 CommandExecutionSource::User => model.start_command_execution(),
                 CommandExecutionSource::EnvVarCollection { metadata } => {
-                    model.start_command_execution_from_env_var_collection(metadata.clone())
+                    model.start_command_execution_from_env_var_collection(metadata)
                 }
             }
 
             if model.is_receiving_in_band_command_output() {
                 model.end_in_band_command_output(false);
             }
-        });
+        }
 
         self.pending_writes.clear();
         self.is_user_command_executing = true;
@@ -578,7 +574,7 @@ impl<T: EventLoopSender> PtyController<T> {
             command: command.to_owned(),
             shell_type,
             in_band_command_id: None,
-            before_write_fn: Some(before_write_fn),
+            before_write_fn: None,
         };
         if self.can_write_to_pty(ctx) {
             // Cancel the async writer task and clear the async write queue.

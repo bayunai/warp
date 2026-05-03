@@ -53,7 +53,20 @@ fn agent_shell_command_block_output(block: &Block) -> String {
     if !displayed.trim().is_empty() {
         return displayed;
     }
-    block.output_to_string_force_full_grid_contents()
+    let forced = block.output_to_string_force_full_grid_contents();
+    if !forced.trim().is_empty() {
+        return forced;
+    }
+    let command_grid = block.command_with_secrets_unobfuscated(false);
+    command_grid
+        .split_once('\n')
+        .map(|(_, output)| output.to_owned())
+        .filter(|output| !output.trim().is_empty())
+        .unwrap_or_default()
+}
+
+fn block_shell_command_output_ready(block: &Block) -> bool {
+    block.finished()
 }
 
 pub struct ShellCommandExecutor {
@@ -127,7 +140,7 @@ impl ShellCommandExecutor {
         let block_finished_senders = self.block_finished_senders.drain().collect_vec();
         for (block_selector, block_finished_tx) in block_finished_senders.into_iter() {
             if let Some(block) = block_selector.get_block(&model) {
-                if block.finished() && block_filter(block) {
+                if block_shell_command_output_ready(block) && block_filter(block) {
                     if let Err(e) = block_finished_tx.send(()) {
                         log::warn!(
                             "Failed to notify block completion for running requested command: {e:?}"
