@@ -67,10 +67,6 @@ pub struct ShellCommandExecutor {
     terminal_view_id: EntityId,
     /// Sender to notify when user hands control back to agent after TransferShellCommandControlToUser.
     control_handback_sender: Option<oneshot::Sender<()>>,
-    /// Active block id when dispatching `RequestCommandOutput` (before `write_command`). Keys completion
-    /// waiters with `BlockSelector::Id` so stdout is read from that shell block, not from
-    /// `block_for_ai_action_id` lookup (can mismatch under duplicate metadata or ordering races).
-    shell_command_block_by_action_id: HashMap<AIAgentActionId, BlockId>,
 }
 
 impl ShellCommandExecutor {
@@ -101,7 +97,6 @@ impl ShellCommandExecutor {
             force_refresh_senders: HashMap::new(),
             terminal_view_id,
             control_handback_sender: None,
-            shell_command_block_by_action_id: HashMap::new(),
         }
     }
 
@@ -142,6 +137,10 @@ impl ShellCommandExecutor {
                     self.block_finished_senders
                         .insert(block_selector, block_finished_tx);
                 }
+            } else {
+                // e.g. `BlockSelector::Action` before the agent command block exists in the list
+                self.block_finished_senders
+                    .insert(block_selector, block_finished_tx);
             }
         }
     }
@@ -313,17 +312,16 @@ impl ShellCommandExecutor {
                 } else {
                     command.clone()
                 };
-                let shell_command_block_id = model.block_list().active_block_id().clone();
-                self.shell_command_block_by_action_id
-                    .insert(action_id.clone(), shell_command_block_id.clone());
                 ctx.emit(ShellCommandExecutorEvent::ExecuteCommand {
                     action_id: action_id.clone(),
                     command: decorated_command,
                 });
 
-                let block_selector = BlockSelector::Id(shell_command_block_id);
+                // Resolve stdout via `block_for_ai_action_id`, not `active_block_id`. On bash with
+                // precmd hooks, the active block at dispatch can be a synthetic `precmd-*` block
+                // that finishes with exit 0 and empty output before the real command block exists.
+                let block_selector = BlockSelector::Action(action_id.clone());
                 let command = command.clone();
-                let cleanup_action_id = action_id.clone();
                 drop(model);
 
                 ActionExecution::new_async(
@@ -332,8 +330,6 @@ impl ShellCommandExecutor {
                         // Remove the senders from the maps.
                         if let Some(handle) = handle.upgrade(ctx) {
                             handle.update(ctx, |me, _| {
-                                me.shell_command_block_by_action_id
-                                    .remove(&cleanup_action_id);
                                 me.block_finished_senders.remove(&block_selector);
                                 me.force_refresh_senders.remove(&block_selector);
                             });
@@ -730,23 +726,23 @@ impl ShellCommandExecutor {
     }
 
     pub(super) fn cancel_execution(&mut self, id: &AIAgentActionId, _ctx: &mut ModelContext<Self>) {
+        let by_action = BlockSelector::Action(id.clone());
+        let removed = self.block_finished_senders.remove(&by_action).is_some();
+        self.force_refresh_senders.remove(&by_action);
+        if removed {
+            return;
+        }
+
         let terminal_model = self.terminal_model.lock();
         let active_block = terminal_model.block_list().active_block();
         if !active_block.is_active_and_long_running() {
             return;
         }
 
-        let selector = self
-            .shell_command_block_by_action_id
-            .get(id)
-            .cloned()
-            .map(BlockSelector::Id)
-            .or_else(|| {
-                terminal_model
-                    .block_list()
-                    .block_for_ai_action_id(id)
-                    .map(|b| BlockSelector::Id(b.id().clone()))
-            })
+        let selector = terminal_model
+            .block_list()
+            .block_for_ai_action_id(id)
+            .map(|b| BlockSelector::Id(b.id().clone()))
             .or_else(|| {
                 active_block
                     .requested_command_action_id()
@@ -756,7 +752,6 @@ impl ShellCommandExecutor {
         let Some(selector) = selector else {
             return;
         };
-        self.shell_command_block_by_action_id.remove(id);
         self.block_finished_senders.remove(&selector);
         self.force_refresh_senders.remove(&selector);
     }
@@ -802,12 +797,17 @@ impl ShellCommandExecutor {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum BlockSelector {
     Id(BlockId),
+    /// Shell block that carries `requested_command_action_id` for this agent tool call.
+    Action(AIAgentActionId),
 }
 
 impl BlockSelector {
     fn get_block<'a>(&self, model: &'a TerminalModel) -> Option<&'a Block> {
         match self {
             BlockSelector::Id(block_id) => model.block_list().block_with_id(block_id),
+            BlockSelector::Action(action_id) => {
+                model.block_list().block_for_ai_action_id(action_id)
+            }
         }
     }
 }
