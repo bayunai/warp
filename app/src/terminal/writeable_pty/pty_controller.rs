@@ -543,30 +543,32 @@ impl<T: EventLoopSender> PtyController<T> {
         source: CommandExecutionSource,
         ctx: &mut ModelContext<Self>,
     ) {
-        {
-            let mut model = self.terminal_model.lock();
+        let terminal_model = self.terminal_model.clone();
+        let before_write_fn: Box<dyn Fn() + Send + 'static> = Box::new(move || {
+            let mut model = terminal_model.lock();
 
-            // Explicitly start the block now that the command is executed.
-            match source {
+            match &source {
                 CommandExecutionSource::AI { metadata } => {
-                    model.start_command_execution_with_ai_metadata(metadata)
+                    model.start_command_execution_with_ai_metadata(metadata.clone())
                 }
                 CommandExecutionSource::SharedSession {
                     participant_id,
                     ai_metadata,
                     ..
-                } => model.start_command_execution_for_shared_session(participant_id, ai_metadata),
+                } => model.start_command_execution_for_shared_session(
+                    participant_id.clone(),
+                    ai_metadata.clone(),
+                ),
                 CommandExecutionSource::User => model.start_command_execution(),
                 CommandExecutionSource::EnvVarCollection { metadata } => {
-                    model.start_command_execution_from_env_var_collection(metadata)
+                    model.start_command_execution_from_env_var_collection(metadata.clone())
                 }
             }
 
-            // Ensure that the `TerminalModel` doesn't interpret any of the PTY output from the
-            // following commands as in-band command output. If the in-band command output is not
-            // currently being received by the `TerminalModel`, this is a no-op.
-            model.end_in_band_command_output(false);
-        }
+            if model.is_receiving_in_band_command_output() {
+                model.end_in_band_command_output(false);
+            }
+        });
 
         self.pending_writes.clear();
         self.is_user_command_executing = true;
@@ -576,7 +578,7 @@ impl<T: EventLoopSender> PtyController<T> {
             command: command.to_owned(),
             shell_type,
             in_band_command_id: None,
-            before_write_fn: None,
+            before_write_fn: Some(before_write_fn),
         };
         if self.can_write_to_pty(ctx) {
             // Cancel the async writer task and clear the async write queue.
