@@ -19182,13 +19182,26 @@ impl TerminalView {
 
             let has_bootstrapped = model.block_list().is_bootstrapping_precmd_done();
 
+            // Agent handed the PTY to the user for an interactive prompt (password, 2FA, etc.).
+            // Otherwise `has_active_user_terminal_command` stays false while the AI input is visible
+            // (bootstrapped), and keystrokes go to "Steer the running agent" instead of ssh/sudo.
+            let agent_transferred_pty_for_interactive_prompt = block_list
+                .active_block()
+                .is_active_and_long_running()
+                && block_list
+                    .active_block()
+                    .long_running_control_state()
+                    .and_then(|state| state.user_take_over_reason())
+                    .is_some_and(UserTakeOverReason::is_transfer_from_agent);
+
             let has_active_user_terminal_command = block_list.active_block().is_active_and_long_running()
                 && !block_list.active_block().is_agent_in_control()
                 // The only case where terminal can take focus _while_ input is visible is
                 // pre-bootstrap, for example when oh-my-zsh prompts you to update -- at this point
                 // the input is visible but you should still be able to click into the block for the
                 // oh-my-zsh prompt and send input directly to the pty.
-                && (!is_input_visible || !has_bootstrapped);
+                && ((!is_input_visible || !has_bootstrapped)
+                    || agent_transferred_pty_for_interactive_prompt);
 
             let is_shell_mode = !self.ai_input_model.as_ref(ctx).is_ai_input_enabled();
             let are_blocks_selected = !self.selected_blocks.is_empty();
