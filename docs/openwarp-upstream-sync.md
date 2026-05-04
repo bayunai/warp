@@ -109,16 +109,16 @@ bash script/setup-merge-drivers.sh
 
 ## 合并流程
 
-1. `git fetch origin master`
+1. `git fetch origin main`
 2. 创建 worktree:`git worktree add ../warp-merge -b merge-upstream-<date> openWarp`
 3. 在 worktree 内:
-   - `git log --reverse --oneline openWarp..origin/master` 列出待评估 commit
+   - `git log --reverse --oneline openWarp..origin/main` 列出待评估 commit
    - 跳过黑名单中的(若有)
    - 按拓扑顺序 cherry-pick
 4. `merge=openwarp-ours` 路径自动保留本地版本,无需手工解决
 5. modify/delete 类冲突直接 `git rm`(参考上表)
 6. 其它冲突手工解决;rerere 会记下来
-7. `cargo check -p warp` 验证后合回 openWarp
+7. `cargo check -p warp` 验证后合回本地目标分支
 
 ---
 
