@@ -83,6 +83,7 @@ warp_logging = { path = "crates/warp_logging" }
 warp_managed_secrets = { path = "crates/managed_secrets" }
 warp_ripgrep = { path = "crates/warp_ripgrep" }
 warp_server_client = { path = "crates/warp_server_client" }
+warp_ssh_manager = { path = "crates/warp_ssh_manager" }
 warp_terminal = { path = "crates/warp_terminal" }
 warp_util = { path = "crates/warp_util" }
 warp_web_event_bus = { path = "crates/warp_web_event_bus" }
@@ -177,6 +178,14 @@ jaq-json = { version = "2.0", features = ["serde"] }
 # The long-term fix is https://github.com/01mf02/jaq/issues/431.
 jaq-all = { version = "0.1", default-features = false }
 jsonschema = { version = "0.45", default-features = false }
+keyring = { version = "3.6", features = [
+    "apple-native",
+    "windows-native",
+    "sync-secret-service",
+    "linux-native",
+    "linux-native-sync-persistent",
+    "crypto-rust",
+] }
 lasso = { version = "0.7.3", features = ["multi-threaded"] }
 lazy_static = "1.4.0"
 libc = "0.2.81"
@@ -369,6 +378,7 @@ rquickjs = { version = "0.3.1" }
 dirs = "6.0.0"
 rayon = "1.10.0"
 sha2 = "0.10"
+shell-escape = "0.1.5"
 shellexpand = "3.1.1"
 warp-command-signatures = { git = "https://github.com/warpdotdev/command-signatures.git", rev = "00a032b8ea0ee5711e2077e39a92dc9ca2051cd3", default-features = false }
 winit = { git = "https://github.com/warpdotdev/winit.git", rev = "7ef01853ae3fe952e6014080a88dc4352662dfb1" }

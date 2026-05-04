@@ -910,6 +910,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::VerticalTabsSummaryMode,
     FeatureFlag::CloudModeSetupV2,
     FeatureFlag::ConfigurableContextWindow,
+    FeatureFlag::DragTabsToWindows,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).
@@ -917,7 +918,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
 pub const PREVIEW_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::Orchestration,
     FeatureFlag::BlocklistMarkdownTableRendering,
-    FeatureFlag::BlocklistMarkdownImages,
     FeatureFlag::MarkdownTables,
     FeatureFlag::OzIdentityFederation,
     // Remote server binary is not yet supported on Windows.

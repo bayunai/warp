@@ -88,11 +88,11 @@ export default function ProviderTabs({ tabs, labels }: Props) {
             className="grid gap-4 sm:grid-cols-2"
           >
             {fields.map((f) => (
-              <div key={f.k} className={f.full ? 'sm:col-span-2' : ''}>
+              <div key={f.k} className={'min-w-0 ' + (f.full ? 'sm:col-span-2' : '')}>
                 <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">{f.k}</p>
                 <div
                   className={
-                    'rounded-lg border border-white/5 bg-ink-950/60 px-3 py-2.5 text-sm text-zinc-200 ' +
+                    'min-w-0 break-all rounded-lg border border-white/5 bg-ink-950/60 px-3 py-2.5 text-sm text-zinc-200 ' +
                     (f.mono ? 'font-mono text-[12.5px]' : '')
                   }
                 >

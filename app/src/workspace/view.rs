@@ -270,8 +270,7 @@ use crate::server::server_api::{ServerApi, ServerApiEvent, ServerApiProvider, Se
 use crate::server::telemetry::{
     AddTabWithShellSource, AnonymousUserSignupEntrypoint, CloseTarget, EnvVarTelemetryMetadata,
     FileTreeSource, KnowledgePaneEntrypoint, LaunchConfigUiLocation,
-    MCPServerCollectionPaneEntrypoint, OpenedWarpAISource, SharingDialogSource,
-    WarpDriveSource,
+    MCPServerCollectionPaneEntrypoint, OpenedWarpAISource, SharingDialogSource, WarpDriveSource,
 };
 use crate::session_management::{SessionNavigationData, SessionSource};
 use crate::settings::{
@@ -330,9 +329,7 @@ use crate::user_config::{
     tab_configs_dir,
 };
 use crate::user_config::{WarpConfig, WarpConfigUpdateEvent};
-use crate::util::bindings::{
-    keybinding_name_to_display_string, keybinding_name_to_keystroke,
-};
+use crate::util::bindings::{keybinding_name_to_display_string, keybinding_name_to_keystroke};
 use crate::util::links;
 use crate::util::traffic_lights::{traffic_light_data, TrafficLightMouseStates, TrafficLightSide};
 use crate::util::truncation::truncate_from_end;
@@ -7077,7 +7074,7 @@ impl Workspace {
         self.add_tab_with_pane_layout(
             panes_layout,
             Arc::new(HashMap::new()),
-            Some("Settings".to_owned()),
+            Some(crate::t!("settings-title")),
             ctx,
         );
     }
@@ -11655,8 +11652,13 @@ impl Workspace {
 
         terminal_view.update(ctx, |terminal, ctx| {
             terminal.ai_controller().update(ctx, |controller, ctx| {
-                controller
-                    .send_slash_command_request(SlashCommandRequest::Summarize { prompt, overflow: false }, ctx);
+                controller.send_slash_command_request(
+                    SlashCommandRequest::Summarize {
+                        prompt,
+                        overflow: false,
+                    },
+                    ctx,
+                );
             });
 
             if let Some(prompt) = initial_prompt {
@@ -16198,7 +16200,7 @@ impl Workspace {
                         icons::Icon::Grid,
                         &self.mouse_states.agent_management_view_button,
                         WorkspaceAction::ToggleAgentManagementView,
-                        "Agent management panel".to_string(),
+                        crate::t!("workspace-agent-management-panel-tooltip"),
                         keybinding_name_to_display_string(
                             "workspace:toggle_agent_management_view",
                             ctx,
@@ -16228,7 +16230,7 @@ impl Workspace {
             if vertical_tabs_active {
                 (
                     self.vertical_tabs_panel_open,
-                    "Tabs panel",
+                    crate::t!("workspace-tabs-panel-tooltip"),
                     WorkspaceAction::ToggleVerticalTabsPanel,
                     "workspace:toggle_vertical_tabs_panel",
                     "workspace:toggle_vertical_tabs_panel",
@@ -16241,13 +16243,19 @@ impl Workspace {
                         .copied()
                         .unwrap_or(ToolPanelView::WarpDrive)
                     {
-                        ToolPanelView::ProjectExplorer => "Project explorer",
-                        ToolPanelView::GlobalSearch { .. } => "Global search",
-                        ToolPanelView::WarpDrive => "Warp Drive",
-                        ToolPanelView::ConversationListView => "Agent conversations",
+                        ToolPanelView::ProjectExplorer => {
+                            crate::t!("workspace-left-panel-project-explorer")
+                        }
+                        ToolPanelView::GlobalSearch { .. } => {
+                            crate::t!("workspace-left-panel-global-search")
+                        }
+                        ToolPanelView::WarpDrive => crate::t!("workspace-left-panel-warp-drive"),
+                        ToolPanelView::ConversationListView => {
+                            crate::t!("workspace-left-panel-agent-conversations")
+                        }
                     }
                 } else {
-                    "Tools panel"
+                    crate::t!("workspace-tools-panel-tooltip")
                 };
                 (
                     self.active_tab_pane_group().as_ref(ctx).left_panel_open,
@@ -16295,13 +16303,19 @@ impl Workspace {
                 .copied()
                 .unwrap_or(ToolPanelView::WarpDrive)
             {
-                ToolPanelView::ProjectExplorer => "Project explorer",
-                ToolPanelView::GlobalSearch { .. } => "Global search",
-                ToolPanelView::WarpDrive => "Warp Drive",
-                ToolPanelView::ConversationListView => "Agent conversations",
+                ToolPanelView::ProjectExplorer => {
+                    crate::t!("workspace-left-panel-project-explorer")
+                }
+                ToolPanelView::GlobalSearch { .. } => {
+                    crate::t!("workspace-left-panel-global-search")
+                }
+                ToolPanelView::WarpDrive => crate::t!("workspace-left-panel-warp-drive"),
+                ToolPanelView::ConversationListView => {
+                    crate::t!("workspace-left-panel-agent-conversations")
+                }
             }
         } else {
-            "Tools panel"
+            crate::t!("workspace-tools-panel-tooltip")
         };
 
         SavePosition::new(
@@ -16458,7 +16472,7 @@ impl Workspace {
             button
                 .with_tooltip(self.render_tab_bar_icon_button_tooltip(
                     appearance,
-                    "Code review panel".to_string(),
+                    crate::t!("workspace-code-review-panel-tooltip"),
                     keybinding_name_to_display_string("workspace:toggle_right_panel", ctx),
                 ))
                 .build()
@@ -16954,7 +16968,7 @@ impl Workspace {
                 WorkspaceAction::ToggleNotificationMailbox {
                     select_first: false,
                 },
-                "Notifications".to_string(),
+                crate::t!("workspace-notifications-tooltip"),
                 keybinding_name_to_display_string(TOGGLE_NOTIFICATION_MAILBOX_BINDING_NAME, ctx),
                 is_inbox_active,
                 false,
@@ -17223,10 +17237,10 @@ impl Workspace {
         const BUTTON_WIDTH: f32 = 24. + SIDE_MENU_WIDTH;
         const BUTTON_LEFT_MARGIN: f32 = 4.;
 
-        let new_tab_tool_tip_label_text = "New Tab".to_string();
+        let new_tab_tool_tip_label_text = crate::t!("workspace-new-tab-tooltip");
         let new_tab_tool_tip_sublabel_text =
             keybinding_name_to_display_string(NEW_TAB_BINDING_NAME, ctx);
-        let tab_configs_tool_tip_label_text = "Tab configs".to_string();
+        let tab_configs_tool_tip_label_text = crate::t!("workspace-tab-configs-tooltip");
         let tab_configs_tool_tip_sublabel_text =
             keybinding_name_to_display_string(TOGGLE_TAB_CONFIGS_MENU_BINDING_NAME, ctx);
         let appearance = Appearance::as_ref(ctx);
@@ -17461,7 +17475,7 @@ impl Workspace {
                 icons::Icon::Gear,
                 &self.mouse_states.settings_icon,
                 WorkspaceAction::ShowSettings,
-                "Settings".to_string(),
+                crate::t!("settings-title"),
                 self.cached_keybindings[SHOW_SETTINGS_KEYBINDING_NAME].clone(),
                 false,
                 false,
@@ -17560,7 +17574,7 @@ impl Workspace {
     fn render_offline_button(&self, appearance: &Appearance) -> Box<dyn Element> {
         let ui_builder = appearance.ui_builder().clone();
 
-        let tool_tip_label_text = "Some features may be unavailable offline".to_string();
+        let tool_tip_label_text = crate::t!("workspace-offline-tooltip");
         let icon = ConstrainedBox::new(
             Container::new(
                 icons::Icon::CloudOffline

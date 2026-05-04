@@ -57,9 +57,7 @@ use genai::{Client, ModelIden, ServiceTarget};
 
 use crate::ai::agent::api::{RequestParams, ResponseStream};
 use crate::ai::agent::{AIAgentInput, RunningCommand};
-use crate::ai::byop_compaction::{
-    self,
-};
+use crate::ai::byop_compaction;
 use crate::server::server_api::AIApiError;
 use crate::settings::AgentProviderApiType;
 use ai::agent::convert::ConvertToAPITypeError;
@@ -404,7 +402,10 @@ fn build_chat_request(
         .iter()
         .any(|i| matches!(i, AIAgentInput::SummarizeConversation { .. }));
     let summarization_overflow = params.input.iter().any(|i| {
-        matches!(i, AIAgentInput::SummarizeConversation { overflow: true, .. })
+        matches!(
+            i,
+            AIAgentInput::SummarizeConversation { overflow: true, .. }
+        )
     });
     let _ = summarization_overflow; // 当前在 input loop 内的 follow-up 文案分支会用,目前先 silence dead
 
@@ -414,7 +415,11 @@ fn build_chat_request(
             state
                 .completed()
                 .iter()
-                .filter_map(|c| c.summary_text.as_ref().map(|s| (c.user_msg_id.clone(), s.clone())))
+                .filter_map(|c| {
+                    c.summary_text
+                        .as_ref()
+                        .map(|s| (c.user_msg_id.clone(), s.clone()))
+                })
                 .collect()
         } else {
             std::collections::HashMap::new()
@@ -433,7 +438,10 @@ fn build_chat_request(
             let mut out = std::collections::HashSet::new();
             for msg in &all_msgs {
                 if let Some(api::message::Message::ToolCallResult(_)) = &msg.message {
-                    if s.marker(&msg.id).and_then(|m| m.tool_output_compacted_at).is_some() {
+                    if s.marker(&msg.id)
+                        .and_then(|m| m.tool_output_compacted_at)
+                        .is_some()
+                    {
                         out.insert(msg.id.clone());
                     }
                 }
@@ -445,28 +453,19 @@ fn build_chat_request(
     // 摘要请求路径:用 byop_compaction::algorithm::select 切 head;tail 不送上游
     let summarize_head_end: Option<usize> = if is_summarization_request {
         // 临时投影成 WarpMessageView 算 select
-        let state_for_select = params
-            .compaction_state
-            .clone()
-            .unwrap_or_default();
-        let tool_names = byop_compaction::message_view::build_tool_name_lookup(
-            all_msgs.iter().copied(),
-        );
-        let views = byop_compaction::message_view::project(
-            &all_msgs,
-            &state_for_select,
-            &tool_names,
-        );
+        let state_for_select = params.compaction_state.clone().unwrap_or_default();
+        let tool_names =
+            byop_compaction::message_view::build_tool_name_lookup(all_msgs.iter().copied());
+        let views =
+            byop_compaction::message_view::project(&all_msgs, &state_for_select, &tool_names);
         let cfg = byop_compaction::CompactionConfig::default();
         let model_limit = byop_compaction::overflow::ModelLimit::FALLBACK;
-        let result = byop_compaction::algorithm::select(
-            &views,
-            &cfg,
-            model_limit,
-            |slice| {
-                slice.iter().map(byop_compaction::algorithm::MessageRef::estimate_size).sum()
-            },
-        );
+        let result = byop_compaction::algorithm::select(&views, &cfg, model_limit, |slice| {
+            slice
+                .iter()
+                .map(byop_compaction::algorithm::MessageRef::estimate_size)
+                .sum()
+        });
         // head_end 是 views 里"head 区间"上界,与 all_msgs 同序
         Some(result.head_end)
     } else {
@@ -505,10 +504,45 @@ fn build_chat_request(
                     continue;
                 }
                 buf.flush_into(&mut messages);
-                // 历史轮的 user query 没有 AIAgentContext 数据(InputContext 在 warp 协议
-                // 是单 Request 级 payload,不持久化到 message),只送 query 文本。
-                // 这跟 warp 自家路径行为一致 — 历史轮不重发附件 context。
-                messages.push(ChatMessage::user(u.query.clone()));
+                // OpenWarp:历史轮多模态保活。warp 自家路径靠云端 server 重注入 InputContext,
+                // BYOP 直连没有那层,所以我们在 `make_user_query_message` 持久化时把 image
+                // 字节塞进了 `UserQuery.context.images`,这里反向把它们重建成 UserBinary 并
+                // 走 `build_user_message_with_binaries`,使后续轮模型仍能看到先前粘贴的截图。
+                // 没有图片 → 退回老路 `ChatMessage::user(text)`,与修复前等价。
+                let history_binaries: Vec<user_context::UserBinary> = u
+                    .context
+                    .as_ref()
+                    .map(|ctx| {
+                        ctx.images
+                            .iter()
+                            .filter(|img| !img.data.is_empty())
+                            .enumerate()
+                            .map(|(idx, img)| {
+                                use base64::Engine;
+                                user_context::UserBinary {
+                                    name: format!("history-image-{}-{idx}", &msg.id),
+                                    content_type: if img.mime_type.is_empty() {
+                                        "image/png".to_string()
+                                    } else {
+                                        img.mime_type.clone()
+                                    },
+                                    data: base64::engine::general_purpose::STANDARD
+                                        .encode(&img.data),
+                                }
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if history_binaries.is_empty() {
+                    messages.push(ChatMessage::user(u.query.clone()));
+                } else {
+                    messages.push(build_user_message_with_binaries(
+                        u.query.clone(),
+                        history_binaries,
+                        api_type,
+                        model_id,
+                    ));
+                }
             }
             // hidden assistant message 直接 skip(它是某次压缩对的 assistant_msg_id,
             // 摘要文本已经在对应 user 分支注入)
@@ -573,7 +607,8 @@ fn build_chat_request(
                 // server 端 emit 走 result oneof 结构化 variant — 兼容两路。
                 let content = if compacted_tool_msg_ids.contains(&msg.id) {
                     // 压缩投影:被 prune 的 tool output 替换为占位符,不送实际内容上游
-                    r#"{"status":"compacted","note":"tool output was pruned by local compaction"}"#.to_string()
+                    r#"{"status":"compacted","note":"tool output was pruned by local compaction"}"#
+                        .to_string()
                 } else if tcr.result.is_some() {
                     tools::serialize_result(tcr)
                 } else if !msg.server_message_data.is_empty() {
@@ -697,7 +732,10 @@ fn build_chat_request(
                     ));
                 }
             }
-            AIAgentInput::SummarizeConversation { prompt, overflow: _ } => {
+            AIAgentInput::SummarizeConversation {
+                prompt,
+                overflow: _,
+            } => {
                 // OpenWarp BYOP 本地会话压缩入口 — 1:1 对齐 opencode `compaction.ts processCompaction`。
                 //
                 // 此前 messages loop 已根据 `summarize_head_end` 把序列切到 head(去掉 tail);
@@ -714,12 +752,11 @@ fn build_chat_request(
                 let mut anchor_context: Vec<String> = Vec::new();
                 if let Some(custom) = prompt.as_ref().filter(|p| !p.is_empty()) {
                     // /compact <自定义指令> 走这里 — 把用户指令拼到 plugin_context 段
-                    anchor_context.push(format!("Additional instructions from the user:\n{custom}"));
+                    anchor_context
+                        .push(format!("Additional instructions from the user:\n{custom}"));
                 }
-                let nextp = byop_compaction::prompt::build_prompt(
-                    prev_summary.as_deref(),
-                    &anchor_context,
-                );
+                let nextp =
+                    byop_compaction::prompt::build_prompt(prev_summary.as_deref(), &anchor_context);
                 messages.push(ChatMessage::user(nextp));
             }
             AIAgentInput::AutoCodeDiffQuery { .. }
@@ -1280,8 +1317,7 @@ fn build_tools_array(params: &RequestParams) -> Vec<GenaiTool> {
             // BYOP web 工具按 profile.web_search_enabled gating(用户已关闭隐私
             // 开关时不暴露给上游模型,避免误调外网请求)。
             if !web_enabled
-                && (t.name == tools::webfetch::TOOL_NAME
-                    || t.name == tools::websearch::TOOL_NAME)
+                && (t.name == tools::webfetch::TOOL_NAME || t.name == tools::websearch::TOOL_NAME)
             {
                 return false;
             }
@@ -1441,10 +1477,7 @@ fn build_chat_options(
             // 服务端不接受 `reasoning_effort: "none"`(400 unknown variant)。
             // 其他 provider 的 Off 档维持原 reasoning_effort 路径。
             let deepseek_off = matches!(api_type, AgentProviderApiType::DeepSeek)
-                && matches!(
-                    effort_setting,
-                    crate::settings::ReasoningEffortSetting::Off
-                );
+                && matches!(effort_setting, crate::settings::ReasoningEffortSetting::Off);
             if deepseek_off {
                 log::info!(
                     "[byop] DeepSeek Off → extra_body thinking.type=disabled (model={model_id})"
@@ -1565,11 +1598,23 @@ pub async fn generate_byop_output(
     //
     // emit 时机必须在 CreateTask 之后(任务已升级为 Server 状态),
     // 在模型响应开始之前(UI 顺序:user 显示 → thinking/answer)。
-    let pending_user_queries: Vec<String> = params
+    // OpenWarp:历史轮多模态保活。除 query 文本外,把当前轮 UserQuery.context 里的 image
+    // binary 一并打包进 `UserQuery.context.images` 持久化,使 build_chat_request 下一轮
+    // 重建 messages 时能从历史 message 上恢复 image,继续以 ContentPart::Binary 注入上游。
+    // 上游 warp 自家路径不需要这步因为云端 server 持有 InputContext;BYOP 直连必须客户端自管。
+    let pending_user_queries: Vec<(String, Vec<user_context::UserBinary>)> = params
         .input
         .iter()
         .filter_map(|i| match i {
-            AIAgentInput::UserQuery { query, .. } => Some(query.clone()),
+            AIAgentInput::UserQuery { query, context, .. } => {
+                let attachments = user_context::collect_user_attachments(context);
+                let images: Vec<user_context::UserBinary> = attachments
+                    .binaries
+                    .into_iter()
+                    .filter(|b| b.content_type.to_ascii_lowercase().starts_with("image/"))
+                    .collect();
+                Some((query.clone(), images))
+            }
             _ => None,
         })
         .collect();
@@ -1628,36 +1673,43 @@ pub async fn generate_byop_output(
     log::info!("[byop] diag_body_approx_len={}", diag_body_json.len());
     log::info!("[byop-diag] full_request_json={diag_body_json}");
 
-    // 主动扫描原始文本里的"可疑反斜杠序列":虽然 serde_json 序列化时会把
-    // `\` escape 成 `\\`(合法 JSON),但若出现在 base64 / 已 escape 字符串等场景,
-    // 上游 proxy 若做"把 `\\u` 误解析回 `\u`"的转换,就会触发 invalid escape。
-    // 这里只扫描 raw 字符串里的 `\n` / `\u` / `\x` / `\0`-`\9` 等模式,辅助定位嫌疑文本。
+    // 主动扫描原始文本里的"可疑反斜杠序列":serde_json 把源字符串里的字面
+    // `\` 序列化为 `\\`,所以 wire body 里出现"两个连续反斜杠 + u/x" 才意味着
+    // 原文有字面 `\u` / `\x`,这是 proxy 误"还原 `\\u` → `\u`"触发 invalid escape
+    // 的真实风险点。源字符串里的 `\n` / `\r` / `\t` 经 serde_json 输出为单个反斜杠 +
+    // 字母,本身就是合法 JSON escape,proxy 不会再二次还原,不算可疑。
     fn scan_suspicious_backslash(label: &str, s: &str) {
         let bytes = s.as_bytes();
         let mut bs_hits: Vec<(usize, String)> = Vec::new();
         let mut ctrl_hits: Vec<(usize, u8)> = Vec::new();
-        for (i, &b) in bytes.iter().enumerate() {
-            // 1) 字面 `\u` `\x` `\a` `\v` 序列(serde_json 会输出 `\\X`,合法,
-            //    但 proxy 若做"`\\u` 还原 `\u`"误处理会触发 invalid escape)
-            if b == b'\\' && i + 1 < bytes.len() {
-                let next = bytes[i + 1];
-                if matches!(next, b'n' | b'r' | b't' | b'u' | b'x' | b'a' | b'v') {
-                    let end = (i + 8).min(bytes.len());
-                    let snippet = String::from_utf8_lossy(&bytes[i..end]).to_string();
-                    if bs_hits.len() < 5 {
-                        bs_hits.push((i, snippet));
-                    }
+        let mut i = 0;
+        while i < bytes.len() {
+            let b = bytes[i];
+            // 字面 `\\u` / `\\x` 序列(源字符串中含 `\u` / `\x`)。
+            if b == b'\\'
+                && i + 2 < bytes.len()
+                && bytes[i + 1] == b'\\'
+                && matches!(bytes[i + 2], b'u' | b'x')
+            {
+                let end = (i + 10).min(bytes.len());
+                let snippet = String::from_utf8_lossy(&bytes[i..end]).to_string();
+                if bs_hits.len() < 5 {
+                    bs_hits.push((i, snippet));
                 }
+                // 跳过这一对,避免对同一位置触发多次。
+                i += 3;
+                continue;
             }
-            // 2) raw 控制字符(byte 0x00-0x08, 0x0B-0x0C, 0x0E-0x1F)
-            //    serde_json 会 escape 为 `\u00XX`,合法 JSON;但部分 strict proxy
-            //    或经过 base64 / 中间编码层时这些字节最容易出错。
+            // raw 控制字符(byte 0x00-0x08, 0x0B-0x0C, 0x0E-0x1F)。
+            // serde_json 会 escape 为 `\u00XX`,合法 JSON;但部分 strict proxy
+            // 或经过 base64 / 中间编码层时这些字节最容易出错。
             if (b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r')) && ctrl_hits.len() < 10 {
                 ctrl_hits.push((i, b));
             }
+            i += 1;
         }
         if !bs_hits.is_empty() {
-            log::warn!("[byop] {label} suspicious literal '\\X' patterns: {bs_hits:?}");
+            log::warn!("[byop] {label} suspicious literal '\\\\u'/'\\\\x' patterns: {bs_hits:?}");
         }
         if !ctrl_hits.is_empty() {
             log::warn!("[byop] {label} contains raw control chars (offset, byte): {ctrl_hits:?}");
@@ -1700,11 +1752,12 @@ pub async fn generate_byop_output(
             target_task_id.as_str()
         };
         let mut persistence_messages: Vec<api::Message> = Vec::new();
-        for q in &pending_user_queries {
+        for (q, imgs) in &pending_user_queries {
             persistence_messages.push(make_user_query_message(
                 persistence_task_id,
                 &request_id,
                 q.clone(),
+                imgs,
             ));
         }
         for (call_id, content) in &pending_tool_results {
@@ -1796,11 +1849,12 @@ pub async fn generate_byop_output(
             //    后续模型 chunks 走 `current_task_id = subtask_id`,append 到这个起点之后。
             if !pending_user_queries.is_empty() {
                 let mut subtask_messages: Vec<api::Message> = Vec::new();
-                for q in &pending_user_queries {
+                for (q, imgs) in &pending_user_queries {
                     subtask_messages.push(make_user_query_message(
                         &subtask_id,
                         &request_id,
                         q.clone(),
+                        imgs,
                     ));
                 }
                 yield Ok(make_add_messages_event(&subtask_id, subtask_messages));
@@ -2183,10 +2237,9 @@ fn sanitize_title(raw: &str) -> Option<String> {
     for tag in &["think", "reasoning", "thought", "scratchpad"] {
         let open = format!("<{}>", tag);
         let close = format!("</{}>", tag);
-        while let (Some(start), Some(end_rel)) = (
-            s.find(&open),
-            s.find(&close).map(|e| e + close.len()),
-        ) {
+        while let (Some(start), Some(end_rel)) =
+            (s.find(&open), s.find(&close).map(|e| e + close.len()))
+        {
             if end_rel <= start {
                 break;
             }
@@ -2205,7 +2258,13 @@ fn sanitize_title(raw: &str) -> Option<String> {
 
     // 3. 剥前缀(循环剥,处理 "Title: 标题: foo" 这类双前缀)。
     let prefixes = [
-        "title:", "subject:", "thread:", "标题:", "标题：", "主题:", "主题：",
+        "title:",
+        "subject:",
+        "thread:",
+        "标题:",
+        "标题：",
+        "主题:",
+        "主题：",
     ];
     loop {
         let lower = s.to_lowercase();
@@ -2411,6 +2470,27 @@ fn parse_incoming_tool_call(
     match (tool.from_args)(&args_str) {
         Ok(t) => Ok(t),
         Err(e) => {
+            // 第一次失败:大概率是模型把 bool/数字/数组 序列化成了字符串。
+            // 拿工具自身的 schema 跑一次类型 coerce,再 retry。
+            let schema = (tool.parameters)();
+            if let Some(coerced) = tools::coerce::coerce_args_against_schema(&args_str, &schema) {
+                match (tool.from_args)(&coerced) {
+                    Ok(t) => {
+                        log::info!(
+                            "[byop] from_args coerced ok: tool={} original_err={e:#}",
+                            call.fn_name
+                        );
+                        return Ok(t);
+                    }
+                    Err(e2) => {
+                        log::warn!(
+                            "[byop] from_args failed (after coerce): tool={} err={e2:#} original_err={e:#} coerced_args={coerced} args_str={args_str}",
+                            call.fn_name
+                        );
+                        return Err(e2);
+                    }
+                }
+            }
             // 诊断:解析失败时把 from_args 实际拿到的字符串原样打出来,
             // 配合上层 [byop] tool_call_in 的 args= 行可以判断:
             //   1. 是否模型出参类型错(bool→"true" / 数字→"1" 等)
@@ -2456,7 +2536,37 @@ fn make_agent_output_message(task_id: &str, request_id: &str, text: String) -> a
     }
 }
 
-fn make_user_query_message(task_id: &str, request_id: &str, query: String) -> api::Message {
+fn make_user_query_message(
+    task_id: &str,
+    request_id: &str,
+    query: String,
+    images: &[user_context::UserBinary],
+) -> api::Message {
+    // OpenWarp:把 image binary 写进 `UserQuery.context.images`(InputContext 字段)。
+    // proto Image.data 是 raw bytes,UserBinary.data 是 base64 字符串,这里 decode 一次。
+    // decode 失败的条目跳过,不让历史持久化阻塞模型流(decode 失败本来就意味着这条 image
+    // 当轮也没真送上游,丢就丢了,不影响 history 一致性)。
+    let proto_images: Vec<api::input_context::Image> = images
+        .iter()
+        .filter_map(|b| {
+            use base64::Engine;
+            base64::engine::general_purpose::STANDARD
+                .decode(&b.data)
+                .ok()
+                .map(|bytes| api::input_context::Image {
+                    data: bytes,
+                    mime_type: b.content_type.clone(),
+                })
+        })
+        .collect();
+    let context = if proto_images.is_empty() {
+        None
+    } else {
+        Some(api::InputContext {
+            images: proto_images,
+            ..Default::default()
+        })
+    };
     api::Message {
         id: Uuid::new_v4().to_string(),
         task_id: task_id.to_owned(),
@@ -2464,6 +2574,7 @@ fn make_user_query_message(task_id: &str, request_id: &str, query: String) -> ap
         citations: vec![],
         message: Some(api::message::Message::UserQuery(api::message::UserQuery {
             query,
+            context,
             ..Default::default()
         })),
         request_id: request_id.to_owned(),

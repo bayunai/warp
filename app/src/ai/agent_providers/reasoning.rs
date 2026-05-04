@@ -96,7 +96,9 @@ pub fn default_reasoning_for(
     api_type: AgentProviderApiType,
     model_id: &str,
 ) -> Option<ReasoningEffortSetting> {
-    model_reasoning_variants(api_type, model_id).first().copied()
+    model_reasoning_variants(api_type, model_id)
+        .first()
+        .copied()
 }
 
 /// Opus 4.7 及更高版本(`claude-opus-4-7` / `claude-opus-5-0` ...)。
@@ -340,10 +342,8 @@ mod tests {
 
     #[test]
     fn opus_4_7_variants_have_xhigh_and_max() {
-        let v = model_reasoning_variants(
-            AgentProviderApiType::Anthropic,
-            "claude-opus-4-7-20260101",
-        );
+        let v =
+            model_reasoning_variants(AgentProviderApiType::Anthropic, "claude-opus-4-7-20260101");
         assert!(v.contains(&ReasoningEffortSetting::XHigh));
         assert!(v.contains(&ReasoningEffortSetting::Max));
         assert_eq!(v.first().copied(), Some(ReasoningEffortSetting::High));
@@ -374,10 +374,8 @@ mod tests {
 
     #[test]
     fn claude_3_5_haiku_variants_empty() {
-        let v = model_reasoning_variants(
-            AgentProviderApiType::Anthropic,
-            "claude-3-5-haiku-20241022",
-        );
+        let v =
+            model_reasoning_variants(AgentProviderApiType::Anthropic, "claude-3-5-haiku-20241022");
         assert!(v.is_empty());
     }
 
@@ -418,8 +416,7 @@ mod tests {
 
     #[test]
     fn deepseek_thinking_variants_two_levels_plus_off() {
-        let v =
-            model_reasoning_variants(AgentProviderApiType::DeepSeek, "deepseek-reasoner");
+        let v = model_reasoning_variants(AgentProviderApiType::DeepSeek, "deepseek-reasoner");
         // DeepSeek 官方:仅 high / max 两档 + Off
         assert_eq!(v.len(), 3);
         assert_eq!(v[0], ReasoningEffortSetting::High);
@@ -434,8 +431,7 @@ mod tests {
     #[test]
     fn deepseek_chat_variants_empty() {
         assert!(
-            model_reasoning_variants(AgentProviderApiType::DeepSeek, "deepseek-chat")
-                .is_empty()
+            model_reasoning_variants(AgentProviderApiType::DeepSeek, "deepseek-chat").is_empty()
         );
     }
 

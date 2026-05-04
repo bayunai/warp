@@ -10,6 +10,11 @@
   html {
     scroll-behavior: smooth;
     background: #05050a;
+    /* 兜底:阻止任何 fixed/absolute 装饰层或子元素在窄屏下产生横向滚动。
+       用 clip 而非 hidden 以避免 html 变成 scroll container,从而破坏 Header 的 position:sticky。
+       老浏览器降级到 hidden(body 上仍有 overflow-x-hidden 双保险)。 */
+    overflow-x: hidden;
+    overflow-x: clip;
   }
 
   html,

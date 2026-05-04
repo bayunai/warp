@@ -1,15 +1,25 @@
 # openWarp 上游同步指南
 
-## 当前同步状态(基线 master = a5fde8f,本地 openWarp tip = e3e6eaf)
+## 当前同步状态(基线 master = e089051,本地 openWarp tip = 3c4c11b)
 
-上游 0443f3f..origin/master 共 **133 条 commit**,处理结果:
+上游 0443f3f..upstream/master 共 **138 条 commit**,处理结果:
 
 | 状态 | 数量 | 说明 |
 |---|---|---|
-| **已合入** | **79** | A 类 31 fix + SSH 对齐 4 + B 类 2 + C1 入 5 + C2 入 8 + D 桶 4 通用 fix 28 + 1 个上游 99f80df 通过 SSH 整族对齐间接合入 |
-| **永久黑名单** | **54** | cloud / codex / OzHandoff / orchestration / cloud_mode 链路 + workflow + STAKEHOLDERS 治理 + 上游内部 docs |
+| **已合入** | **81** | 之前 79 + 本轮 2(`3ce4239` PREVIEW flag 删除 + `d7c45ca` DOGFOOD 加 DragTabsToWindows 手工对齐) |
+| **永久黑名单** | **57** | 之前 54 + 本轮 3(`e089051` OSS .desktop / `525dfb6` spec GH478 / `cabd329` Code Review with Oz) |
 
-**所有 133 条 commit 已 100% 明确归属**,黑名单写在下方表格,后续 sync 用同一份判断标准。
+**所有 138 条 commit 已 100% 明确归属**,黑名单写在下方表格,后续 sync 用同一份判断标准。
+
+### 2026-05-04 增量同步(03ef4d0..e089051,新增 5 条)
+
+| Commit | 标题 | 处理 |
+|---|---|---|
+| `e089051` | fix: point OSS desktop entry at package launcher (#9424) | 黑名单(空 commit;与 `6eefa4b` 同类,openWarp 用 `warp-oss` 命名) |
+| `3ce4239` | Remove blocklist markdown images from preview flags (#9993) | 已合入(干净 cherry-pick) |
+| `d7c45ca` | enable tab dragging between windows for internal warp users (#9991) | 已合入(手工只取 `DragTabsToWindows`,丢弃上游试图引入的 `CloudModeInputV2` 与重复 `SshRemoteServer`) |
+| `525dfb6` | Spec: per-tab theme overrides driven by directory and launch configurations (GH478) (#9910) | 黑名单(纯上游内部 spec 文档) |
+| `cabd329` | docs: replace Becoming a Collaborator with Code Review section (#9982) | 黑名单(上游 Oz review 流程,zerx-lab fork 不适用) |
 
 ## 一次性配置(每个 clone)
 
@@ -82,6 +92,9 @@ bash script/setup-merge-drivers.sh
 | `f696f5b` | Revert "Fix schema generator binary recompilation" | 上游回滚一个 commit,openWarp 没合那个原 commit |
 | `159a0bf` | ci: remove broken oz-for-oss adapter workflows | Warp 内部 workflow |
 | `59fc1a9` | use multi-harness cloud agent icons + status | cloud agent UI |
+| `e089051` | fix: point OSS desktop entry at package launcher (#9424) | 空 commit;与 `6eefa4b` 同类,openWarp 用 `warp-oss` 命名分叉 |
+| `525dfb6` | Spec: per-tab theme overrides (GH478) (#9910) | 纯上游内部 spec 文档 `specs/GH478/*.md`,与 openWarp 无关 |
+| `cabd329` | docs: replace Becoming a Collaborator with Code Review (#9982) | 上游 Oz review 流程,zerx-lab fork 无 Oz |
 
 ## openWarp 已删除/特化的模块(合并时若被恢复,需手工删除)
 

@@ -4,15 +4,15 @@
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::{
-    AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext,
     elements::{
         ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Flex, Hoverable,
         MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
     },
     platform::Cursor,
+    AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext,
 };
 
-use crate::{Appearance, terminal::model::session::SessionId, ui_components::icons::Icon};
+use crate::{terminal::model::session::SessionId, ui_components::icons::Icon, Appearance};
 
 const BANNER_BODY: &str =
     "While advanced features like file browsing and code review are currently \

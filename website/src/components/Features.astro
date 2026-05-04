@@ -86,9 +86,9 @@ const featureCards = [
                 [d.providers.fields.base_url, primaryProvider.baseUrl],
                 [d.providers.fields.model, primaryProvider.model],
               ].map(([label, value]) => (
-                <div class="grid gap-1.5">
+                <div class="grid min-w-0 gap-1.5">
                   <span class="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">{label}</span>
-                  <span class="rounded-2xl border border-white/10 bg-ink-950/80 px-3 py-2.5 font-mono text-[12px] text-zinc-200">{value}</span>
+                  <span class="block break-all rounded-2xl border border-white/10 bg-ink-950/80 px-3 py-2.5 font-mono text-[12px] text-zinc-200">{value}</span>
                 </div>
               ))}
             </div>

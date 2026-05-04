@@ -99,7 +99,7 @@ function FieldRow({ k, v }: { k: string; v: string }) {
   return (
     <>
       <div className="font-mono text-[11px] text-zinc-500 sm:py-1">{k}</div>
-      <div className="rounded-md border border-white/5 bg-ink-950/70 px-2.5 py-1.5 font-mono text-[12px] text-zinc-200">
+      <div className="min-w-0 break-all rounded-md border border-white/5 bg-ink-950/70 px-2.5 py-1.5 font-mono text-[12px] text-zinc-200">
         {v}
       </div>
     </>

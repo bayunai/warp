@@ -28,6 +28,7 @@ use crate::{
 use itertools::Itertools;
 
 use warp_core::ui::theme::color::internal_colors;
+use warp_core::ui::color::blend::Blend;
 use warpui::{elements::Wrap, units::Pixels};
 use warpui::{
     elements::{
@@ -224,14 +225,14 @@ impl KeybindingRow {
                     let background = if state.is_hovered() {
                         Some(appearance.theme().accent().with_opacity(40).into())
                     } else if index.is_multiple_of(2) {
-                        Some(internal_colors::fg_overlay_1(appearance.theme()).into())
+                        Some(internal_colors::fg_overlay_2(appearance.theme()).into())
                     } else {
                         None
                     };
                     if self.editor_open {
                         self.render_clicked(index, has_conflicting_binding, appearance)
                     } else {
-                        self.render_summary(None, background, has_conflicting_binding, appearance)
+                        self.render_summary(None, background, has_conflicting_binding, appearance, None)
                     }
                 },
             );
@@ -255,6 +256,7 @@ impl KeybindingRow {
                 background,
                 has_conflicting_binding,
                 appearance,
+                None,
             ))
             .with_foreground_overlay(appearance.theme().keybinding_row_overlay())
             .finish()
@@ -273,12 +275,20 @@ impl KeybindingRow {
         background: Option<Fill>,
         has_conflicting_binding: bool,
         appearance: &Appearance,
+        text_color_override: Option<warpui::prelude::ColorU>,
     ) -> Box<dyn Element> {
         let binding = &self.binding;
         let keystroke = match binding.trigger.clone() {
             None => Empty::new().finish(),
             Some(keystroke) => {
                 let mut keyshortcut = appearance.ui_builder().keyboard_shortcut(&keystroke);
+
+                if let Some(color) = text_color_override {
+                    keyshortcut = keyshortcut.with_style(UiComponentStyles {
+                        font_color: Some(color),
+                        ..Default::default()
+                    });
+                }
 
                 if has_conflicting_binding {
                     keyshortcut = keyshortcut.with_style(UiComponentStyles {
@@ -294,7 +304,10 @@ impl KeybindingRow {
         let element = render_columns(
             render_text(
                 binding.description.in_context(DescriptionContext::Default),
-                None,
+                text_color_override.map(|color| UiComponentStyles {
+                    font_color: Some(color),
+                    ..Default::default()
+                }),
                 appearance,
             ),
             keystroke,
@@ -323,11 +336,23 @@ impl KeybindingRow {
         has_conflicting_binding: bool,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
+        // The edit row background is accent @ 40% opacity blended onto the page background.
+        // Compute the actual rendered color so WCAG contrast selection is accurate.
+        let edit_bg: themes::theme::Fill = appearance
+            .theme()
+            .background()
+            .blend(&appearance.theme().accent().with_opacity(40));
+        let on_accent_color = appearance
+            .theme()
+            .font_color(edit_bg)
+            .into_solid();
+
         let conflict_warning = if has_conflicting_binding {
             render_text(
                 &crate::t!("settings-keybindings-conflict-warning"),
                 Some(UiComponentStyles {
                     font_weight: Some(Weight::Bold),
+                    font_color: Some(on_accent_color),
                     ..Default::default()
                 }),
                 appearance,
@@ -338,7 +363,10 @@ impl KeybindingRow {
 
         let press_new_shortcut_text = render_text(
             &crate::t!("settings-keybindings-press-new-shortcut"),
-            None,
+            Some(UiComponentStyles {
+                font_color: Some(on_accent_color),
+                ..Default::default()
+            }),
             appearance,
         );
 
@@ -354,6 +382,7 @@ impl KeybindingRow {
                     Some(appearance.theme().accent().into()),
                     has_conflicting_binding,
                     appearance,
+                    Some(on_accent_color),
                 ))
                 .with_child(
                     Container::new(new_shortcut_element)
@@ -395,9 +424,12 @@ impl KeybindingRow {
         appearance: &Appearance,
         state: &MouseState,
     ) -> themes::theme::Fill {
-        let main_text_color: themes::theme::Fill = appearance
+        // Compute contrast against the actual blended edit-row background (accent @ 40%).
+        let edit_bg: themes::theme::Fill = appearance
             .theme()
-            .main_text_color(appearance.theme().surface_2());
+            .background()
+            .blend(&appearance.theme().accent().with_opacity(40));
+        let main_text_color = appearance.theme().font_color(edit_bg);
 
         if state.is_hovered() {
             main_text_color
@@ -994,7 +1026,7 @@ impl KeybindingsWidget {
                 font_color: Some(
                     appearance
                         .theme()
-                        .sub_text_color(appearance.theme().background())
+                        .main_text_color(appearance.theme().background())
                         .into_solid(),
                 ),
                 ..Default::default()
@@ -1020,7 +1052,7 @@ impl KeybindingsWidget {
                                 font_color: Some(
                                     appearance
                                         .theme()
-                                        .sub_text_color(appearance.theme().background())
+                                        .main_text_color(appearance.theme().background())
                                         .into_solid(),
                                 ),
                                 ..Default::default()
@@ -1049,7 +1081,7 @@ impl KeybindingsWidget {
                                 font_color: Some(
                                     appearance
                                         .theme()
-                                        .sub_text_color(appearance.theme().background())
+                                        .main_text_color(appearance.theme().background())
                                         .into_solid(),
                                 ),
                                 ..Default::default()

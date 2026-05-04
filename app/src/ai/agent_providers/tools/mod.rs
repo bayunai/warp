@@ -21,6 +21,7 @@
 
 pub mod ask;
 pub mod codebase;
+pub mod coerce;
 pub mod documents;
 pub mod edit;
 pub mod exa;
