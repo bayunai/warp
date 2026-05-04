@@ -1841,6 +1841,15 @@ impl PaneGroup {
                     "Can't restore execution profile editor panes"
                 ))
             }
+            LeafContents::SshServer { .. } => {
+                // SSH server editor panes are intentionally not restored —
+                // they're transient editor surfaces over the persistent
+                // `ssh_servers` table. Users reopen via the SSH manager tree
+                // in the left panel.
+                Err(anyhow::anyhow!(
+                    "SSH server pane should not have been persisted, as it cannot be restored"
+                ))
+            }
             LeafContents::NetworkLog => {
                 // Network log panes are intentionally not restored. Two
                 // reasons:

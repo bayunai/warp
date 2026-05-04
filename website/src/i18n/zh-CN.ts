@@ -16,9 +16,9 @@ export const zhCN = {
     badge: "社区版 · 进行中",
     title_1: "把",
     title_em: "任意 AI 模型",
-    title_2: "装进你的终端",
+    title_2: "接入你的终端",
     subtitle:
-      "OpenWarp 在 Warp 之上加入 BYOP(自带提供商)能力 —— 通过 genai 适配层原生支持 6 种 API 协议、自定义模型与系统提示词、原生多语言。",
+      "OpenWarp 是 Warp 的开源增强版,引入 BYOP(自带提供商)层,通过 genai 原生支持 6 种 API 协议,自定义模型、提示词与界面语言。",
     cta_primary: "查看 GitHub",
     cta_secondary: "阅读文档",
     note: "当前项目处于早期开发,尚未发布正式版本",
@@ -80,32 +80,32 @@ export const zhCN = {
   },
   how: {
     eyebrow: "工作方式",
-    title: "三步,把 AI 完全握在自己手里",
+    title: "三步,接入你自己的 AI",
     subtitle:
-      "保留 Warp 全部交互,只把 AI 层完全开放 —— 密钥、模型、提示词全部由你掌控。",
+      "保留 Warp 的全部交互,只在 AI 层完全开放:密钥、模型、提示词由你配置。",
     steps: [
       {
         num: "01",
         title: "接入任意提供商",
-        desc: "在设置中显式选择 API 协议、粘贴 Base URL 与 API Key —— OpenAI / Anthropic / Gemini / Ollama / DeepSeek 6 种原生协议任意切换,凭证仅保存在本地。",
+        desc: "在设置中选择 API 协议、填入 Base URL 与 API Key,OpenAI / Anthropic / Gemini / Ollama / DeepSeek 6 种协议任意切换,凭证仅保存在本地。",
       },
       {
         num: "02",
-        title: "编写动态提示词",
-        desc: "基于 minijinja 的模板引擎,根据当前工作目录、语言、角色实时渲染系统提示词,精准引导模型。",
+        title: "自定义系统提示词",
+        desc: "minijinja 模板按当前目录、语言、角色实时渲染,把上下文交给模型。",
       },
       {
         num: "03",
-        title: "在终端立即启用",
-        desc: "一键切换模型、对话、命令补全 —— 体验与 Warp 一致,但完全由你掌控。",
+        title: "在终端中即刻使用",
+        desc: "切换模型、对话、命令补全的体验与 Warp 保持一致,但底层 AI 完全可控。",
       },
     ],
   },
   providers: {
     eyebrow: "自定义提供商",
-    title: "一次配置,全模型可用",
+    title: "一次配置,接入任意模型",
     subtitle:
-      "OpenWarp 通过 genai 适配层原生支持 6 种 API 协议:OpenAI / OpenAI Responses / Anthropic / Gemini / Ollama / DeepSeek —— 显式选择协议,绕过「按模型名识别」的猜测,密钥与请求直连 provider。",
+      "OpenWarp 通过 genai 适配层原生支持 6 种 API 协议:OpenAI / OpenAI Responses / Anthropic / Gemini / Ollama / DeepSeek。协议显式指定,不依赖模型名识别,凭证与请求直连服务商,无中间转发。",
     fields: {
       name: "提供商名称",
       protocol: "API 协议",
@@ -116,10 +116,10 @@ export const zhCN = {
       prompt: "系统提示词模板",
     },
     bullets: [
-      "✓ 6 种 API 协议原生路由,不再「OpenAI 兼容硬塞」",
-      "✓ 推理思考多轮回传:DeepSeek reasoning_content / Claude thinking / Gemini",
-      "✓ minijinja 模板渲染系统提示词",
-      "✓ 凭证仅本地保存,直连 provider 端点不经任何中转",
+      "✓ 6 种 API 协议原生路由,不再以 OpenAI 兼容方式硬接",
+      "✓ 推理内容多轮回传:DeepSeek reasoning_content / Claude thinking / Gemini",
+      "✓ minijinja 模板按上下文渲染系统提示",
+      "✓ 凭证仅保存在本地,请求直连服务商,无中间转发",
     ],
     tabs: [
       {
@@ -156,31 +156,35 @@ export const zhCN = {
   },
   features: {
     eyebrow: "核心特性",
-    title: "所有你期待的,我们都开放",
+    title: "AI、提示词、界面、协议 —— 全栈开放",
     items: [
       {
         title: "BYOP 自定义提供商",
-        desc: "通过 genai 适配层原生支持 6 种 API 协议,Base URL / API Key / Model 自由组合。",
+        desc: "通过 genai 适配层原生支持 6 种 API 协议,Base URL / API Key / 模型自由组合。",
       },
       {
-        title: "系统提示词模板",
-        desc: "基于 minijinja 的强大模板,根据上下文动态渲染指令。",
+        title: "提示词模板",
+        desc: "minijinja 模板按上下文动态渲染系统提示,精准引导模型。",
       },
       {
         title: "多语言界面",
-        desc: "原生中文与英文 UI,后续社区可继续扩展更多语种。",
+        desc: "中文与英文一等公民,其他语种由社区扩展。",
       },
       {
         title: "隐私优先",
-        desc: "关闭 Cloud Agent / Computer Use,默认不上传云端,凭证仅本地保存。",
+        desc: "Cloud Agent / Computer Use 默认关闭,不上传云端,凭证仅保存在本机。",
       },
       {
         title: "保留 Warp 体验",
-        desc: "基于 Warp 上游持续合并,完整保留块、AI 命令、工作流、键位。",
+        desc: "持续合并 Warp 上游,块、AI 命令、工作流、键位全部保留。",
       },
       {
         title: "开源协议",
         desc: "与 Warp 上游一致,采用 AGPL / MIT 双许可,代码全部公开。",
+      },
+      {
+        title: "SSH 管理器",
+        desc: "侧边栏树形分组管理远程主机,密钥与密码加密存入系统 keychain;单击即连,首次登录自动注入密码 / passphrase。",
       },
     ],
   },
@@ -208,7 +212,7 @@ export const zhCN = {
   },
   cta: {
     title: "想第一时间体验?",
-    desc: "克隆仓库本地构建,或关注 GitHub 接收每次发布更新。",
+    desc: "克隆仓库本地构建,或在 GitHub 关注后续发布。",
     button: "前往 GitHub",
     command_label: "克隆仓库",
     command: "git clone https://github.com/zerx-lab/warp",
@@ -246,15 +250,19 @@ export const zhCN = {
       license: ["AGPL-3.0", "MIT"],
       links: ["查看源代码", "阅读 LICENSE", "提交 Issue"],
     },
+    ssh: {
+      tag: "远程连接",
+      chips: ["树形分组", "右键 CRUD", "拖拽排序", "Keychain 加密", "凭证自动注入"],
+    },
   },
   roadmap: {
     meta_title: "OpenWarp 路线图 — 进行中与计划中的增强",
     meta_description:
-      "OpenWarp 在 Warp 上游之上的增强路线图:国际化、客户端分词器多语言、提供商扩展。",
+      "OpenWarp 在 Warp 上游之上的增强路线图:国际化、客户端分词器多语言、提供商扩展、SSH 管理器。",
     eyebrow: "路线图",
-    title: "我们正在把 Warp 进一步打开",
+    title: "OpenWarp 路线图",
     subtitle:
-      "所有进度都基于已合并的代码与提交,没有营销话术。绿色=已交付,蓝色=进行中,灰色=计划中。",
+      "每一条都对应仓库中已合并或进行中的 commit。绿色=已交付,蓝色=进行中,灰色=计划中。",
     legend: {
       shipped: "已交付",
       in_progress: "进行中",
@@ -267,7 +275,7 @@ export const zhCN = {
         eyebrow: "01 · 国际化",
         title: "原生多语言界面",
         summary:
-          "基于 Fluent (.ftl) 的 i18n 基础设施已落地,英文与简体中文双轨并行,后续依靠社区扩展更多语种。",
+          "基于 Fluent (.ftl) 的 i18n 基础设施已就位,英文与简体中文同步迭代,其他语种由社区扩展。",
         progress: 80,
         items: [
           {
@@ -299,9 +307,9 @@ export const zhCN = {
       {
         id: "tokenizer",
         eyebrow: "02 · 客户端分词器",
-        title: "不只是英文的输入分类",
+        title: "面向多语种的输入分类",
         summary:
-          "终端输入分类器(input_classifier)历史上只为英文训练。我们正在把它扩展到 CJK 与更多脚本,避免中文输入被误判为 shell 命令。",
+          "终端输入分类器(input_classifier)原本仅基于英文训练,中文输入容易被误判为 shell 命令。本轨道正在将其扩展到 CJK 与更多书写体系。",
         progress: 35,
         items: [
           {
@@ -329,9 +337,9 @@ export const zhCN = {
       {
         id: "providers",
         eyebrow: "03 · 更多提供商",
-        title: "BYOP 适配范围",
+        title: "BYOP 协议覆盖",
         summary:
-          "BYOP 通过 genai 适配层支持多种原生协议,而不只是 OpenAI Chat Completions。每多支持一种,就少一层网关与 token 损耗。",
+          "BYOP 通过 genai 适配层原生支持多种协议,而不仅是 OpenAI Chat Completions。每新增一种原生协议,就减少一层网关与对应的 token 损耗。",
         progress: 60,
         items: [
           {
@@ -367,9 +375,9 @@ export const zhCN = {
       {
         id: "active-ai",
         eyebrow: "04 · 主动式 AI",
-        title: "Next Command / 建议 / 检索全部走 BYOP",
+        title: "主动式 AI 全部走 BYOP",
         summary:
-          "Warp 上游的主动式 AI(灰色补全 / Prompt Suggestions / NLD / Relevant Files)原本直连 ${server_root_url}/ai/*,现已全量切到 BYOP one-shot,凭证不再绕路云端。",
+          "Warp 原本的主动式 AI(灰色补全 / Prompt Suggestions / NLD / Relevant Files)默认调用 ${server_root_url}/ai/*,目前已全部切换到 BYOP one-shot,凭证不再经过云端中转。",
         progress: 70,
         items: [
           {
@@ -409,9 +417,9 @@ export const zhCN = {
       {
         id: "decouple",
         eyebrow: "05 · 解耦云端",
-        title: "断开 Warp Inc 默认链路",
+        title: "切断默认云端依赖",
         summary:
-          "OpenWarp 是纯本地分支:云账号刷新、远端用户持久化、Plan 同步、passive suggestions HTTP 等链路均已就地禁用,凭证与请求只走你配置的 provider。",
+          "OpenWarp 是纯本地分支:云账号刷新、远端用户持久化、Plan 同步、passive suggestions HTTP 等连回 Warp Inc 的链路均已就地禁用,凭证与请求只发往你配置的服务商。",
         progress: 75,
         items: [
           { status: "shipped", text: "移除 Cloud Agent / Computer Use 入口" },
@@ -444,9 +452,9 @@ export const zhCN = {
       {
         id: "polish",
         eyebrow: "06 · 体验 & 稳定性",
-        title: "本地化体验与崩溃修复",
+        title: "体验打磨与稳定性",
         summary:
-          "为 BYOP 多协议补齐边角:多轮 tool_use 配对、Take over Agent handoff、长命令 alt-screen 防崩、命令面板中英双向搜索、OpenWarp 打包与 Release 工作流。",
+          "围绕 BYOP 多协议补齐细节:多轮 tool_use 配对、Take over Agent 切回、长命令 alt-screen 防卡死、命令面板中英双向搜索,以及 OpenWarp 打包与 Release 工作流。",
         progress: 65,
         items: [
           {
@@ -483,10 +491,64 @@ export const zhCN = {
           },
         ],
       },
+      {
+        id: "ssh",
+        eyebrow: "07 · SSH 管理器",
+        title: "内置 SSH 管理器",
+        summary:
+          "侧边栏新增 SSH 管理器面板:树形分组、右键 CRUD、拖拽排序,密钥与密码加密存入系统 keychain;单击即连,首次登录自动注入密码或 passphrase。",
+        progress: 70,
+        items: [
+          {
+            status: "shipped",
+            text: "SQLite ssh_nodes 表 + 服务器 / 文件夹双类型 + parent_id 树结构",
+          },
+          {
+            status: "shipped",
+            text: "本地 keychain 加密保存 password / key passphrase,凭证零外发",
+          },
+          {
+            status: "shipped",
+            text: "侧边栏树视图:文件夹折叠 / 展开 + 状态持久化 + 智能 toggle-all",
+          },
+          {
+            status: "shipped",
+            text: "右键菜单 CRUD(新建 / 编辑 / 删除 / 连接)+ 文件夹内联重命名",
+          },
+          {
+            status: "shipped",
+            text: "拖拽移动节点:server / folder 任意嵌套 + 环检测 reject",
+          },
+          {
+            status: "shipped",
+            text: "中央 Pane 编辑器(Drive 风格):name / host / port / user + 密码 / 私钥 pill toggle + Save",
+          },
+          {
+            status: "shipped",
+            text: "Connect 一键开新 terminal pane,自动写入 ssh 命令",
+          },
+          {
+            status: "shipped",
+            text: "SecretInjector:订阅 PTY 输出,15s 滑窗匹配 password / passphrase prompt 并注入",
+          },
+          {
+            status: "in_progress",
+            text: "导入 ~/.ssh/config 已有主机批量入库",
+          },
+          {
+            status: "planned",
+            text: "SFTP / 端口转发 / Jump host 链路配置",
+          },
+          {
+            status: "planned",
+            text: "服务器健康探测 + 颜色状态指示",
+          },
+        ],
+      },
     ],
     footnote_title: "路线图怎么读",
     footnote_body:
-      '路线图按"已合并的提交"维护,不是 PM 的愿望清单。每个 ✓ 都对应代码库里的具体文件与函数;进行中条目代表已开 issue / 已起草 PR。希望参与的话,直接来 GitHub 提 issue 或 PR。',
+      "本路线图按已合并的提交维护,而非愿望清单。每个 ✓ 都对应代码库中的具体文件与函数,进行中条目对应已开 issue 或已起草 PR。欢迎到 GitHub 提 issue 或 PR 参与共建。",
     cta_repo: "查看仓库",
     cta_issues: "提交 issue",
   },
@@ -501,7 +563,7 @@ export const zhCN = {
     issues: "问题反馈",
     license: "许可协议",
     privacy: "隐私",
-    rights: "基于 Warp 二次开发,与 Warp 官方无关",
+    rights: "基于 Warp 的社区分支,与 Warp 官方无关",
   },
 };
 

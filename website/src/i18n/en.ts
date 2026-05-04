@@ -184,6 +184,10 @@ export const en: Dict = {
         title: "Open source",
         desc: "AGPL / MIT dual license, mirroring upstream Warp. All code is public.",
       },
+      {
+        title: "SSH manager",
+        desc: "Tree-organized remote hosts with keys & passwords encrypted in the OS keychain. Single-click connect, auto-injects password / passphrase on first prompt.",
+      },
     ],
   },
   faq: {
@@ -248,11 +252,15 @@ export const en: Dict = {
       license: ["AGPL-3.0", "MIT"],
       links: ["View source", "Read LICENSE", "Open an issue"],
     },
+    ssh: {
+      tag: "Remote hosts",
+      chips: ["Tree groups", "Right-click CRUD", "Drag to reorder", "Keychain-encrypted", "Auto secret inject"],
+    },
   },
   roadmap: {
     meta_title: "OpenWarp Roadmap — Shipped & in-flight enhancements",
     meta_description:
-      "The OpenWarp roadmap on top of upstream Warp: i18n, multilingual client tokenizer, expanded provider support.",
+      "The OpenWarp roadmap on top of upstream Warp: i18n, multilingual client tokenizer, expanded providers, SSH manager.",
     eyebrow: "Roadmap",
     title: "Opening Warp up, one merge at a time",
     subtitle:
@@ -494,6 +502,60 @@ export const en: Dict = {
           {
             status: "planned",
             text: "Linux Release workflow automation",
+          },
+        ],
+      },
+      {
+        id: "ssh",
+        eyebrow: "07 · SSH manager",
+        title: "Remote hosts in your sidebar",
+        summary:
+          "A built-in SSH manager panel: tree groups, right-click CRUD, drag-to-reorder. Keys and passwords live in the OS keychain. Single-click connect auto-injects the password or passphrase on the first prompt.",
+        progress: 70,
+        items: [
+          {
+            status: "shipped",
+            text: "SQLite ssh_nodes table, server / folder dual type, parent_id tree structure",
+          },
+          {
+            status: "shipped",
+            text: "Passwords & key passphrases sealed in the OS keychain — never sent off-device",
+          },
+          {
+            status: "shipped",
+            text: "Sidebar tree view: collapse / expand folders with persisted state + smart toggle-all",
+          },
+          {
+            status: "shipped",
+            text: "Right-click CRUD (new / edit / delete / connect) + folder inline rename",
+          },
+          {
+            status: "shipped",
+            text: "Drag-to-move nodes between folders + cycle detection",
+          },
+          {
+            status: "shipped",
+            text: "Drive-style central Pane editor: name / host / port / user + password / key pill toggle + Save",
+          },
+          {
+            status: "shipped",
+            text: "Connect opens a new terminal pane and auto-writes the ssh command",
+          },
+          {
+            status: "shipped",
+            text: "SecretInjector: subscribes to PTY output, 15s sliding window matches password / passphrase prompts and injects",
+          },
+          {
+            status: "in_progress",
+            text: "Bulk import of existing hosts from ~/.ssh/config",
+          },
+          {
+            status: "planned",
+            text: "SFTP / port forwarding / jump host configuration",
+          },
+          {
+            status: "planned",
+            text: "Server health probes + colored status indicators",
           },
         ],
       },

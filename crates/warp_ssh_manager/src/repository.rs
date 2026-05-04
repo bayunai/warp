@@ -185,6 +185,39 @@ impl SshRepository {
         Ok(())
     }
 
+    /// 更新单个 folder 的折叠状态。Server 节点也允许设(虽然 UI 不用),
+    /// 简化调用方逻辑。
+    pub fn set_collapsed(
+        conn: &mut SqliteConnection,
+        node_id: &str,
+        collapsed: bool,
+    ) -> Result<(), SshRepositoryError> {
+        let n = diesel::update(ssh_nodes::table.find(node_id))
+            .set((
+                ssh_nodes::is_collapsed.eq(collapsed),
+                ssh_nodes::updated_at.eq(Utc::now().naive_utc()),
+            ))
+            .execute(conn)?;
+        if n == 0 {
+            return Err(SshRepositoryError::NotFound(node_id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// 把所有 folder 节点的 `is_collapsed` 一次性设成给定值。
+    pub fn set_all_folders_collapsed(
+        conn: &mut SqliteConnection,
+        collapsed: bool,
+    ) -> Result<(), SshRepositoryError> {
+        diesel::update(ssh_nodes::table.filter(ssh_nodes::kind.eq(NodeKind::Folder.as_db_str())))
+            .set((
+                ssh_nodes::is_collapsed.eq(collapsed),
+                ssh_nodes::updated_at.eq(Utc::now().naive_utc()),
+            ))
+            .execute(conn)?;
+        Ok(())
+    }
+
     fn get_node(
         conn: &mut SqliteConnection,
         node_id: &str,
@@ -234,6 +267,7 @@ fn node_from_row(r: SshNodeRow) -> Result<SshNode, SshRepositoryError> {
         sort_order: r.sort_order,
         created_at: r.created_at,
         updated_at: r.updated_at,
+        is_collapsed: r.is_collapsed,
     })
 }
 
@@ -253,16 +287,23 @@ fn server_from_row(r: SshServerRow) -> Result<SshServerInfo, SshRepositoryError>
     })
 }
 
-/// 测试用:用嵌入的 up.sql 在内存 SQLite 上建表。
+/// 测试用:把 SSH 相关 migrations 全部跑一遍在内存 SQLite。新增 migration
+/// 时这里要追加 include_str!。
 #[cfg(test)]
 pub(crate) fn setup_in_memory() -> SqliteConnection {
     use diesel::connection::SimpleConnection;
     let mut conn = SqliteConnection::establish(":memory:").unwrap();
     conn.batch_execute("PRAGMA foreign_keys = ON;").unwrap();
-    let up = include_str!(
-        "../../persistence/migrations/2026-05-04-120000_add_ssh_manager_tables/up.sql"
-    );
-    conn.batch_execute(up).unwrap();
+    for up in [
+        include_str!(
+            "../../persistence/migrations/2026-05-04-120000_add_ssh_manager_tables/up.sql"
+        ),
+        include_str!(
+            "../../persistence/migrations/2026-05-04-130000_add_ssh_nodes_is_collapsed/up.sql"
+        ),
+    ] {
+        conn.batch_execute(up).unwrap();
+    }
     conn
 }
 

@@ -119,3 +119,58 @@ bash script/setup-merge-drivers.sh
 5. modify/delete 类冲突直接 `git rm`(参考上表)
 6. 其它冲突手工解决;rerere 会记下来
 7. `cargo check -p warp` 验证后合回 openWarp
+
+---
+
+## openWarp 独有特性:SSH 管理器(2026-05-04 新增)
+
+完整模块,**上游不会有**。所有自治区路径已写进 `.gitattributes` 末尾。
+
+### 整片自治区(merge=openwarp-ours,合并时永远保留我们版本)
+
+| 路径 | 内容 |
+|---|---|
+| `crates/warp_ssh_manager/**` | 数据层 crate(Diesel CRUD / 类型 / SSH 命令拼装 / keychain wrapper / SecretInjector matcher) |
+| `app/src/ssh_manager/**` | UI 层(panel / server_view / secret_injector / notifier) |
+| `app/src/pane_group/pane/ssh_server_pane.rs` | SshServerPane(中央 pane,仿 GetStartedPane 极简) |
+| `crates/persistence/migrations/2026-05-04-120000_add_ssh_manager_tables/**` | `ssh_nodes` + `ssh_servers` 表初创建 |
+| `crates/persistence/migrations/2026-05-04-130000_add_ssh_nodes_is_collapsed/**` | `is_collapsed BOOLEAN NOT NULL DEFAULT 0` 列 |
+
+### "嵌入到上游热点文件"的修改(**非自治区**,sync 时若上游也改了同位置要手工 merge)
+
+下面这些文件 openWarp 改了,但**也在上游主线持续演进**,不能整体进自治区。每次 sync 上游若触及这些位置,需要手工保留我们的 SSH 接入代码。
+
+| 文件 | 我们改了什么 | 关键 anchor |
+|---|---|---|
+| `app/src/lib.rs` | `mod ssh_manager;` 注册;启动后调 `warp_ssh_manager::set_database_path(...)`;`SshTreeChangedNotifier::new()` 加入 `add_singleton_model` 链 | `mod shell_indicator` 后;`persistence::initialize` 调用之后;`KeybindingChangedNotifier::new()` 旁 |
+| `app/src/workspace/view/left_panel.rs` | `ToolPanelView::SshManager` enum 变体 + `LeftPanelAction::SshManager` + `MouseStateHandles.ssh_manager_button` + `LeftPanelView.ssh_manager_view` 字段 + `LeftPanelEvent::OpenSshServerEditor` / `OpenSshTerminal` 变体 + new() 构造 + 12+ 处 match 分支(`update_available_views`/`create_toolbelt_button_config`/`update_button_active_states`/`handle_action_with_force_open`/`View::on_focus`/`focus_active_view_on_entry`/render content_area+mouse_state_handles vec) + ssh_manager_view 事件 subscribe 转发 | grep `ssh_manager` / `SshManager` / `OpenSshServer` / `OpenSshTerminal` 找全 |
+| `app/src/workspace/view.rs` | `compute_left_panel_views` 末尾 push SshManager;`restore_active_view_from_snapshot` match;`render_left_panel_button` + `render_tools_panel_button` 两处 ToolPanelView match;`handle_left_panel_event` 处理 OpenSshServerEditor/OpenSshTerminal;`handle_action` 加 `WorkspaceAction::OpenSshTerminal` 分支;新方法 `Workspace::open_ssh_server` 与 `Workspace::open_ssh_terminal` | grep `ssh` / `SshServer` / `OpenSshTerminal` |
+| `app/src/workspace/action.rs` | `WorkspaceAction::OpenSshTerminal { node_id, server }` 变体 + `should_save_app_state_on_action` 加 false 分支 | grep `OpenSshTerminal` |
+| `app/src/app_state.rs` | `LeafContents::SshServer { node_id }` 变体 + `is_persisted()` 返回 false | grep `LeafContents::SshServer` |
+| `app/src/persistence/sqlite.rs` | save 路径两处 LeafContents match 加 SshServer 占位(都 unreachable) | grep `LeafContents::SshServer` |
+| `app/src/pane_group/mod.rs` | restore match 加 SshServer arm 返回 Err(类似 NetworkLog,因 is_persisted=false) | grep `LeafContents::SshServer` |
+| `app/src/pane_group/pane/mod.rs` | `IPaneType::SshServer` enum + Display + `from_ssh_server_pane_ctx/_view` PaneId 方法 + render() 分支 + `pub(crate) mod ssh_server_pane` | grep `IPaneType::SshServer` / `ssh_server_pane` |
+| `app/src/launch_configs/launch_config.rs` | LeafContents match 加 SshServer 到 `Err(())` 分支(SSH pane 不能存 launch config) | grep `LeafContents::SshServer` |
+| `app/src/workspace/view/vertical_tabs.rs` | IPaneType match 加 SshServer 到 `TypedPane::Other` | grep `IPaneType::SshServer` |
+| `app/src/terminal/recorder.rs` | `pub fn inactive_pty_reads_rx(&self)` getter 暴露(给 SecretInjector 订阅 PTY 用) | grep `inactive_pty_reads_rx` 找方法 |
+| `app/src/terminal/view.rs` | `pub fn inactive_pty_reads_rx(&self, ctx)` 包装 pty_recorder | grep `inactive_pty_reads_rx` |
+| `crates/persistence/src/schema.rs` | `ssh_nodes` + `ssh_servers` 两个 `diesel::table!` 块 + joinable | 按字母序在 `settings_panes` 与 `tabs` 之间 |
+| `crates/persistence/src/model.rs` | 4 个 ORM struct(`SshNodeRow` / `NewSshNode` / `SshServerRow` / `NewSshServer`)+ schema import 列表加 `ssh_nodes, ssh_servers` | 文件末尾;import 块按字母序 |
+| `Cargo.toml`(workspace 根) | `keyring 3.6` / `shell-escape 0.1.5` workspace deps;`warp_ssh_manager = { path = "crates/warp_ssh_manager" }` workspace dep | 字母序插入对应位置 |
+| `app/Cargo.toml` | `warp_ssh_manager.workspace = true` + `zeroize = "1.8"` 直接 dep | warp_server_client 旁;字母序 |
+| `crates/warp_ssh_manager/Cargo.toml` | 自有 dev-dependencies 包含 `libsqlite3-sys = { features = ["bundled"] }`(Windows 测试链接器需要) | (整文件就是我们的) |
+| `app/i18n/en/warp.ftl` 和 `app/i18n/zh-CN/warp.ftl` | ~25 条 `workspace-left-panel-ssh-manager-*` key 全部新增 | grep `ssh-manager` |
+
+### 处理建议
+
+- **整片自治区已通过 `.gitattributes` 自动保留**,这部分省心。
+- **嵌入式修改的冲突**:重 sync 时若上游改了 `left_panel.rs` 的 `ToolPanelView` 或 `workspace/view.rs` 的 `compute_left_panel_views` 之类,git 会标记冲突。手工解决时**保留我们的 SSH 分支** + **吸收上游对其他分支的更新**。
+- 上游不太可能新增同名 `LeafContents::SshServer`/`IPaneType::SshServer`/`WorkspaceAction::OpenSshTerminal` 变体(语义太具体),冲突场景主要是**新增其他变体**到同一个 enum,git 一般能自动 merge。
+- **SecretInjector + keychain** 完全本地化,不依赖任何 cloud 路径,sync 上游 cloud 改动时不会被波及。
+
+### 验收
+
+sync 完成后跑一遍:
+- `cargo test -p warp_ssh_manager`(16 个数据层单测)
+- `cargo check -p warp --lib` 干净
+- 启动 openWarp,工具条最末仍能看到 SSH 管理器图标(钥匙图标),点开树结构、folder 折叠、拖拽、连接、密码注入这条 e2e 链路保持工作

@@ -57,6 +57,9 @@ pub struct SshNode {
     pub sort_order: i32,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+    /// 仅对 folder 有意义,UI 据此决定是否隐藏子节点。SQLite 持久化让重启后
+    /// 状态保持。
+    pub is_collapsed: bool,
 }
 
 /// Server 节点的连接配置。`password` / `passphrase` 不在此处 — 走 keychain。

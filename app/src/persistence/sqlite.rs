@@ -1044,7 +1044,9 @@ fn save_pane_state(
         LeafContents::GetStarted => GET_STARTED_PANE_KIND,
         LeafContents::Welcome { .. } => WELCOME_PANE_KIND,
         LeafContents::AIDocument(_) => AI_DOCUMENT_PANE_KIND,
-        LeafContents::EnvironmentManagement(_) | LeafContents::NetworkLog => {
+        LeafContents::EnvironmentManagement(_)
+        | LeafContents::NetworkLog
+        | LeafContents::SshServer { .. } => {
             // These pane types are filtered out before this function is
             // called; see `LeafContents::is_persisted` and the skip in
             // `save_app_state`. Reaching this arm would mean a `pane_nodes`
@@ -1284,6 +1286,9 @@ fn save_pane_state(
                 .execute(conn)?;
         }
         LeafContents::NetworkLog => {
+            // Unreachable: filtered by `is_persisted` in `save_app_state`.
+        }
+        LeafContents::SshServer { .. } => {
             // Unreachable: filtered by `is_persisted` in `save_app_state`.
         }
     }

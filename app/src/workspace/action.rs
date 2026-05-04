@@ -144,6 +144,14 @@ pub enum WorkspaceAction {
     AddTerminalTab {
         hide_homepage: bool,
     },
+    /// 在当前 tab 中央开新 terminal pane,执行 `ssh user@host`(openWarp 独有)。
+    /// 由 SshServerView 的 Connect 按钮 / SshManagerPanel 右键"连接" 触发。
+    OpenSshTerminal {
+        node_id: String,
+        server: warp_ssh_manager::SshServerInfo,
+    },
+    /// 打开/关闭左侧 panel 的 SSH 管理器视图(openWarp 独有)。
+    ToggleSshManager,
     AddTabWithShell {
         shell: AvailableShell,
         source: AddTabWithShellSource,
@@ -725,6 +733,8 @@ impl WorkspaceAction {
             | ToggleTabColor { .. }
             | AddDefaultTab
             | AddTerminalTab { .. }
+            | OpenSshTerminal { .. }
+            | ToggleSshManager
             | AddTabWithShell { .. }
             | AddGetStartedTab
             | AddAgentTab

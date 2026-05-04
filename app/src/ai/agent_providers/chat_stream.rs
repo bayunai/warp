@@ -311,10 +311,24 @@ fn build_user_message_with_binaries(
     let mut parts: Vec<ContentPart> = Vec::with_capacity(1 + binaries.len());
     parts.push(ContentPart::Text(text));
 
-    let mut dropped: Vec<(String, String)> = Vec::new();
+    let mut error_replacements: Vec<(String, String)> = Vec::new();
     for bin in binaries {
         if !caps.supports_mime(&bin.content_type) {
-            dropped.push((bin.name.clone(), bin.content_type.clone()));
+            // OpenWarp 对齐 opencode `unsupportedParts`(packages/opencode/src/provider/transform.ts:305-341):
+            // 模型不支持的 mime 不静默 drop,改成插入一条 ERROR 文本 part,让 LLM 自己告诉用户。
+            // 文案严格照抄 opencode 的 `ERROR: Cannot read {name} (this model does not support
+            // {modality} input). Inform the user.`,modality 由 mime 前缀映射,name 优先用文件名。
+            let modality = mime_to_modality(&bin.content_type);
+            let name = if bin.name.is_empty() {
+                modality.to_string()
+            } else {
+                format!("\"{}\"", bin.name)
+            };
+            let err_text = format!(
+                "ERROR: Cannot read {name} (this model does not support {modality} input). Inform the user."
+            );
+            error_replacements.push((bin.name.clone(), bin.content_type.clone()));
+            parts.push(ContentPart::Text(err_text));
             continue;
         }
         parts.push(ContentPart::Binary(Binary::from_base64(
@@ -324,15 +338,16 @@ fn build_user_message_with_binaries(
         )));
     }
 
-    if !dropped.is_empty() {
-        log::warn!(
-            "[byop] dropped {} attachment(s) — model {api_type:?}/{model_id} doesn't support: {dropped:?}",
-            dropped.len()
+    if !error_replacements.is_empty() {
+        log::info!(
+            "[byop] {} attachment(s) replaced with ERROR text — model {api_type:?}/{model_id} \
+             does not support: {error_replacements:?}",
+            error_replacements.len()
         );
     }
 
-    // 若过滤后只剩 Text(全部 binaries 被 caps 拒绝),退回纯文本以保持 message
-    // 形态与现有 `sanitize_tool_call_pairs` / `ensure_ends_with_user` 兼容。
+    // 若 binaries 全是被替换的 ERROR 文本(没有真正的 Binary part),仍保留 ERROR 文本 part
+    // 让模型看到。退化情况(例如 text 为空 + 没有任何 part 加进来)兜底纯文本。
     if parts.len() == 1 {
         if let Some(ContentPart::Text(t)) = parts.into_iter().next() {
             return ChatMessage::user(t);
@@ -344,6 +359,23 @@ fn build_user_message_with_binaries(
         role: ChatRole::User,
         content: MessageContent::from_parts(parts),
         options: None,
+    }
+}
+
+/// MIME → modality 字符串映射。对齐 opencode `mimeToModality`
+/// (packages/opencode/src/provider/transform.ts:12-18)。
+fn mime_to_modality(mime: &str) -> &'static str {
+    let lower = mime.trim().to_ascii_lowercase();
+    if lower.starts_with("image/") {
+        "image"
+    } else if lower.starts_with("audio/") {
+        "audio"
+    } else if lower.starts_with("video/") {
+        "video"
+    } else if lower == "application/pdf" {
+        "pdf"
+    } else {
+        "file"
     }
 }
 
@@ -505,29 +537,31 @@ fn build_chat_request(
                 }
                 buf.flush_into(&mut messages);
                 // OpenWarp:历史轮多模态保活。warp 自家路径靠云端 server 重注入 InputContext,
-                // BYOP 直连没有那层,所以我们在 `make_user_query_message` 持久化时把 image
-                // 字节塞进了 `UserQuery.context.images`,这里反向把它们重建成 UserBinary 并
-                // 走 `build_user_message_with_binaries`,使后续轮模型仍能看到先前粘贴的截图。
-                // 没有图片 → 退回老路 `ChatMessage::user(text)`,与修复前等价。
+                // BYOP 直连没有那层,所以 `make_user_query_message` 持久化时把所有 binary
+                // (image / pdf / audio)塞进了 `UserQuery.context.images`,这里反向恢复成
+                // UserBinary 走 `build_user_message_with_binaries`,使后续轮模型仍能看到先前
+                // 粘贴的多模态附件。模型 caps 不支持的 mime 由 build_user_message_with_binaries
+                // 替换为 ERROR 文本(opencode unsupportedParts 风格),不会静默 drop。
+                // 没有 binary → 退回老路 `ChatMessage::user(text)`,与修复前等价。
                 let history_binaries: Vec<user_context::UserBinary> = u
                     .context
                     .as_ref()
                     .map(|ctx| {
                         ctx.images
                             .iter()
-                            .filter(|img| !img.data.is_empty())
+                            .filter(|b| !b.data.is_empty())
                             .enumerate()
-                            .map(|(idx, img)| {
+                            .map(|(idx, b)| {
                                 use base64::Engine;
                                 user_context::UserBinary {
-                                    name: format!("history-image-{}-{idx}", &msg.id),
-                                    content_type: if img.mime_type.is_empty() {
-                                        "image/png".to_string()
+                                    name: format!("history-attachment-{}-{idx}", &msg.id),
+                                    content_type: if b.mime_type.is_empty() {
+                                        "application/octet-stream".to_string()
                                     } else {
-                                        img.mime_type.clone()
+                                        b.mime_type.clone()
                                     },
                                     data: base64::engine::general_purpose::STANDARD
-                                        .encode(&img.data),
+                                        .encode(&b.data),
                                 }
                             })
                             .collect()
@@ -1598,9 +1632,12 @@ pub async fn generate_byop_output(
     //
     // emit 时机必须在 CreateTask 之后(任务已升级为 Server 状态),
     // 在模型响应开始之前(UI 顺序:user 显示 → thinking/answer)。
-    // OpenWarp:历史轮多模态保活。除 query 文本外,把当前轮 UserQuery.context 里的 image
-    // binary 一并打包进 `UserQuery.context.images` 持久化,使 build_chat_request 下一轮
-    // 重建 messages 时能从历史 message 上恢复 image,继续以 ContentPart::Binary 注入上游。
+    // OpenWarp:历史轮多模态保活。除 query 文本外,把当前轮 UserQuery.context 里的所有
+    // multimodal binary(image / pdf / audio / ...)一并打包进 `UserQuery.context.images`
+    // 持久化(proto 字段叫 images,语义上是通用 BinaryFile —— `bytes data + mime_type`,
+    // 跟 opencode FilePart 等价),使 build_chat_request 下一轮重建 messages 时能从历史
+    // message 上恢复 binary,继续以 ContentPart::Binary 注入上游(模型不支持的 mime 由
+    // build_user_message_with_binaries 替换为 ERROR 文本,与 opencode unsupportedParts 一致)。
     // 上游 warp 自家路径不需要这步因为云端 server 持有 InputContext;BYOP 直连必须客户端自管。
     let pending_user_queries: Vec<(String, Vec<user_context::UserBinary>)> = params
         .input
@@ -1608,12 +1645,7 @@ pub async fn generate_byop_output(
         .filter_map(|i| match i {
             AIAgentInput::UserQuery { query, context, .. } => {
                 let attachments = user_context::collect_user_attachments(context);
-                let images: Vec<user_context::UserBinary> = attachments
-                    .binaries
-                    .into_iter()
-                    .filter(|b| b.content_type.to_ascii_lowercase().starts_with("image/"))
-                    .collect();
-                Some((query.clone(), images))
+                Some((query.clone(), attachments.binaries))
             }
             _ => None,
         })
@@ -2540,13 +2572,14 @@ fn make_user_query_message(
     task_id: &str,
     request_id: &str,
     query: String,
-    images: &[user_context::UserBinary],
+    binaries: &[user_context::UserBinary],
 ) -> api::Message {
-    // OpenWarp:把 image binary 写进 `UserQuery.context.images`(InputContext 字段)。
-    // proto Image.data 是 raw bytes,UserBinary.data 是 base64 字符串,这里 decode 一次。
-    // decode 失败的条目跳过,不让历史持久化阻塞模型流(decode 失败本来就意味着这条 image
+    // OpenWarp:把 multimodal binary(image / pdf / audio 等)写进 `UserQuery.context.images`
+    // (InputContext 字段,proto Image 实际是 `bytes data + string mime_type` 通用容器,
+    // 字段名叫 images 历史原因)。UserBinary.data 是 base64 字符串,proto.data 是 raw bytes,
+    // 这里 decode 一次;decode 失败的条目跳过,不阻塞模型流(decode 失败本来就意味着这条
     // 当轮也没真送上游,丢就丢了,不影响 history 一致性)。
-    let proto_images: Vec<api::input_context::Image> = images
+    let proto_binaries: Vec<api::input_context::Image> = binaries
         .iter()
         .filter_map(|b| {
             use base64::Engine;
@@ -2559,11 +2592,11 @@ fn make_user_query_message(
                 })
         })
         .collect();
-    let context = if proto_images.is_empty() {
+    let context = if proto_binaries.is_empty() {
         None
     } else {
         Some(api::InputContext {
-            images: proto_images,
+            images: proto_binaries,
             ..Default::default()
         })
     };

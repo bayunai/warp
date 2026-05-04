@@ -363,6 +363,7 @@ diesel::table! {
         sort_order -> Integer,
         created_at -> Timestamp,
         updated_at -> Timestamp,
+        is_collapsed -> Bool,
     }
 }
 

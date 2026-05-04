@@ -609,6 +609,8 @@ pub(crate) const LEFT_PANEL_GLOBAL_SEARCH_BINDING_NAME: &str = "workspace:left_p
 pub(crate) const LEFT_PANEL_WARP_DRIVE_BINDING_NAME: &str = "workspace:left_panel_warp_drive";
 pub(crate) const LEFT_PANEL_AGENT_CONVERSATIONS_BINDING_NAME: &str =
     "workspace:left_panel_agent_conversations";
+pub(crate) const LEFT_PANEL_SSH_MANAGER_BINDING_NAME: &str =
+    "workspace:left_panel_ssh_manager";
 
 const KEYBINDINGS_TO_CACHE: [&str; 4] = [
     ASK_AI_ASSISTANT_KEYBINDING_NAME,
@@ -3427,7 +3429,8 @@ impl Workspace {
                 ..
             }
             | TabSettingsChangedEvent::VerticalTabsShowPrLink { .. }
-            | TabSettingsChangedEvent::VerticalTabsShowDiffStats { .. } => {
+            | TabSettingsChangedEvent::VerticalTabsShowDiffStats { .. }
+            | TabSettingsChangedEvent::ShowTitleBarSearchBar { .. } => {
                 ctx.notify();
             }
             TabSettingsChangedEvent::VerticalTabsShowDetailsOnHover { .. } => {
@@ -3751,6 +3754,7 @@ impl Workspace {
                 },
                 LeftPanelDisplayedTab::WarpDrive => ToolPanelView::WarpDrive,
                 LeftPanelDisplayedTab::ConversationListView => ToolPanelView::ConversationListView,
+                LeftPanelDisplayedTab::SshManager => ToolPanelView::SshManager,
             };
             lp.restore_active_view_from_snapshot(active_view, ctx);
             lp.set_active_pane_group(pane_group.clone(), &self.working_directories_model, ctx);
@@ -5786,7 +5790,106 @@ impl Workspace {
                     ctx,
                 );
             }
+            LeftPanelEvent::OpenSshServerEditor { node_id } => {
+                self.open_ssh_server(node_id.clone(), ctx);
+            }
+            LeftPanelEvent::OpenSshTerminal { node_id, server } => {
+                self.open_ssh_terminal(node_id.clone(), server.clone(), ctx);
+            }
         }
+    }
+
+    /// 在中央区域打开给定 SSH 节点的编辑 pane。MVP 实现:**每次都开新
+    /// pane**(暂未做去重 / find_pane);Phase 2 起加 manager singleton 做
+    /// dedupe + 切窗口聚焦。
+    pub fn open_ssh_server(&mut self, node_id: String, ctx: &mut ViewContext<Self>) {
+        use crate::pane_group::pane::ssh_server_pane::SshServerPane;
+        self.active_tab_pane_group().update(ctx, |pane_group, ctx| {
+            let pane = SshServerPane::new(node_id, ctx);
+            let smart_split_direction =
+                pane_group.smart_split_direction(ctx, WORKFLOW_AND_ENV_VAR_SPLIT_RATIO);
+            pane_group.add_pane_with_direction(
+                smart_split_direction,
+                pane,
+                true, /* focus_new_pane */
+                ctx,
+            );
+        });
+    }
+
+    /// 在当前 tab 开新 terminal pane,自动跑 `ssh ...` 命令,并 spawn 一个
+    /// SecretInjector 监听 PTY 输出,在出现 `password:` / `passphrase:` 提示时
+    /// 自动注入 keychain 里的 secret。
+    ///
+    /// **配公钥免登录的边界**:用户在 server 端配了 authorized_keys,客户端
+    /// 默认私钥握手成功 → 不会出现 prompt → injector 静默超时(15s)退出,
+    /// **不会乱注入到登录后的 shell**。这是 SecretInjector 的天然特性:行尾
+    /// 严格匹配 + 一次性触发 + deadline。
+    ///
+    /// **shell bootstrap 时序**:`execute_command_or_set_pending` 把 ssh 命令
+    /// 丢进 pending 队列,等 `BootstrapPrecmdDone` 事件再 flush —— 不会跟
+    /// bootstrap 脚本拼到一起把 shell 整挂(2026-05-04 实测过)。
+    pub fn open_ssh_terminal(
+        &mut self,
+        node_id: String,
+        server: warp_ssh_manager::SshServerInfo,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        use warp_ssh_manager::{KeychainSecretStore, SecretKind, SshSecretStore};
+
+        let cmd = warp_ssh_manager::build_ssh_command_line(&server);
+        let window_id = ctx.window_id();
+
+        // 开新 tab(不分屏 — 之前用 add_terminal_pane(Direction::Right) 会切左/右
+        // 分屏,用户反馈不喜欢)。新 tab 添加后会自动成为 active tab。
+        self.add_new_session_tab_internal_with_default_session_mode_behavior(
+            NewSessionSource::Tab,
+            Some(window_id),
+            None, /* chosen_shell */
+            None, /* conversation_restoration */
+            true, /* hide_homepage */
+            DefaultSessionModeBehavior::Ignore,
+            ctx,
+        );
+
+        // 拿新 tab 的 focused terminal view。
+        let pane_group = self.active_tab_pane_group();
+        let focused_pane_id = pane_group.as_ref(ctx).focused_pane_id(ctx);
+        let Some(terminal_view) = pane_group
+            .as_ref(ctx)
+            .terminal_view_from_pane_id(focused_pane_id, ctx)
+        else {
+            log::warn!("open_ssh_terminal: no terminal in newly added tab");
+            return;
+        };
+
+        // 1. 同步读 keychain(主线程 OK)。auth_type 决定查 password 还是 passphrase。
+        let secret_kind = match server.auth_type {
+            warp_ssh_manager::AuthType::Password => SecretKind::Password,
+            warp_ssh_manager::AuthType::Key => SecretKind::Passphrase,
+        };
+        let secret = match KeychainSecretStore.get(&node_id, secret_kind) {
+            Ok(opt) => opt.unwrap_or_else(|| zeroize::Zeroizing::new(String::new())),
+            Err(e) => {
+                log::warn!("ssh keychain read failed (will continue without injection): {e}");
+                zeroize::Zeroizing::new(String::new())
+            }
+        };
+
+        // 2. 注入器 spawn 必须在 execute_command 之前启动 — 否则 password prompt
+        //    在 spawn 之前已经飞过 broadcast,injector 拿不到。
+        let pty_reads_rx = terminal_view.read(ctx, |v, c| v.inactive_pty_reads_rx(c));
+        crate::ssh_manager::secret_injector::spawn_password_injector(
+            pty_reads_rx,
+            terminal_view.downgrade(),
+            secret,
+            ctx,
+        );
+
+        // 3. 排队 ssh 命令,等 bootstrap 完成自动 flush。
+        terminal_view.update(ctx, |view, ctx| {
+            view.execute_command_or_set_pending(&cmd, ctx);
+        });
     }
 
     fn handle_right_panel_event(&mut self, event: RightPanelEvent, ctx: &mut ViewContext<Self>) {
@@ -16253,6 +16356,9 @@ impl Workspace {
                         ToolPanelView::ConversationListView => {
                             crate::t!("workspace-left-panel-agent-conversations")
                         }
+                        ToolPanelView::SshManager => {
+                            crate::t!("workspace-left-panel-ssh-manager")
+                        }
                     }
                 } else {
                     crate::t!("workspace-tools-panel-tooltip")
@@ -16312,6 +16418,9 @@ impl Workspace {
                 ToolPanelView::WarpDrive => crate::t!("workspace-left-panel-warp-drive"),
                 ToolPanelView::ConversationListView => {
                     crate::t!("workspace-left-panel-agent-conversations")
+                }
+                ToolPanelView::SshManager => {
+                    crate::t!("workspace-left-panel-ssh-manager")
                 }
             }
         } else {
@@ -16745,11 +16854,14 @@ impl Workspace {
 
             let left_padding = self.compute_tab_bar_left_padding(ctx);
 
-            let tab_bar = Flex::row()
+            let show_title_bar_search_bar =
+                *TabSettings::as_ref(ctx).show_title_bar_search_bar;
+            let mut tab_bar_row = Flex::row()
                 .with_main_axis_size(MainAxisSize::Max)
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(tab_bar.finish())
-                .with_child(
+                .with_child(tab_bar.finish());
+            if show_title_bar_search_bar {
+                tab_bar_row.add_child(
                     Shrinkable::new(
                         1.,
                         Clipped::new(
@@ -16763,9 +16875,12 @@ impl Workspace {
                         .finish(),
                     )
                     .finish(),
-                )
-                .with_child(right_controls.finish())
-                .finish();
+                );
+            } else {
+                tab_bar_row.add_child(Shrinkable::new(1., Empty::new().finish()).finish());
+            }
+            tab_bar_row.add_child(right_controls.finish());
+            let tab_bar = tab_bar_row.finish();
 
             return EventHandler::new(
                 Container::new(tab_bar)
@@ -19184,6 +19299,8 @@ impl Workspace {
         if WarpDriveSettings::is_warp_drive_enabled(ctx) {
             views.push(ToolPanelView::WarpDrive);
         }
+        // openWarp 独有:SSH 管理器,无 feature flag,默认始终显示。
+        views.push(ToolPanelView::SshManager);
         views
     }
 
@@ -19361,6 +19478,9 @@ impl TypedActionView for Workspace {
                     ctx,
                 );
                 ctx.notify();
+            }
+            OpenSshTerminal { node_id, server } => {
+                self.open_ssh_terminal(node_id.clone(), server.clone(), ctx);
             }
             AddTabWithShell { shell, source } => {
                 self.add_tab_with_shell(shell.clone(), *source, ctx)
@@ -21036,6 +21156,11 @@ impl TypedActionView for Workspace {
                         self.left_panel_view.as_ref(ctx).active_view() == ToolPanelView::WarpDrive;
                     self.toggle_left_panel_view(&LeftPanelAction::WarpDrive, is_showing, ctx);
                 }
+            }
+            ToggleSshManager => {
+                let is_showing =
+                    self.left_panel_view.as_ref(ctx).active_view() == ToolPanelView::SshManager;
+                self.toggle_left_panel_view(&LeftPanelAction::SshManager, is_showing, ctx);
             }
             ToggleGlobalSearch => {
                 if FeatureFlag::GlobalSearch.is_enabled()

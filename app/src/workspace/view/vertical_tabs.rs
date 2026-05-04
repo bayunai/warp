@@ -3251,6 +3251,7 @@ impl PaneGroup {
             IPaneType::ExecutionProfileEditor => TypedPane::ExecutionProfileEditor,
             IPaneType::GetStarted
             | IPaneType::NetworkLog
+            | IPaneType::SshServer
             | IPaneType::Welcome
             | IPaneType::DeferredPlaceholder => TypedPane::Other,
             #[cfg(test)]

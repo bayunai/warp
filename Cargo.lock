@@ -15018,6 +15018,7 @@ dependencies = [
  "warp_multi_agent_api",
  "warp_ripgrep",
  "warp_server_client",
+ "warp_ssh_manager",
  "warp_terminal",
  "warp_util",
  "warp_web_event_bus",
@@ -15035,6 +15036,7 @@ dependencies = [
  "winreg",
  "x11rb",
  "zbus 5.9.0",
+ "zeroize",
 ]
 
 [[package]]

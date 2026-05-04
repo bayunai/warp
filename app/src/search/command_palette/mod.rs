@@ -9,6 +9,7 @@ pub mod navigation;
 pub mod new_session;
 pub mod render_util;
 pub mod repos;
+pub mod ssh_servers;
 mod selected_items;
 pub mod separator_search_item;
 pub mod view;

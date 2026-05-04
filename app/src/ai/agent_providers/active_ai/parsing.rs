@@ -34,6 +34,10 @@ fn strip_code_fence(raw: &str) -> &str {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 enum SuggestionDto {
+    /// 模型显式表态"信号不足,无建议"。区别于"解析失败":
+    /// 后者会被上层 map 成 `AgentModePromptSuggestion::Error`,前者走
+    /// `AgentModePromptSuggestion::None` 干净不渲染芯片。
+    None,
     Simple {
         query: String,
         #[serde(default)]
@@ -48,10 +52,17 @@ enum SuggestionDto {
 
 /// 解析 prompt_suggestions / nld_generate 的模型输出。
 /// 失败 → `None`,调用方映射为 `AgentModePromptSuggestion::Error`。
+/// `kind:"none"` → `Some(... suggestion: None)`,上层映射为 `AgentModePromptSuggestion::None`。
 pub fn parse_suggestion(raw: &str) -> Option<GenerateAMQuerySuggestionsResponse> {
     let cleaned = strip_code_fence(raw);
     let dto: SuggestionDto = serde_json::from_str(cleaned).ok()?;
     let suggestion = match dto {
+        SuggestionDto::None => {
+            return Some(GenerateAMQuerySuggestionsResponse {
+                id: String::new(),
+                suggestion: None,
+            });
+        }
         SuggestionDto::Simple {
             query,
             should_plan_task,
@@ -237,6 +248,20 @@ mod tests {
     #[test]
     fn parse_invalid_json() {
         assert!(parse_suggestion("not json").is_none());
+    }
+
+    #[test]
+    fn parse_none_kind_returns_empty_suggestion() {
+        // `kind:"none"` 表示模型选择沉默 — 必须返回 `Some(suggestion: None)`,
+        // 不能返回 `None`(后者会被上层映射为 Error)。
+        let resp = parse_suggestion(r#"{"kind":"none"}"#).unwrap();
+        assert!(resp.suggestion.is_none());
+    }
+
+    #[test]
+    fn parse_none_kind_with_fence() {
+        let resp = parse_suggestion("```json\n{\"kind\":\"none\"}\n```").unwrap();
+        assert!(resp.suggestion.is_none());
     }
 
     #[test]

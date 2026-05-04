@@ -22,3 +22,12 @@ app/src/ai/execution_profiles/editor/** merge=openwarp-ours
 app/src/terminal/input/slash_commands/** merge=openwarp-ours
 app/src/terminal/view/ambient_agent/** merge=openwarp-ours
 app/src/search/slash_command_menu/** merge=openwarp-ours
+
+# openWarp 独有特性:SSH 管理器(2026-05-04 新增)
+# 上游不会有这些路径,标记 merge=openwarp-ours 是为了将来万一上游加同名
+# 文件时不产生意外冲突。
+crates/warp_ssh_manager/** merge=openwarp-ours
+app/src/ssh_manager/** merge=openwarp-ours
+app/src/pane_group/pane/ssh_server_pane.rs merge=openwarp-ours
+crates/persistence/migrations/2026-05-04-120000_add_ssh_manager_tables/** merge=openwarp-ours
+crates/persistence/migrations/2026-05-04-130000_add_ssh_nodes_is_collapsed/** merge=openwarp-ours

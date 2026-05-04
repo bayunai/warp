@@ -76,6 +76,7 @@ mod search_bar;
 mod server;
 mod session_management;
 mod shell_indicator;
+mod ssh_manager;
 mod suggestions;
 mod system;
 mod tab;
@@ -1153,6 +1154,11 @@ fn initialize_app(
     let (sqlite_data, writer_handles) = persistence::initialize(ctx);
     timer.mark_interval_end("SQLITE_INITIALIZED");
 
+    // SSH 管理器在主写线程外开自己的写连接(WAL + busy_timeout 保证安全)。
+    // 必须在 persistence::initialize 跑完 migration 之后才设路径,否则首个
+    // SshManager 操作可能撞 missing-table。
+    warp_ssh_manager::set_database_path(persistence::database_file_path());
+
     let persistence_writer = PersistenceWriter::new(writer_handles);
 
     let model_event_sender = persistence_writer.sender();
@@ -1583,6 +1589,7 @@ fn initialize_app(
     ctx.add_singleton_model(|_| NetworkStatus::new());
     ctx.add_singleton_model(|_| SystemStats::new());
     ctx.add_singleton_model(|_| KeybindingChangedNotifier::new());
+    ctx.add_singleton_model(|_| crate::ssh_manager::SshTreeChangedNotifier::new());
     ctx.add_singleton_model(|_| search::command_palette::SelectedItems::new());
     ctx.add_singleton_model(search::files::model::FileSearchModel::new);
     ctx.add_singleton_model(|_| VimRegisters::new());

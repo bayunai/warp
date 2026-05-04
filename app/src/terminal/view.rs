@@ -7597,6 +7597,17 @@ impl TerminalView {
         ctx.emit(Event::WriteBytesToPty { bytes: data.into() });
     }
 
+    /// 暴露 PTY 输出广播接收端,给非录制订阅者用(目前是 SSH manager 的
+    /// SecretInjector,见 `app/src/ssh_manager/secret_injector.rs`)。返回
+    /// `None` 表示当前会话不是 local TTY(wasm / 远端会话)。
+    pub fn inactive_pty_reads_rx(
+        &self,
+        ctx: &warpui::AppContext,
+    ) -> Option<async_broadcast::InactiveReceiver<std::sync::Arc<Vec<u8>>>> {
+        self.pty_recorder
+            .read(ctx, |recorder, _| recorder.inactive_pty_reads_rx())
+    }
+
     fn write_agent_bytes_to_pty<B: Into<Cow<'static, [u8]>>>(
         &mut self,
         data: B,
