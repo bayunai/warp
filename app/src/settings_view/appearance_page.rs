@@ -56,9 +56,9 @@ use crate::window_settings::{
 use crate::workspace::header_toolbar_editor::HeaderToolbarInlineEditor;
 use crate::workspace::tab_settings::{
     DirectoryTabColor, PreserveActiveTabColor, ShowCodeReviewButton, ShowIndicatorsButton,
-    ShowTitleBarSearchBar, ShowVerticalTabPanelInRestoredWindows, TabCloseButtonPosition, TabSettings,
-    TabSettingsChangedEvent, UseLatestUserPromptAsConversationTitleInTabNames, UseVerticalTabs,
-    WorkspaceDecorationVisibility,
+    ShowTitleBarSearchBar, ShowVerticalTabPanelInRestoredWindows, TabCloseButtonPosition,
+    TabSettings, TabSettingsChangedEvent, UseLatestUserPromptAsConversationTitleInTabNames,
+    UseVerticalTabs, WorkspaceDecorationVisibility,
 };
 use crate::workspace::WorkspaceAction;
 use crate::{editor::EditorView, themes::theme_chooser::ThemeChooserMode};
@@ -1590,8 +1590,8 @@ impl AppearanceSettingsPageView {
 
     fn language_dropdown_item_label(val: Language) -> &'static str {
         match val {
-            Language::System => "System default",
-            Language::English => "English",
+            Language::System => crate::t_static!("settings-language-system-default"),
+            Language::English => crate::t_static!("settings-language-english"),
             Language::SimplifiedChinese => "简体中文",
         }
     }

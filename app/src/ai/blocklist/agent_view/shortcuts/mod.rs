@@ -122,7 +122,7 @@ pub fn render_agent_shortcuts_view(
                     key: "!".to_owned(),
                     ..Default::default()
                 },
-                text: "input shell command".into(),
+                text: crate::t!("agent-shortcuts-input-shell-command").into(),
                 ..Default::default()
             },
             app,
@@ -135,7 +135,7 @@ pub fn render_agent_shortcuts_view(
                 key: "/".to_owned(),
                 ..Default::default()
             },
-            text: "for slash commands".into(),
+            text: crate::t!("agent-shortcuts-slash-commands").into(),
             ..Default::default()
         },
         app,
@@ -147,7 +147,7 @@ pub fn render_agent_shortcuts_view(
                 key: "@".to_owned(),
                 ..Default::default()
             },
-            text: "for file paths and attaching other context".into(),
+            text: crate::t!("agent-shortcuts-file-paths-context").into(),
             ..Default::default()
         },
         app,
@@ -160,7 +160,7 @@ pub fn render_agent_shortcuts_view(
             shortcuts.push(render_shortcut(
                 ShortcutProps {
                     keystroke,
-                    text: "open code review".into(),
+                    text: crate::t!("agent-shortcuts-open-code-review").into(),
                     ..Default::default()
                 },
                 app,
@@ -175,7 +175,7 @@ pub fn render_agent_shortcuts_view(
             shortcuts.push(render_shortcut(
                 ShortcutProps {
                     keystroke,
-                    text: "toggle conversation list".into(),
+                    text: crate::t!("agent-shortcuts-toggle-conversation-list").into(),
                     ..Default::default()
                 },
                 app,
@@ -186,7 +186,7 @@ pub fn render_agent_shortcuts_view(
     shortcuts.push(render_shortcut(
         ShortcutProps {
             keystroke: Keystroke::parse(cmd_or_ctrl_shift("y")).expect("is valid keystroke"),
-            text: "search and continue conversations".into(),
+            text: crate::t!("agent-shortcuts-search-continue-conversations").into(),
             ..Default::default()
         },
         app,
@@ -197,7 +197,7 @@ pub fn render_agent_shortcuts_view(
     shortcuts.push(render_shortcut(
         ShortcutProps {
             keystroke: new_conversation_keystroke.clone(),
-            text: "start a new conversation".into(),
+            text: crate::t!("agent-shortcuts-start-new-conversation").into(),
             ..Default::default()
         },
         app,
@@ -210,7 +210,7 @@ pub fn render_agent_shortcuts_view(
             shortcuts.push(render_shortcut(
                 ShortcutProps {
                     keystroke,
-                    text: "toggle auto-accept".into(),
+                    text: crate::t!("agent-shortcuts-toggle-auto-accept").into(),
                     ..Default::default()
                 },
                 app,
@@ -225,7 +225,7 @@ pub fn render_agent_shortcuts_view(
                 ctrl: true,
                 ..Default::default()
             },
-            text: "pause agent".into(),
+            text: crate::t!("agent-shortcuts-pause-agent").into(),
             ..Default::default()
         },
         app,

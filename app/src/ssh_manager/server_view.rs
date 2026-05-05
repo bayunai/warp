@@ -14,8 +14,8 @@ use warpui::elements::{
 };
 use warpui::fonts::Weight;
 use warpui::platform::{Cursor, FilePickerConfiguration};
-use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::ui_components::button::ButtonVariant;
+use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
 use warpui::{
     AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
@@ -272,9 +272,9 @@ impl SshServerView {
 
         let name = name.trim().to_string();
         if name.is_empty() {
-            self.status = Some(StatusBanner::Error(
-                crate::t!("workspace-left-panel-ssh-manager-error-name-required"),
-            ));
+            self.status = Some(StatusBanner::Error(crate::t!(
+                "workspace-left-panel-ssh-manager-error-name-required"
+            )));
             ctx.notify();
             return;
         }
@@ -282,9 +282,9 @@ impl SshServerView {
         let port: u16 = match port_str.trim().parse() {
             Ok(p) => p,
             Err(_) => {
-                self.status = Some(StatusBanner::Error(
-                    crate::t!("workspace-left-panel-ssh-manager-error-port-invalid"),
-                ));
+                self.status = Some(StatusBanner::Error(crate::t!(
+                    "workspace-left-panel-ssh-manager-error-port-invalid"
+                )));
                 ctx.notify();
                 return;
             }
@@ -362,9 +362,9 @@ impl SshServerView {
         let port: u16 = port_str.trim().parse().unwrap_or(22);
         let host = host.trim().to_string();
         if host.is_empty() {
-            self.status = Some(StatusBanner::Error(
-                crate::t!("workspace-left-panel-ssh-manager-error-host-required"),
-            ));
+            self.status = Some(StatusBanner::Error(crate::t!(
+                "workspace-left-panel-ssh-manager-error-host-required"
+            )));
             ctx.notify();
             return;
         }
@@ -762,11 +762,9 @@ impl View for SshServerView {
             .with_color(theme.sub_text_color(theme.background()).into())
             .finish();
             return Align::new(
-                ConstrainedBox::new(
-                    Container::new(body).with_uniform_padding(24.0).finish(),
-                )
-                .with_max_width(560.0)
-                .finish(),
+                ConstrainedBox::new(Container::new(body).with_uniform_padding(24.0).finish())
+                    .with_max_width(560.0)
+                    .finish(),
             )
             .top_center()
             .finish();
@@ -808,11 +806,7 @@ impl View for SshServerView {
             .finish();
 
         let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
-        col.add_child(
-            Container::new(header)
-                .with_margin_bottom(16.0)
-                .finish(),
-        );
+        col.add_child(Container::new(header).with_margin_bottom(16.0).finish());
 
         if let Some(banner) = self.render_status_banner(appearance) {
             col.add_child(banner);

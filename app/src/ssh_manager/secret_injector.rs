@@ -114,8 +114,7 @@ mod tests {
     use super::*;
 
     fn matches(input: &str) -> bool {
-        let re =
-            regex::bytes::Regex::new(r"(?im)(password|passphrase)[^\n]*:\s*$").unwrap();
+        let re = regex::bytes::Regex::new(r"(?im)(password|passphrase)[^\n]*:\s*$").unwrap();
         re.is_match(input.as_bytes())
     }
 
@@ -134,9 +133,7 @@ mod tests {
     #[test]
     fn does_not_match_motd_with_password_word() {
         // 登录后 banner 里出现 "password" 字样,不应触发(因为不在行尾的 `:`)
-        assert!(!matches(
-            "Welcome! Please change your password soon.\n# "
-        ));
+        assert!(!matches("Welcome! Please change your password soon.\n# "));
         assert!(!matches(
             "Last login: Mon Jan 1 password rotated yesterday\n"
         ));

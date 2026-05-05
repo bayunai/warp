@@ -56,11 +56,10 @@ impl SyncDataSource for SshServersDataSource {
         let results = server_nodes
             .into_iter()
             .filter_map(|node| {
-                let server = warp_ssh_manager::with_conn(|c| {
-                    Ok(SshRepository::get_server(c, &node.id)?)
-                })
-                .ok()
-                .flatten()?;
+                let server =
+                    warp_ssh_manager::with_conn(|c| Ok(SshRepository::get_server(c, &node.id)?))
+                        .ok()
+                        .flatten()?;
 
                 // 用 name + " " + host 作为搜索文本,name 或 host 任一命中都行。
                 let display_name = node.name.clone();

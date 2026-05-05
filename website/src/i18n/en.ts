@@ -25,51 +25,10 @@ export const en: Dict = {
     cta_secondary: "Read docs",
     note: "Early development — no public release yet",
     trust_lead: "Compatible with major providers",
-  },
-  terminal: {
-    tabs: ["zsh", "openwarp", "agent"],
-    breadcrumb: "~/projects/openwarp",
-    scenarios: [
-      {
-        model: "deepseek-r1",
-        tag: "reasoning",
-        user: "Refactor this Rust trait",
-        reply:
-          "This trait carries three responsibilities. Splitting it into Reader and Writer decouples I/O and makes both sides easier to test.",
-        suggest: [
-          "pub trait Reader { fn read(&self) -> Bytes; }",
-          "pub trait Writer { fn write(&mut self, b: Bytes); }",
-        ],
-      },
-      {
-        model: "gpt-4o",
-        tag: "OpenAI",
-        user: "Generate a migration for users",
-        reply:
-          "Add last_login_at and a composite index on (email, last_login_at) to speed up session-aware lookups.",
-        suggest: [
-          "ALTER TABLE users ADD COLUMN last_login_at TIMESTAMPTZ;",
-          "CREATE INDEX idx_users_email_login ON users(email, last_login_at);",
-        ],
-      },
-      {
-        model: "qwen-2.5-coder",
-        tag: "local",
-        user: "Explain this unsafe block",
-        reply:
-          "It writes through a raw pointer, bypassing borrow checking. Safe only when layout and lifetime are statically guaranteed.",
-        suggest: [
-          "// safe only when layout & lifetime are provable",
-          "unsafe { *ptr = value; }",
-        ],
-      },
-    ],
-    status: {
-      tokens: "tokens",
-      latency: "latency",
-      local: "local",
-      streaming: "streaming",
-      ready: "ready",
+    showcase: {
+      connected: "● connected · genai",
+      local_only: "local only",
+      template: "renders with user.role / locale",
     },
   },
   stats: {
@@ -125,14 +84,14 @@ export const en: Dict = {
     ],
     tabs: [
       {
-        id: "deepseek",
-        name: "DeepSeek",
-        tag: "OpenAI-compat",
+        id: "openai",
+        name: "OpenAI",
+        tag: "native",
         protocol: "OpenAI",
-        baseUrl: "https://api.deepseek.com",
+        baseUrl: "https://api.openai.com",
         endpoint: "POST /v1/chat/completions",
         apiKey: "sk-•••••••••••••••••••••",
-        model: "deepseek-reasoner",
+        model: "gpt-4o",
       },
       {
         id: "anthropic",
@@ -143,6 +102,26 @@ export const en: Dict = {
         endpoint: "POST /v1/messages",
         apiKey: "sk-ant-•••••••••••••••••",
         model: "claude-sonnet-4-6",
+      },
+      {
+        id: "gemini",
+        name: "Gemini",
+        tag: "native",
+        protocol: "Gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        endpoint: "POST /v1beta/models/{model}:generateContent",
+        apiKey: "AIza•••••••••••••••••••",
+        model: "gemini-2.0-flash",
+      },
+      {
+        id: "deepseek",
+        name: "DeepSeek",
+        tag: "OpenAI-compat",
+        protocol: "OpenAI",
+        baseUrl: "https://api.deepseek.com",
+        endpoint: "POST /v1/chat/completions",
+        apiKey: "sk-•••••••••••••••••••••",
+        model: "deepseek-reasoner",
       },
       {
         id: "ollama",

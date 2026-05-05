@@ -49,9 +49,6 @@ const TOS_URL: &str = "https://www.warp.dev/terms-of-service";
 const COMMON_BODY_UI_FONT_SIZE: f32 = 12.;
 const AUTH_MODAL_GAP: f32 = 16.;
 
-const AUTH_TOKEN_INPUT_PLACEHOLDER_TEXT: &str = "Auth Token";
-const AUTH_TOKEN_INPUT_PLACEHOLDER_TEXT_EXPERIMENTAL: &str = "Browser auth token";
-
 const AUTH_TOKEN_INPUT_BORDER_RADIUS: Radius = Radius::Pixels(4.);
 
 lazy_static! {
@@ -166,9 +163,9 @@ impl AuthViewBody {
 
             let placeholder_text =
                 if matches!(experiment_group, Some(AuthFlowInstructions::Experiment)) {
-                    AUTH_TOKEN_INPUT_PLACEHOLDER_TEXT_EXPERIMENTAL
+                    crate::t!("auth-browser-token-placeholder")
                 } else {
-                    AUTH_TOKEN_INPUT_PLACEHOLDER_TEXT
+                    crate::t!("auth-token-placeholder")
                 };
 
             editor.set_placeholder_text(placeholder_text, ctx);

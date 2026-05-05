@@ -18,7 +18,6 @@ use warpui::{
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent_conversations_model::AgentConversationsModel;
-use crate::ssh_manager::SshManagerPanel;
 #[cfg(feature = "local_fs")]
 use crate::code::file_tree::FileTreeEvent;
 use crate::coding_panel_enablement_state::CodingPanelEnablementState;
@@ -29,6 +28,7 @@ use crate::pane_group::{PaneGroup, WorkingDirectoriesEvent, WorkingDirectoriesMo
 use crate::server::telemetry::CodePanelsFileOpenEntrypoint;
 use crate::server::telemetry::{FileTreeSource, WarpDriveSource};
 use crate::settings_view::keybindings::{KeybindingChangedEvent, KeybindingChangedNotifier};
+use crate::ssh_manager::SshManagerPanel;
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
 #[cfg(feature = "local_fs")]
@@ -99,7 +99,9 @@ pub enum LeftPanelEvent {
     },
     /// 用户从 SSH 管理器树点击 server / 双击 / 右键 "编辑" → 主窗口应在中央
     /// 区开/聚焦 `SshServerPane`(具体 `WorkspaceView::open_ssh_server`)。
-    OpenSshServerEditor { node_id: String },
+    OpenSshServerEditor {
+        node_id: String,
+    },
     /// 用户从 SSH 管理器右键 "连接" → 主窗口在新 terminal pane 跑 `ssh ...`
     /// 并启动 SecretInjector(Commit 3 实施;当前为占位事件)。
     OpenSshTerminal {

@@ -145,10 +145,7 @@ const WORKFLOW_PARAMETER_HIGHLIGHT_COLOR: u32 = 0x42C0FA4D;
 const MAX_ELEMENT_WIDTH: f32 = 800.;
 
 const SCROLLBAR_WIDTH: ScrollbarWidth = ScrollbarWidth::Auto;
-const TITLE_PLACEHOLDER_TEXT: &str = "Add a title";
-const DESCRIPTION_PLACEHOLDER_TEXT: &str = "Add a description";
 const COMMAND_PLACEHOLDER_TEXT: &str = "echo \"Hello {{your_name}}\" # insert arguments with curly braces\n# enter a single-line command or an entire shell script";
-const AGENT_MODE_QUERY_PLACEHOLDER_TEXT: &str = "Enter your prompt here... (e.g., 'Create a function to sort an array of objects by date' or 'Help me debug this React component').";
 const DESCRIPTION_MARGIN_TOP: f32 = 10.;
 
 const CORE_HORIZONATAL_MARGIN: f32 = 24.;
@@ -350,7 +347,8 @@ impl WorkflowView {
 
 impl WorkflowView {
     pub fn new_in_pane(ctx: &mut ViewContext<Self>) -> Self {
-        let pane_configuration = ctx.add_model(|_ctx| PaneConfiguration::new("Untitled"));
+        let pane_configuration =
+            ctx.add_model(|_ctx| PaneConfiguration::new(crate::t!("common-untitled")));
 
         Self::new_internal(ctx, ContainerConfiguration::Pane(pane_configuration))
     }
@@ -372,7 +370,7 @@ impl WorkflowView {
             ctx,
             Some(header_font_size),
             Some(ui_font_family),
-            Some(TITLE_PLACEHOLDER_TEXT),
+            Some(crate::t!("workflow-title-input-placeholder")),
             false,
             true,
             true,
@@ -382,7 +380,7 @@ impl WorkflowView {
             ctx,
             Some(EDITOR_FONT_SIZE),
             Some(ui_font_family),
-            Some(DESCRIPTION_PLACEHOLDER_TEXT),
+            Some(crate::t!("workflow-description-input-placeholder")),
             false,
             false,
             true,
@@ -502,7 +500,8 @@ impl WorkflowView {
         self.is_for_agent_mode = is_for_agent_mode;
         if is_for_agent_mode {
             self.content_editor.update(ctx, |editor, ctx| {
-                editor.set_placeholder_text(AGENT_MODE_QUERY_PLACEHOLDER_TEXT, ctx);
+                editor
+                    .set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
                 editor.set_font_family(Appearance::as_ref(ctx).ui_font_family(), ctx);
             });
         }
@@ -525,7 +524,8 @@ impl WorkflowView {
 
         if is_for_agent_mode {
             self.content_editor.update(ctx, |editor, ctx| {
-                editor.set_placeholder_text(AGENT_MODE_QUERY_PLACEHOLDER_TEXT, ctx);
+                editor
+                    .set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
             });
         }
 
@@ -726,7 +726,8 @@ impl WorkflowView {
         self.is_for_agent_mode = workflow.model().data.is_agent_mode_workflow();
         if self.is_for_agent_mode {
             self.content_editor.update(ctx, |editor, ctx| {
-                editor.set_placeholder_text(AGENT_MODE_QUERY_PLACEHOLDER_TEXT, ctx);
+                editor
+                    .set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
                 editor.set_font_family(Appearance::as_ref(ctx).ui_font_family(), ctx);
             });
         }
@@ -818,7 +819,8 @@ impl WorkflowView {
 
         if self.is_for_agent_mode {
             self.content_editor.update(ctx, |editor, ctx| {
-                editor.set_placeholder_text(AGENT_MODE_QUERY_PLACEHOLDER_TEXT, ctx);
+                editor
+                    .set_placeholder_text(crate::t!("workflow-agent-mode-query-placeholder"), ctx);
             });
         } else {
             self.content_editor_highlight_model
@@ -1973,7 +1975,7 @@ impl WorkflowView {
                 let ui_builder = appearance.ui_builder().clone();
                 edit_button = edit_button.with_tooltip(move || {
                     ui_builder
-                        .tool_tip("Sign in to edit".to_string())
+                        .tool_tip(crate::t!("notebook-sign-in-to-edit"))
                         .build()
                         .finish()
                 });
@@ -2190,13 +2192,13 @@ impl WorkflowView {
 
     fn render_section_header(
         &self,
-        text: &'static str,
+        text: impl Into<String>,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
         Container::new(
             appearance
                 .ui_builder()
-                .span(text)
+                .span(text.into())
                 .with_style(UiComponentStyles {
                     font_size: Some(SECTION_FONT_SIZE),
                     font_weight: Some(Weight::Bold),
@@ -2549,7 +2551,7 @@ impl WorkflowView {
         ctx: &mut ViewContext<Self>,
         font_size_override: Option<f32>,
         font_family_override: Option<FamilyId>,
-        placeholder_text: Option<&str>,
+        placeholder_text: Option<impl Into<String>>,
         supports_vim_mode: bool,
         single_line: bool,
         soft_wrap: bool,
@@ -2600,7 +2602,7 @@ impl WorkflowView {
             editor.set_autogrow(soft_wrap);
 
             if let Some(text) = placeholder_text {
-                editor.set_placeholder_text(text, ctx);
+                editor.set_placeholder_text(text.into(), ctx);
             }
 
             editor
@@ -2837,11 +2839,11 @@ impl WorkflowView {
                         )
                         .with_tooltip(move || {
                             ui_builder
-                                .tool_tip("Restore workflow from trash".to_string())
+                                .tool_tip(crate::t!("workflow-tooltip-restore-from-trash"))
                                 .build()
                                 .finish()
                         })
-                        .with_text_label("Restore".to_string())
+                        .with_text_label(crate::t!("common-restore"))
                         .build()
                         .on_click(|ctx, _, _| ctx.dispatch_typed_action(WorkflowAction::Untrash))
                         .finish(),
@@ -3151,7 +3153,7 @@ impl BackingView for WorkflowView {
         // Add "Copy Link" to menu
         if let Some(link) = self.workflow_link(ctx) {
             menu_items.push(
-                MenuItemFields::new("Copy link")
+                MenuItemFields::new(crate::t!("common-copy-link"))
                     .with_on_select_action(WorkflowAction::CopyLink(link))
                     .with_icon(Icon::Link)
                     .into_item(),
@@ -3162,7 +3164,7 @@ impl BackingView for WorkflowView {
             if let Some(link) = self.workflow_link(ctx) {
                 if let Ok(url) = Url::parse(&link) {
                     menu_items.push(
-                        MenuItemFields::new("Open on Desktop")
+                        MenuItemFields::new(crate::t!("object-menu-open-on-desktop"))
                             .with_on_select_action(WorkflowAction::OpenLinkOnDesktop(url))
                             .with_icon(Icon::Laptop)
                             .into_item(),
@@ -3176,7 +3178,7 @@ impl BackingView for WorkflowView {
         // Add "Duplicate" to menu
         if space != Some(Space::Shared) {
             menu_items.push(
-                MenuItemFields::new("Duplicate")
+                MenuItemFields::new(crate::t!("common-duplicate"))
                     .with_on_select_action(WorkflowAction::Duplicate)
                     .with_icon(Icon::Duplicate)
                     .into_item(),
@@ -3189,7 +3191,7 @@ impl BackingView for WorkflowView {
             && (!FeatureFlag::SharedWithMe.is_enabled() || access_level.can_trash())
         {
             menu_items.push(
-                MenuItemFields::new("Trash")
+                MenuItemFields::new(crate::t!("common-trash"))
                     .with_on_select_action(WorkflowAction::Trash)
                     .with_icon(Icon::Trash)
                     .into_item(),

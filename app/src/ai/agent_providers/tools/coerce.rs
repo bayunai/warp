@@ -67,9 +67,7 @@ fn coerce_value(value: &mut Value, schema: &Value, changed: &mut bool) {
                     }
                 }
             }
-            if let (Some(arr), Some(items_schema)) =
-                (value.as_array_mut(), schema.get("items"))
-            {
+            if let (Some(arr), Some(items_schema)) = (value.as_array_mut(), schema.get("items")) {
                 for item in arr {
                     coerce_value(item, items_schema, changed);
                 }
@@ -137,12 +135,7 @@ fn coerce_value(value: &mut Value, schema: &Value, changed: &mut bool) {
     }
 }
 
-fn coerce_object(
-    value: &mut Value,
-    props: &Value,
-    parent_schema: &Value,
-    changed: &mut bool,
-) {
+fn coerce_object(value: &mut Value, props: &Value, parent_schema: &Value, changed: &mut bool) {
     let Some(obj) = value.as_object_mut() else {
         return;
     };
@@ -162,11 +155,7 @@ fn coerce_object(
         let known: std::collections::HashSet<&String> = props_map.keys().collect();
         // SAFETY: keys collected before mutating values. Walk via owned copy of
         // the keys to avoid double borrow.
-        let extra_keys: Vec<String> = obj
-            .keys()
-            .filter(|k| !known.contains(k))
-            .cloned()
-            .collect();
+        let extra_keys: Vec<String> = obj.keys().filter(|k| !known.contains(k)).cloned().collect();
         for k in extra_keys {
             if let Some(field) = obj.get_mut(&k) {
                 coerce_value(field, additional, changed);
@@ -196,7 +185,8 @@ mod tests {
 
     #[test]
     fn boolean_strings_coerced() {
-        let args = r#"{"command":"echo b","is_read_only":"true","is_risky":"False","uses_pager":"0"}"#;
+        let args =
+            r#"{"command":"echo b","is_read_only":"true","is_risky":"False","uses_pager":"0"}"#;
         let out = coerce_args_against_schema(args, &shell_schema()).expect("coerced");
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["is_read_only"], json!(true));

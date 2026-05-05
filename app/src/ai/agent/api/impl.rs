@@ -254,4 +254,3 @@ fn get_supported_cli_agent_tools(params: &RequestParams) -> Vec<api::ToolType> {
 
     supported_cli_agent_tools
 }
-

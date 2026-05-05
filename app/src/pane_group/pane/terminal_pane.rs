@@ -13,10 +13,8 @@ use warpui::{
 
 use crate::{
     ai::{
-        active_agent_views_model::ActiveAgentViewsModel,
-        blocklist::BlocklistAIHistoryModel,
-        llms::LLMPreferences,
-        skills::SkillManager,
+        active_agent_views_model::ActiveAgentViewsModel, blocklist::BlocklistAIHistoryModel,
+        llms::LLMPreferences, skills::SkillManager,
     },
     app_state::{AmbientAgentPaneSnapshot, LeafContents, TerminalPaneSnapshot},
     pane_group::{self, Direction, Event::OpenConversationHistory, PaneGroup},

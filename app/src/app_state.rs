@@ -142,7 +142,9 @@ pub enum LeafContents {
     GetStarted,
     /// SSH 服务器编辑器 pane(openWarp 独有)。引用 `ssh_servers.node_id` 主键
     /// 加载/保存。**不持久化** — 重启后用户从左侧 SSH 管理器树重新打开。
-    SshServer { node_id: String },
+    SshServer {
+        node_id: String,
+    },
 }
 
 #[cfg(feature = "local_fs")]

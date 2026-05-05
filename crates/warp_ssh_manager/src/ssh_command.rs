@@ -70,7 +70,10 @@ mod tests {
     fn custom_port_uses_dash_p() {
         let mut s = server();
         s.port = 2222;
-        assert_eq!(build_ssh_args(&s), vec!["ssh", "-p", "2222", "alice@1.2.3.4"]);
+        assert_eq!(
+            build_ssh_args(&s),
+            vec!["ssh", "-p", "2222", "alice@1.2.3.4"]
+        );
     }
 
     #[test]
@@ -105,6 +108,9 @@ mod tests {
         s.auth_type = AuthType::Key;
         s.key_path = Some("/path with spaces/id_rsa".into());
         let line = build_ssh_command_line(&s);
-        assert!(line.contains("'/path with spaces/id_rsa'"), "actual: {line}");
+        assert!(
+            line.contains("'/path with spaces/id_rsa'"),
+            "actual: {line}"
+        );
     }
 }

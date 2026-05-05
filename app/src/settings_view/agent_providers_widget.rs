@@ -372,7 +372,10 @@ impl AgentProvidersWidget {
             let appearance = Appearance::handle(ctx).as_ref(ctx);
             let options = single_line_editor_options(&appearance, false);
             let mut editor = EditorView::single_line(options, ctx);
-            editor.set_placeholder_text("https://api.deepseek.com/v1", ctx);
+            editor.set_placeholder_text(
+                crate::t!("settings-agent-providers-base-url-placeholder"),
+                ctx,
+            );
             if !initial_base_url.is_empty() {
                 editor.set_buffer_text(&initial_base_url, ctx);
             }

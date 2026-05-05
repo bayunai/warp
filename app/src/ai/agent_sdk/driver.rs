@@ -2296,4 +2296,3 @@ fn write_session_joined(join_url: &str, output_format: OutputFormat) {
     })
     .context("Failed to write shared session event"));
 }
-

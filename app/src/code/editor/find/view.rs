@@ -174,7 +174,7 @@ impl CodeEditorFind {
         let editor_height = line_height + (2. * FIND_EDITOR_PADDING) + 5.;
 
         let select_all_button = ctx.add_typed_action_view(|_ctx| {
-            ActionButton::new("Select all", SecondaryTheme)
+            ActionButton::new(crate::t!("code-select-all"), SecondaryTheme)
                 .on_click(|ctx| {
                     ctx.dispatch_typed_action(FindAction::SelectAll);
                 })
@@ -184,7 +184,7 @@ impl CodeEditorFind {
         });
 
         let replace_all_button = ctx.add_typed_action_view(|ctx| {
-            let mut button = ActionButton::new("Replace all", SecondaryTheme)
+            let mut button = ActionButton::new(crate::t!("code-replace-all"), SecondaryTheme)
                 .on_click(|ctx| {
                     ctx.dispatch_typed_action(FindAction::ReplaceAll);
                 })

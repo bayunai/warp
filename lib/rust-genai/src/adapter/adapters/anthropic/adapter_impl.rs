@@ -35,12 +35,12 @@ fn has_model(model_prefixes: &[&str], model_name: &str) -> bool {
 }
 
 /// Returns true when the given model name looks like a Claude Opus model with
-/// version >= 4.7 (e.g. `claude-opus-4-7`, `claude-opus-5-0`, ...).
+/// version >= `(major, minor)` (e.g. `claude-opus-4-7`, `claude-opus-5-0`).
 ///
 /// The regex is unanchored and tolerates arbitrary prefixes/suffixes around the
 /// core `claude-opus-<major>-<minor>` portion. Any parse or regex failure is
 /// treated as a conservative `false`.
-fn is_opus_4_7_or_higher(model_name: &str) -> bool {
+fn is_opus_at_least(model_name: &str, target_major: u32, target_minor: u32) -> bool {
 	static RE: OnceLock<Option<regex::Regex>> = OnceLock::new();
 	let re = RE.get_or_init(|| regex::Regex::new(r"claude-opus-(\d+)-(\d+)").ok());
 	let Some(re) = re.as_ref() else {
@@ -52,10 +52,33 @@ fn is_opus_4_7_or_higher(model_name: &str) -> bool {
 	let major = caps.get(1).and_then(|m| m.as_str().parse::<u32>().ok());
 	let minor = caps.get(2).and_then(|m| m.as_str().parse::<u32>().ok());
 	match (major, minor) {
-		(Some(major), Some(minor)) => (major, minor) >= (4, 7),
+		(Some(major), Some(minor)) => (major, minor) >= (target_major, target_minor),
 		_ => false,
 	}
 }
+
+fn is_opus_4_7_or_higher(model_name: &str) -> bool {
+	is_opus_at_least(model_name, 4, 7)
+}
+
+/// 模型是否支持 1M 上下文 beta(`anthropic-beta: context-1m-2025-08-07`)。
+///
+/// 判据(对齐 opencode `packages/console/.../anthropic.ts`):
+/// - 模型名包含 `sonnet`(Claude Sonnet 4 起全系都支持 1M)
+/// - 或为 Opus 4.6 及以上(`claude-opus-4-6`、`claude-opus-4-7`、`claude-opus-5-x` ...)
+///
+/// 用于 BYOP / 直连 / 中转场景:不带这个 header,某些中转(如 anyrouter)会
+/// 直接 400 拒绝带 `claude-opus-4-7` 之类模型名的请求,见 zerx-lab/warp #21。
+/// Anthropic 官方接受该 header 后,prompt < 200K 时仍按常规价格,所以默认带上是安全的。
+pub(in crate::adapter) fn model_supports_1m_context(model_name: &str) -> bool {
+	if model_name.contains("sonnet") {
+		return true;
+	}
+	is_opus_at_least(model_name, 4, 6)
+}
+
+const ANTHROPIC_BETA_HEADER: &str = "anthropic-beta";
+const ANTHROPIC_BETA_CONTEXT_1M: &str = "context-1m-2025-08-07";
 
 fn insert_anthropic_reasoning(
 	payload: &mut Value,
@@ -244,10 +267,29 @@ impl Adapter for AnthropicAdapter {
 		let url = Self::get_service_url(&model, service_type, endpoint)?;
 
 		// -- headers
-		let headers = Headers::from(vec![
+		let mut headers = Headers::from(vec![
 			("x-api-key".to_string(), api_key),
 			("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()),
 		]);
+
+		// -- 1M context beta header(对支持 1M 的模型默认带上)
+		// 不带的话,某些中转网关(anyrouter 等)会直接 400 拒绝。
+		// Anthropic 官方对 prompt < 200K 仍按常规价格计费,默认带上是安全的。
+		// 详见 zerx-lab/warp issue #21。
+		let (_, raw_model_name_for_beta) = model.model_name.namespace_and_name();
+		if model_supports_1m_context(raw_model_name_for_beta) {
+			headers.merge(Headers::from((
+				ANTHROPIC_BETA_HEADER.to_string(),
+				ANTHROPIC_BETA_CONTEXT_1M.to_string(),
+			)));
+		}
+
+		// -- 合并用户在 ChatOptions 里追加的 extra_headers(后写覆盖前写)
+		// 用户可显式塞同名 header(比如组合多个 beta:`context-1m-...,files-api-...`)
+		// 来覆盖 adapter 默认值。
+		if let Some(extra_headers) = options_set.extra_headers() {
+			headers.merge_with(extra_headers);
+		}
 
 		// -- Parts
 		let AnthropicRequestParts {
@@ -995,6 +1037,117 @@ mod tests {
 			Some("json_schema"),
 			"format.type must be present in output_config"
 		);
+	}
+
+	/// 辅助:从 Headers 中按名取值(case-sensitive)。
+	fn header_value<'a>(headers: &'a crate::Headers, name: &str) -> Option<&'a str> {
+		headers.iter().find_map(|(k, v)| (k == name).then_some(v.as_str()))
+	}
+
+	fn build_minimal_request(model_name: &str) -> WebRequestData {
+		let chat_options = ChatOptions::default();
+		let target = ServiceTarget {
+			endpoint: AnthropicAdapter::default_endpoint(),
+			auth: AuthData::from_single("test-key"),
+			model: ModelIden::new(AdapterKind::Anthropic, model_name),
+		};
+		let options_set = ChatOptionsSet::default().with_chat_options(Some(&chat_options));
+		AnthropicAdapter::to_web_request_data(
+			target,
+			ServiceType::Chat,
+			ChatRequest::from_user("hello"),
+			options_set,
+		)
+		.expect("to_web_request_data should succeed")
+	}
+
+	/// 回归保护(zerx-lab/warp #21):支持 1M 上下文的模型必须默认带
+	/// `anthropic-beta: context-1m-2025-08-07`,否则 anyrouter 等中转网关 400。
+	#[test]
+	fn test_anthropic_beta_header_for_opus_4_7() {
+		let req = build_minimal_request("claude-opus-4-7");
+		assert_eq!(
+			header_value(&req.headers, "anthropic-beta"),
+			Some("context-1m-2025-08-07"),
+			"opus-4-7 must default to 1m context beta header"
+		);
+	}
+
+	#[test]
+	fn test_anthropic_beta_header_for_sonnet_4_6() {
+		let req = build_minimal_request("claude-sonnet-4-6");
+		assert_eq!(
+			header_value(&req.headers, "anthropic-beta"),
+			Some("context-1m-2025-08-07"),
+			"sonnet 全系都支持 1m context"
+		);
+	}
+
+	#[test]
+	fn test_anthropic_beta_header_for_opus_4_6() {
+		let req = build_minimal_request("claude-opus-4-6");
+		assert_eq!(
+			header_value(&req.headers, "anthropic-beta"),
+			Some("context-1m-2025-08-07"),
+		);
+	}
+
+	#[test]
+	fn test_no_beta_header_for_old_models() {
+		let req = build_minimal_request("claude-3-5-haiku");
+		assert!(
+			header_value(&req.headers, "anthropic-beta").is_none(),
+			"haiku 3.5 不支持 1m,不应注入 beta header"
+		);
+
+		let req = build_minimal_request("claude-opus-4-5");
+		assert!(
+			header_value(&req.headers, "anthropic-beta").is_none(),
+			"opus 4.5 不支持 1m,不应注入 beta header"
+		);
+	}
+
+	#[test]
+	fn test_extra_headers_can_override_beta() {
+		// 用户在 ChatOptions 里塞自定义 anthropic-beta(比如组合多个 beta feature)
+		// 应该覆盖 adapter 默认的 1m 单值。
+		let custom = crate::Headers::from((
+			"anthropic-beta".to_string(),
+			"context-1m-2025-08-07,files-api-2025-04-14".to_string(),
+		));
+		let chat_options = ChatOptions::default().with_extra_headers(custom);
+		let target = ServiceTarget {
+			endpoint: AnthropicAdapter::default_endpoint(),
+			auth: AuthData::from_single("test-key"),
+			model: ModelIden::new(AdapterKind::Anthropic, "claude-opus-4-7"),
+		};
+		let options_set = ChatOptionsSet::default().with_chat_options(Some(&chat_options));
+		let req = AnthropicAdapter::to_web_request_data(
+			target,
+			ServiceType::Chat,
+			ChatRequest::from_user("hello"),
+			options_set,
+		)
+		.expect("to_web_request_data should succeed");
+		assert_eq!(
+			header_value(&req.headers, "anthropic-beta"),
+			Some("context-1m-2025-08-07,files-api-2025-04-14"),
+			"用户 extra_headers 必须覆盖 adapter 默认 beta header"
+		);
+	}
+
+	#[test]
+	fn test_model_supports_1m_context_matrix() {
+		assert!(model_supports_1m_context("claude-sonnet-4-6"));
+		assert!(model_supports_1m_context("claude-sonnet-4-7"));
+		assert!(model_supports_1m_context("anthropic/claude-sonnet-4-6"));
+		assert!(model_supports_1m_context("claude-opus-4-6"));
+		assert!(model_supports_1m_context("claude-opus-4-7"));
+		assert!(model_supports_1m_context("claude-opus-5-0"));
+		assert!(!model_supports_1m_context("claude-opus-4-5"));
+		assert!(!model_supports_1m_context("claude-3-5-haiku"));
+		assert!(!model_supports_1m_context("claude-haiku-4-5"));
+		assert!(!model_supports_1m_context("gpt-4o"));
 	}
 
 	#[test]

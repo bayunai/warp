@@ -27,8 +27,8 @@ use crate::{
 };
 use itertools::Itertools;
 
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::color::blend::Blend;
+use warp_core::ui::theme::color::internal_colors;
 use warpui::{elements::Wrap, units::Pixels};
 use warpui::{
     elements::{
@@ -232,7 +232,13 @@ impl KeybindingRow {
                     if self.editor_open {
                         self.render_clicked(index, has_conflicting_binding, appearance)
                     } else {
-                        self.render_summary(None, background, has_conflicting_binding, appearance, None)
+                        self.render_summary(
+                            None,
+                            background,
+                            has_conflicting_binding,
+                            appearance,
+                            None,
+                        )
                     }
                 },
             );
@@ -342,10 +348,7 @@ impl KeybindingRow {
             .theme()
             .background()
             .blend(&appearance.theme().accent().with_opacity(40));
-        let on_accent_color = appearance
-            .theme()
-            .font_color(edit_bg)
-            .into_solid();
+        let on_accent_color = appearance.theme().font_color(edit_bg).into_solid();
 
         let conflict_warning = if has_conflicting_binding {
             render_text(

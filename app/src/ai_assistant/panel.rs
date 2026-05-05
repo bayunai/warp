@@ -788,7 +788,7 @@ impl AIAssistantPanelView {
                 ..Default::default()
             };
             ui_builder
-                .tool_tip("Copy transcript to clipboard".to_owned())
+                .tool_tip(crate::t!("ai-assistant-copy-transcript-tooltip"))
                 .with_style(tool_tip_style)
                 .build()
                 .finish()

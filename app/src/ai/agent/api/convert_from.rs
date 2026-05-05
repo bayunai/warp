@@ -826,4 +826,3 @@ fn convert_api_question(
         },
     })
 }
-

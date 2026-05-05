@@ -23,51 +23,10 @@ export const zhCN = {
     cta_secondary: "阅读文档",
     note: "当前项目处于早期开发,尚未发布正式版本",
     trust_lead: "兼容主流提供商",
-  },
-  terminal: {
-    tabs: ["zsh", "openwarp", "agent"],
-    breadcrumb: "~/projects/openwarp",
-    scenarios: [
-      {
-        model: "deepseek-r1",
-        tag: "推理",
-        user: "帮我重构这个 Rust trait",
-        reply:
-          "识别到这个 trait 承担了三个职责。建议拆分为 Reader 与 Writer 两个 trait,以解耦读写并提升可测试性。",
-        suggest: [
-          "pub trait Reader { fn read(&self) -> Bytes; }",
-          "pub trait Writer { fn write(&mut self, b: Bytes); }",
-        ],
-      },
-      {
-        model: "gpt-4o",
-        tag: "OpenAI",
-        user: "为 users 表生成迁移脚本",
-        reply:
-          "新增 last_login_at 字段并为 (email, last_login_at) 建立复合索引,以加速登录态相关查询。",
-        suggest: [
-          "ALTER TABLE users ADD COLUMN last_login_at TIMESTAMPTZ;",
-          "CREATE INDEX idx_users_email_login ON users(email, last_login_at);",
-        ],
-      },
-      {
-        model: "qwen-2.5-coder",
-        tag: "本地",
-        user: "解释这段 unsafe 代码",
-        reply:
-          "这段代码通过裸指针直接读写内存,绕过了借用检查。仅当生命周期与对齐均可静态保证时,这种用法才是安全的。",
-        suggest: [
-          "// 仅在 layout 与 lifetime 可证明时安全",
-          "unsafe { *ptr = value; }",
-        ],
-      },
-    ],
-    status: {
-      tokens: "tokens",
-      latency: "延迟",
-      local: "本地",
-      streaming: "流式中",
-      ready: "就绪",
+    showcase: {
+      connected: "● 已连接 · genai",
+      local_only: "仅本地",
+      template: "user.role / locale 上下文渲染",
     },
   },
   stats: {
@@ -123,14 +82,14 @@ export const zhCN = {
     ],
     tabs: [
       {
-        id: "deepseek",
-        name: "DeepSeek",
-        tag: "OpenAI 兼容",
+        id: "openai",
+        name: "OpenAI",
+        tag: "原生协议",
         protocol: "OpenAI",
-        baseUrl: "https://api.deepseek.com",
+        baseUrl: "https://api.openai.com",
         endpoint: "POST /v1/chat/completions",
         apiKey: "sk-•••••••••••••••••••••",
-        model: "deepseek-reasoner",
+        model: "gpt-4o",
       },
       {
         id: "anthropic",
@@ -141,6 +100,26 @@ export const zhCN = {
         endpoint: "POST /v1/messages",
         apiKey: "sk-ant-•••••••••••••••••",
         model: "claude-sonnet-4-6",
+      },
+      {
+        id: "gemini",
+        name: "Gemini",
+        tag: "原生协议",
+        protocol: "Gemini",
+        baseUrl: "https://generativelanguage.googleapis.com",
+        endpoint: "POST /v1beta/models/{model}:generateContent",
+        apiKey: "AIza•••••••••••••••••••",
+        model: "gemini-2.0-flash",
+      },
+      {
+        id: "deepseek",
+        name: "DeepSeek",
+        tag: "OpenAI 兼容",
+        protocol: "OpenAI",
+        baseUrl: "https://api.deepseek.com",
+        endpoint: "POST /v1/chat/completions",
+        apiKey: "sk-•••••••••••••••••••••",
+        model: "deepseek-reasoner",
       },
       {
         id: "ollama",

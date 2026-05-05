@@ -1953,14 +1953,14 @@ impl CodeView {
         if let Some(path) = self.local_path(ctx) {
             items.extend([
                 MenuItem::Separator,
-                MenuItemFields::new("Copy file path")
+                MenuItemFields::new(crate::t!("code-copy-file-path"))
                     .with_on_select_action(CodeViewAction::CopyFilePath)
                     .into_item(),
             ]);
 
             if is_markdown_file(&path) {
                 items.push(
-                    MenuItemFields::new("View Markdown preview")
+                    MenuItemFields::new(crate::t!("code-view-markdown-preview"))
                         .with_on_select_action(CodeViewAction::RenderMarkdown)
                         .into_item(),
                 );

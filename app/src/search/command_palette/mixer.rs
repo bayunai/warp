@@ -142,11 +142,9 @@ impl CommandPaletteItemAction {
                 ItemSummary::Project { path: path.clone() }
             }
             CommandPaletteItemAction::NewConversation => ItemSummary::NewConversation,
-            CommandPaletteItemAction::OpenSshServer { node_id, .. } => {
-                ItemSummary::SshServer {
-                    node_id: node_id.clone(),
-                }
-            }
+            CommandPaletteItemAction::OpenSshServer { node_id, .. } => ItemSummary::SshServer {
+                node_id: node_id.clone(),
+            },
             CommandPaletteItemAction::NoOp => ItemSummary::NoOp,
         }
     }

@@ -578,7 +578,7 @@ impl AISettingsPageView {
                 let expanded = host_native_absolute_path(s, &None, &None);
                 Path::new(&expanded).is_dir()
             });
-            input.set_placeholder_text("e.g. ~/code-repos/repo", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-repo-placeholder"), ctx);
             input
         });
         Self::update_editor_interaction_state(
@@ -617,7 +617,10 @@ impl AISettingsPageView {
             };
             let mut editor = EditorView::new(options, ctx);
 
-            editor.set_placeholder_text("Commands, comma separated", ctx);
+            editor.set_placeholder_text(
+                crate::t!("settings-ai-commands-comma-separated-placeholder"),
+                ctx,
+            );
 
             let current_value = AISettings::as_ref(ctx)
                 .autodetection_command_denylist
@@ -639,7 +642,7 @@ impl AISettingsPageView {
         let command_execution_allowlist_editor = ctx.add_typed_action_view(|ctx| {
             let mut input =
                 SubmittableTextInput::new(ctx).validate_on_edit(|s| Regex::new(s).is_ok());
-            input.set_placeholder_text("e.g. ls .*", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-regex-example-placeholder"), ctx);
             input
         });
         Self::update_editor_interaction_state(
@@ -671,7 +674,7 @@ impl AISettingsPageView {
         let command_execution_denylist_editor = ctx.add_typed_action_view(|ctx| {
             let mut input =
                 SubmittableTextInput::new(ctx).validate_on_edit(|s| Regex::new(s).is_ok());
-            input.set_placeholder_text("e.g. rm .*", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-regex-example-placeholder"), ctx);
             input
         });
         Self::update_editor_interaction_state(
@@ -703,7 +706,10 @@ impl AISettingsPageView {
         let cli_agent_footer_command_editor = ctx.add_typed_action_view(|ctx| {
             let mut input =
                 SubmittableTextInput::new(ctx).validate_on_edit(|s| Regex::new(s).is_ok());
-            input.set_placeholder_text("command (supports regex)", ctx);
+            input.set_placeholder_text(
+                crate::t!("settings-ai-command-supports-regex-placeholder"),
+                ctx,
+            );
             input
         });
         // The coding agent footer command editor is always enabled,
@@ -1196,7 +1202,7 @@ impl AISettingsPageView {
                 let expanded = host_native_absolute_path(s, &None, &None);
                 Path::new(&expanded).is_dir()
             });
-            input.set_placeholder_text("e.g. ~/code-repos/repo", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-repo-placeholder"), ctx);
             input
         });
 
@@ -1228,7 +1234,7 @@ impl AISettingsPageView {
         let command_denylist_editor = ctx.add_typed_action_view(|ctx| {
             let mut input =
                 SubmittableTextInput::new(ctx).validate_on_edit(|s| Regex::new(s).is_ok());
-            input.set_placeholder_text("e.g. rm .*", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-regex-example-placeholder"), ctx);
             input
         });
         Self::update_editor_interaction_state(
@@ -1266,7 +1272,7 @@ impl AISettingsPageView {
         let command_allowlist_editor = ctx.add_typed_action_view(|ctx| {
             let mut input =
                 SubmittableTextInput::new(ctx).validate_on_edit(|s| Regex::new(s).is_ok());
-            input.set_placeholder_text("e.g. ls .*", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-regex-example-placeholder"), ctx);
             input
         });
         Self::update_editor_interaction_state(
@@ -6669,7 +6675,7 @@ impl AwsBedrockWidget {
                 ..Default::default()
             };
             let mut editor = EditorView::single_line(options, ctx);
-            editor.set_placeholder_text("aws login", ctx);
+            editor.set_placeholder_text(crate::t!("settings-ai-aws-login-placeholder"), ctx);
             editor.set_buffer_text(&aws_auth_refresh_command, ctx);
             editor
         });
@@ -6717,7 +6723,7 @@ impl AwsBedrockWidget {
                 ..Default::default()
             };
             let mut editor = EditorView::single_line(options, ctx);
-            editor.set_placeholder_text("default", ctx);
+            editor.set_placeholder_text(crate::t!("settings-ai-default-placeholder"), ctx);
             editor.set_buffer_text(&aws_auth_refresh_profile, ctx);
             editor
         });

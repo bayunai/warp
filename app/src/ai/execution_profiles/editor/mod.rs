@@ -30,8 +30,8 @@ use warpui::ui_components::switch::SwitchStateHandle;
 use std::path::{Path, PathBuf};
 use warpui::{
     elements::{
-        Align, ChildView, ClippedScrollStateHandle, ClippedScrollable,
-        Container, Flex, MouseStateHandle, ParentElement, ScrollbarWidth,
+        Align, ChildView, ClippedScrollStateHandle, ClippedScrollable, Container, Flex,
+        MouseStateHandle, ParentElement, ScrollbarWidth,
     },
     AppContext, Element, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
@@ -458,7 +458,7 @@ impl ExecutionProfileEditorView {
         let command_allowlist_editor = ctx.add_typed_action_view(|ctx| {
             let mut input =
                 SubmittableTextInput::new(ctx).validate_on_edit(|s| Regex::new(s).is_ok());
-            input.set_placeholder_text("e.g. ls .*", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-regex-example-placeholder"), ctx);
             input
         });
 
@@ -471,7 +471,7 @@ impl ExecutionProfileEditorView {
         let command_denylist_editor = ctx.add_typed_action_view(|ctx| {
             let mut input =
                 SubmittableTextInput::new(ctx).validate_on_edit(|s| Regex::new(s).is_ok());
-            input.set_placeholder_text("e.g. rm .*", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-regex-example-placeholder"), ctx);
             input
         });
 
@@ -486,7 +486,7 @@ impl ExecutionProfileEditorView {
                 let expanded = host_native_absolute_path(s, &None, &None);
                 Path::new(&expanded).is_dir()
             });
-            input.set_placeholder_text("e.g. ~/code-repos/repo", ctx);
+            input.set_placeholder_text(crate::t!("settings-ai-repo-placeholder"), ctx);
             input
         });
 
@@ -504,7 +504,7 @@ impl ExecutionProfileEditorView {
                 },
                 ctx,
             );
-            editor.set_placeholder_text("e.g. \"YOLO code\"", ctx);
+            editor.set_placeholder_text(crate::t!("ai-execution-profile-name-placeholder"), ctx);
             editor
         });
 
@@ -518,11 +518,14 @@ impl ExecutionProfileEditorView {
         Self::update_profile_name_editor(&profile_name_editor, &profile_data, ctx);
 
         let delete_button = ctx.add_typed_action_view(|_| {
-            ActionButton::new("Delete profile", DangerSecondaryTheme)
-                .with_icon(Icon::Trash)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(ExecutionProfileEditorViewAction::DeleteProfile);
-                })
+            ActionButton::new(
+                crate::t!("ai-execution-profile-delete-profile"),
+                DangerSecondaryTheme,
+            )
+            .with_icon(Icon::Trash)
+            .on_click(|ctx| {
+                ctx.dispatch_typed_action(ExecutionProfileEditorViewAction::DeleteProfile);
+            })
         });
 
         let mut view = Self {

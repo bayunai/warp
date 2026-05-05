@@ -85,8 +85,7 @@ use warp_util::path::convert_wsl_to_windows_host_path;
 #[cfg(feature = "local_fs")]
 use warp_util::path::LineAndColumnArg;
 use warpui::elements::{
-    CrossAxisAlignment, DispatchEventResult, EventHandler, Flex, MainAxisSize, Shrinkable,
-    Stack,
+    CrossAxisAlignment, DispatchEventResult, EventHandler, Flex, MainAxisSize, Shrinkable, Stack,
 };
 use warpui::keymap::{Context, EditableBinding, FixedBinding};
 use warpui::notification::NotificationSendError;

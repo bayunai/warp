@@ -32,13 +32,7 @@ impl SshServerPane {
         let pane_configuration = server_view.as_ref(ctx).pane_configuration();
         let pane_view = ctx.add_typed_action_view(|ctx| {
             let pane_id = PaneId::from_ssh_server_pane_ctx(ctx);
-            PaneView::new(
-                pane_id,
-                server_view,
-                (),
-                pane_configuration.clone(),
-                ctx,
-            )
+            PaneView::new(pane_id, server_view, (), pane_configuration.clone(), ctx)
         });
         Self {
             view: pane_view,

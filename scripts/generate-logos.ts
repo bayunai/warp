@@ -48,14 +48,21 @@ function traceToSvg(input: string): Promise<string> {
   });
 }
 
-/** potrace 输出的 SVG 自带紧贴 content 的 viewBox,直接用来渲染即可保证已裁剪边框 */
+/**
+ * 渲染策略:
+ *   1. SVG 在透明背景上光栅化,得到「黑色 shape + 透明」的 RGBA。
+ *   2. 从画布四边对透明像素做 flood-fill,标记出「外部透明区」。
+ *   3. 没被标记的透明像素就是被 shape 包围的「内部洞」,填成不透明白。
+ *
+ * 这样最终图像 = 外部透明 + 黑色 shape + 仅前卡片内洞为白。
+ */
 async function renderPng(svg: Buffer, size: number, padding: number): Promise<Buffer> {
   const inner = Math.max(1, size - padding * 2);
   const innerPng = await sharp(svg, { density: 384 })
     .resize(inner, inner, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png()
     .toBuffer();
-  return sharp({
+  const { data, info } = await sharp({
     create: {
       width: size,
       height: size,
@@ -64,6 +71,51 @@ async function renderPng(svg: Buffer, size: number, padding: number): Promise<Bu
     },
   })
     .composite([{ input: innerPng, gravity: "center" }])
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const w = info.width;
+  const h = info.height;
+  const buf = Buffer.from(data);
+  const ALPHA_THRESHOLD = 16; // 抗锯齿边缘算 shape,避免漏填
+  const exterior = new Uint8Array(w * h);
+  const stack: number[] = [];
+  const tryPush = (x: number, y: number) => {
+    if (x < 0 || x >= w || y < 0 || y >= h) return;
+    const idx = y * w + x;
+    if (exterior[idx]) return;
+    if (buf[idx * 4 + 3] >= ALPHA_THRESHOLD) return;
+    exterior[idx] = 1;
+    stack.push(idx);
+  };
+  for (let x = 0; x < w; x++) {
+    tryPush(x, 0);
+    tryPush(x, h - 1);
+  }
+  for (let y = 0; y < h; y++) {
+    tryPush(0, y);
+    tryPush(w - 1, y);
+  }
+  while (stack.length) {
+    const idx = stack.pop()!;
+    const x = idx % w;
+    const y = (idx - x) / w;
+    tryPush(x - 1, y);
+    tryPush(x + 1, y);
+    tryPush(x, y - 1);
+    tryPush(x, y + 1);
+  }
+
+  for (let i = 0; i < w * h; i++) {
+    if (buf[i * 4 + 3] < ALPHA_THRESHOLD && !exterior[i]) {
+      buf[i * 4] = 255;
+      buf[i * 4 + 1] = 255;
+      buf[i * 4 + 2] = 255;
+      buf[i * 4 + 3] = 255;
+    }
+  }
+
+  return sharp(buf, { raw: { width: w, height: h, channels: 4 } })
     .png({ compressionLevel: 9 })
     .toBuffer();
 }

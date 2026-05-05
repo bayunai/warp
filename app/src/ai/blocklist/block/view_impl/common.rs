@@ -953,7 +953,7 @@ fn render_force_refresh_inline(
         // Mirror `render_output_status_text` exactly: same `Text` configuration plus
         // the `Container::with_margin_top(1.)` wrapper so this sits on the same
         // baseline as the adjacent `Last seen by agent ...` text.
-        let text = Text::new(" · Check now".to_string(), font_family, font_size)
+        let text = Text::new(crate::t!("ai-block-check-now"), font_family, font_size)
             .with_color(color)
             .with_style(Properties::default())
             .with_clip(ClipConfig::end())
@@ -967,7 +967,7 @@ fn render_force_refresh_inline(
         let mut stack = Stack::new().with_child(text_with_margin);
         if state.is_hovered() {
             let tool_tip = ui_builder
-                .tool_tip("Ask the agent to check this command now, skipping its timer.".to_owned())
+                .tool_tip(crate::t!("ai-block-check-now-tooltip"))
                 .build()
                 .finish();
             stack.add_positioned_overlay_child(
@@ -2977,10 +2977,16 @@ pub fn render_failed_output(props: FailedOutputProps, app: &AppContext) -> Box<d
             if *will_attempt_resume {
                 if *waiting_for_network {
                     format!(
-                        "{error_message}\n\nWill resume conversation when network connectivity is restored..."
+                        "{}\n\n{}",
+                        error_message,
+                        crate::t!("agent-error-will-resume-when-network-restored")
                     )
                 } else {
-                    format!("{error_message}\n\nAttempting to resume conversation...")
+                    format!(
+                        "{}\n\n{}",
+                        error_message,
+                        crate::t!("agent-error-attempting-resume-conversation")
+                    )
                 }
             } else {
                 format!("{ERROR_APOLOGY_TEXT}\n\n{error_message}")

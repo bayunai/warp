@@ -879,7 +879,7 @@ impl DriveIndex {
                 ..Default::default()
             };
             let mut editor = EditorView::single_line(options, ctx);
-            editor.set_placeholder_text("Untitled", ctx);
+            editor.set_placeholder_text(crate::t!("common-untitled"), ctx);
             editor
         });
 
@@ -1212,7 +1212,9 @@ impl DriveIndex {
                     {
                         self.expand_section_for_object(&id.uid().clone(), ctx);
                     } else {
-                        log::warn!("unknown GenericStringObject type found while trying to manually expand drive section. {object_id:?}");
+                        log::warn!(
+                            "unknown GenericStringObject type found while trying to manually expand drive section. {object_id:?}"
+                        );
                     }
                 }
             };
@@ -5333,7 +5335,9 @@ impl TypedActionView for DriveIndex {
                         log::error!("Creation of EnvVarCollections is not yet supported")
                     }
                     DriveObjectType::AIFact | DriveObjectType::AIFactCollection => {
-                        log::error!("Use DriveIndexAction::OpenAIFactCollection to open the pane view instead");
+                        log::error!(
+                            "Use DriveIndexAction::OpenAIFactCollection to open the pane view instead"
+                        );
                     }
                     DriveObjectType::MCPServer | DriveObjectType::MCPServerCollection => {
                         log::error!(

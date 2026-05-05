@@ -31,9 +31,7 @@ pub struct SshRepository;
 
 impl SshRepository {
     /// 列所有节点(folder + server),不含详情。调用方排成树。
-    pub fn list_nodes(
-        conn: &mut SqliteConnection,
-    ) -> Result<Vec<SshNode>, SshRepositoryError> {
+    pub fn list_nodes(conn: &mut SqliteConnection) -> Result<Vec<SshNode>, SshRepositoryError> {
         let rows: Vec<SshNodeRow> = ssh_nodes::table
             .order((ssh_nodes::parent_id.asc(), ssh_nodes::sort_order.asc()))
             .load(conn)?;
@@ -44,10 +42,7 @@ impl SshRepository {
         conn: &mut SqliteConnection,
         node_id: &str,
     ) -> Result<Option<SshServerInfo>, SshRepositoryError> {
-        let row: Option<SshServerRow> = ssh_servers::table
-            .find(node_id)
-            .first(conn)
-            .optional()?;
+        let row: Option<SshServerRow> = ssh_servers::table.find(node_id).first(conn).optional()?;
         row.map(server_from_row).transpose()
     }
 
@@ -218,10 +213,7 @@ impl SshRepository {
         Ok(())
     }
 
-    fn get_node(
-        conn: &mut SqliteConnection,
-        node_id: &str,
-    ) -> Result<SshNode, SshRepositoryError> {
+    fn get_node(conn: &mut SqliteConnection, node_id: &str) -> Result<SshNode, SshRepositoryError> {
         let row: SshNodeRow = ssh_nodes::table
             .find(node_id)
             .first(conn)
@@ -340,9 +332,13 @@ mod tests {
         let mut conn = setup_in_memory();
         let prod = SshRepository::create_folder(&mut conn, None, "Prod").unwrap();
         let web = SshRepository::create_folder(&mut conn, Some(&prod.id), "Web").unwrap();
-        let srv =
-            SshRepository::create_server(&mut conn, Some(&web.id), "edge1", &sample_server("edge1"))
-                .unwrap();
+        let srv = SshRepository::create_server(
+            &mut conn,
+            Some(&web.id),
+            "edge1",
+            &sample_server("edge1"),
+        )
+        .unwrap();
 
         let all = SshRepository::list_nodes(&mut conn).unwrap();
         assert_eq!(all.len(), 3);
@@ -351,7 +347,9 @@ mod tests {
         assert_eq!(by_id[&web.id].parent_id.as_deref(), Some(prod.id.as_str()));
         assert_eq!(by_id[&srv.id].parent_id.as_deref(), Some(web.id.as_str()));
 
-        let server = SshRepository::get_server(&mut conn, &srv.id).unwrap().unwrap();
+        let server = SshRepository::get_server(&mut conn, &srv.id)
+            .unwrap()
+            .unwrap();
         assert_eq!(server.host, "edge1.example.com");
         assert_eq!(server.port, 22);
     }
@@ -374,16 +372,21 @@ mod tests {
     #[test]
     fn rename_and_update_server() {
         let mut conn = setup_in_memory();
-        let s = SshRepository::create_server(&mut conn, None, "old", &sample_server("foo")).unwrap();
+        let s =
+            SshRepository::create_server(&mut conn, None, "old", &sample_server("foo")).unwrap();
         SshRepository::rename_node(&mut conn, &s.id, "new").unwrap();
-        let mut info = SshRepository::get_server(&mut conn, &s.id).unwrap().unwrap();
+        let mut info = SshRepository::get_server(&mut conn, &s.id)
+            .unwrap()
+            .unwrap();
         info.host = "bar.example.com".into();
         info.port = 2222;
         info.auth_type = AuthType::Key;
         info.key_path = Some("/k".into());
         SshRepository::update_server(&mut conn, &info).unwrap();
 
-        let got = SshRepository::get_server(&mut conn, &s.id).unwrap().unwrap();
+        let got = SshRepository::get_server(&mut conn, &s.id)
+            .unwrap()
+            .unwrap();
         assert_eq!(got.host, "bar.example.com");
         assert_eq!(got.port, 2222);
         assert_eq!(got.auth_type, AuthType::Key);
@@ -407,8 +410,8 @@ mod tests {
         let mut conn = setup_in_memory();
         let a = SshRepository::create_folder(&mut conn, None, "A").unwrap();
         let b = SshRepository::create_folder(&mut conn, None, "B").unwrap();
-        let leaf = SshRepository::create_server(&mut conn, Some(&a.id), "x", &sample_server("x"))
-            .unwrap();
+        let leaf =
+            SshRepository::create_server(&mut conn, Some(&a.id), "x", &sample_server("x")).unwrap();
 
         SshRepository::move_node(&mut conn, &leaf.id, Some(&b.id), 5).unwrap();
         let nodes = SshRepository::list_nodes(&mut conn).unwrap();

@@ -47,12 +47,8 @@ impl From<keyring::Error> for SshSecretStoreError {
 
 /// 凭据存储抽象 — `KeychainSecretStore` 是默认实现,测试可用 mock。
 pub trait SshSecretStore: Send + Sync {
-    fn set(
-        &self,
-        node_id: &str,
-        kind: SecretKind,
-        secret: &str,
-    ) -> Result<(), SshSecretStoreError>;
+    fn set(&self, node_id: &str, kind: SecretKind, secret: &str)
+    -> Result<(), SshSecretStoreError>;
 
     fn get(
         &self,
@@ -146,11 +142,7 @@ pub(crate) mod test_support {
                 .map(Zeroizing::new))
         }
 
-        fn delete(
-            &self,
-            node_id: &str,
-            kind: SecretKind,
-        ) -> Result<(), SshSecretStoreError> {
+        fn delete(&self, node_id: &str, kind: SecretKind) -> Result<(), SshSecretStoreError> {
             self.inner
                 .lock()
                 .unwrap()
@@ -181,8 +173,14 @@ mod tests {
         let store = InMemorySecretStore::default();
         store.set("n", SecretKind::Password, "pw").unwrap();
         store.set("n", SecretKind::Passphrase, "pp").unwrap();
-        assert_eq!(&*store.get("n", SecretKind::Password).unwrap().unwrap(), "pw");
-        assert_eq!(&*store.get("n", SecretKind::Passphrase).unwrap().unwrap(), "pp");
+        assert_eq!(
+            &*store.get("n", SecretKind::Password).unwrap().unwrap(),
+            "pw"
+        );
+        assert_eq!(
+            &*store.get("n", SecretKind::Passphrase).unwrap().unwrap(),
+            "pp"
+        );
     }
 
     #[test]

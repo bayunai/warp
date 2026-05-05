@@ -1541,6 +1541,7 @@ fn initialize_app(
     terminal::init(ctx);
     input::init(ctx);
     editor::init(ctx);
+    onboarding::set_localizer(|key| crate::i18n::t_or(key, key));
     onboarding::init(ctx);
     menu::init(ctx);
     tips::tip_view::init(ctx);
@@ -1673,10 +1674,11 @@ fn initialize_app(
             RestoredAgentConversations::new(multi_agent_conversations);
         // 把无法转换的持久化会话从 sqlite 中清理掉,避免每次启动都重复尝试 + 打 warn
         if !failed_to_restore.is_empty() {
-            if let Some(sender) = crate::global_resource_handles::GlobalResourceHandlesProvider::as_ref(ctx)
-                .get()
-                .model_event_sender
-                .as_ref()
+            if let Some(sender) =
+                crate::global_resource_handles::GlobalResourceHandlesProvider::as_ref(ctx)
+                    .get()
+                    .model_event_sender
+                    .as_ref()
             {
                 if let Err(e) = sender.send(
                     crate::persistence::ModelEvent::DeleteMultiAgentConversations {

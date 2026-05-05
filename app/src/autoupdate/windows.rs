@@ -290,9 +290,8 @@ async fn download_oss_to_downloads(client: &http_client::Client) -> Result<Downl
     let download_dir = dirs::download_dir()
         .ok_or_else(|| anyhow!("无法定位用户下载目录(dirs::download_dir 返回 None)"))?;
     if !download_dir.exists() {
-        fs::create_dir_all(&download_dir).with_context(|| {
-            format!("创建下载目录失败: {}", download_dir.display())
-        })?;
+        fs::create_dir_all(&download_dir)
+            .with_context(|| format!("创建下载目录失败: {}", download_dir.display()))?;
     }
     let target_path = download_dir.join(&installer_name);
 

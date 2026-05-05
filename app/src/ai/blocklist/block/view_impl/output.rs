@@ -1933,7 +1933,7 @@ fn render_stopped_output(props: Props, app: &AppContext) -> Box<dyn Element> {
         .with_custom_label(button_content)
         .with_tooltip(move || {
             ui_builder
-                .tool_tip("Resume conversation".to_string())
+                .tool_tip(crate::t!("ai-block-resume-conversation"))
                 .build()
                 .finish()
         })
@@ -2747,7 +2747,7 @@ fn render_response_footer(props: Props, app: &AppContext) -> Option<Box<dyn Elem
         )
         .with_tooltip(move || {
             ui_builder
-                .tool_tip("Continue conversation".to_string())
+                .tool_tip(crate::t!("ai-block-continue-conversation"))
                 .build()
                 .finish()
         })
@@ -2771,7 +2771,7 @@ fn render_response_footer(props: Props, app: &AppContext) -> Option<Box<dyn Elem
         )
         .with_tooltip(move || {
             ui_builder
-                .tool_tip("Fork conversation".to_string())
+                .tool_tip(crate::t!("ai-block-fork-conversation"))
                 .build()
                 .finish()
         })
@@ -2932,7 +2932,7 @@ fn render_usage_button(props: Props, app: &AppContext) -> Box<dyn Element> {
                 // Show tooltip on hover or while clicked
                 let mut stack = Stack::new().with_child(content.finish());
                 let tooltip = ui_builder
-                    .tool_tip("Show credit usage details".to_string())
+                    .tool_tip(crate::t!("ai-block-show-credit-usage-details"))
                     .build()
                     .finish();
                 stack.add_positioned_overlay_child(
@@ -3419,4 +3419,3 @@ fn format_conversation_search_phase(phase: &ConversationSearchPhase) -> String {
         }
     }
 }
-

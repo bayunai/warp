@@ -560,8 +560,7 @@ fn build_chat_request(
                                     } else {
                                         b.mime_type.clone()
                                     },
-                                    data: base64::engine::general_purpose::STANDARD
-                                        .encode(&b.data),
+                                    data: base64::engine::general_purpose::STANDARD.encode(&b.data),
                                 }
                             })
                             .collect()
@@ -2094,6 +2093,12 @@ pub async fn generate_byop_output(
             // OpenWarp BYOP web 工具拦截:webfetch / websearch 不映射到 protobuf
             // executor variant,在这里直接跑本地 HTTP,合成 (carrier ToolCall,
             // ToolCallResult) 一对消息,绕开 parse_incoming_tool_call。
+            //
+            // UI:对齐 cloud 模式,前后各 emit 一条 `Message::WebSearch` /
+            // `Message::WebFetch` 状态消息,触发 inline_action `WebSearchView` /
+            // `WebFetchView` 渲染:Searching/Fetching loading 卡片 → Success(URL 列表)
+            // / Error 折叠卡。这两条不进 final_messages,直接 yield 让 UI 实时更新;
+            // carrier + result 仍走 final_messages 给下一轮模型推理用。
             if call.fn_name == tools::webfetch::TOOL_NAME
                 || call.fn_name == tools::websearch::TOOL_NAME
             {
@@ -2102,7 +2107,76 @@ pub async fn generate_byop_output(
                 } else {
                     call.fn_arguments.to_string()
                 };
+                let is_search = call.fn_name == tools::websearch::TOOL_NAME;
+
+                // 预解析 args 抽 query / url 给 UI loading 卡。args 解析失败也要 emit
+                // (用空字段兜底),保证 UI 至少看到一帧 loading,后续 dispatch
+                // 仍会返回 invalid_arguments → 切到 Error 卡。
+                let preview_query = if is_search {
+                    serde_json::from_str::<tools::web_runtime::SearchToolArgs>(&args_str)
+                        .map(|a| a.query)
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                let preview_urls: Vec<String> = if !is_search {
+                    serde_json::from_str::<tools::web_runtime::FetchArgs>(&args_str)
+                        .map(|a| vec![a.url])
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                // Searching/Fetching loading 帧与最终 Success/Error 帧必须共用同一个
+                // message.id —— `block.rs::handle_web_search_messages` 按 id 复用
+                // WebSearchView,id 不同会创建两张独立卡。
+                let web_msg_id = Uuid::new_v4().to_string();
+                let mut loading_msg = if is_search {
+                    make_web_search_searching_message(
+                        &current_task_id,
+                        &request_id,
+                        preview_query.clone(),
+                    )
+                } else {
+                    make_web_fetch_fetching_message(
+                        &current_task_id,
+                        &request_id,
+                        preview_urls.clone(),
+                    )
+                };
+                loading_msg.id = web_msg_id.clone();
+                yield Ok(make_add_messages_event(&current_task_id, vec![loading_msg]));
+
                 let result_json = dispatch_byop_web_tool(&call.fn_name, &args_str).await;
+
+                let mut done_msg = if is_search {
+                    make_web_search_status_from_result(
+                        &current_task_id,
+                        &request_id,
+                        &preview_query,
+                        &result_json,
+                    )
+                } else {
+                    make_web_fetch_status_from_result(
+                        &current_task_id,
+                        &request_id,
+                        &preview_urls,
+                        &result_json,
+                    )
+                };
+                done_msg.id = web_msg_id;
+                // 第二帧不能再用 AddMessagesToTask —— 那会往 task.messages 追加第二条
+                // 同 id 记录,`output.rs::WebSearch` 渲染分支按 message 数量 add_child,
+                // 显示成两张并排卡。改用 UpdateTaskMessage + FieldMask:`task::upsert_message`
+                // 找到同 id 现有 message 后走 FieldMaskOperation::update 原地合并,
+                // task.messages 仍只有一条 → UI 一张卡 set_status 切换。
+                let mask_path = if is_search { "web_search" } else { "web_fetch" };
+                yield Ok(make_update_message_event(
+                    &current_task_id,
+                    done_msg,
+                    vec![mask_path.to_owned()],
+                ));
+
                 let result_content = serde_json::to_string(&result_json)
                     .unwrap_or_else(|_| r#"{"status":"serialize_error"}"#.to_owned());
                 final_messages.push(make_tool_call_carrier_message(
@@ -2387,6 +2461,32 @@ fn make_add_messages_event(task_id: &str, messages: Vec<api::Message>) -> api::R
     }
 }
 
+/// 用 `UpdateTaskMessage` + FieldMask 替换已有 message 的部分字段。controller
+/// `conversation::Action::UpdateTaskMessage` → `task::upsert_message` →
+/// `FieldMaskOperation::update` 原地合并,id 已存在则不会 push 重复记录。
+/// 用于 BYOP web 工具 loading → success/error 状态切换(见拦截分支)。
+fn make_update_message_event(
+    task_id: &str,
+    message: api::Message,
+    mask_paths: Vec<String>,
+) -> api::ResponseEvent {
+    api::ResponseEvent {
+        r#type: Some(api::response_event::Type::ClientActions(
+            api::response_event::ClientActions {
+                actions: vec![api::ClientAction {
+                    action: Some(api::client_action::Action::UpdateTaskMessage(
+                        api::client_action::UpdateTaskMessage {
+                            task_id: task_id.to_owned(),
+                            message: Some(message),
+                            mask: Some(prost_types::FieldMask { paths: mask_paths }),
+                        },
+                    )),
+                }],
+            },
+        )),
+    }
+}
+
 fn make_append_event(task_id: &str, message_id: &str, kind: AppendKind) -> api::ResponseEvent {
     let (msg_inner, mask_path) = match kind {
         AppendKind::Reasoning(r) => (
@@ -2609,6 +2709,207 @@ fn make_user_query_message(
             query,
             context,
             ..Default::default()
+        })),
+        request_id: request_id.to_owned(),
+        timestamp: None,
+    }
+}
+
+/// BYOP 拦截 websearch 时,emit `Message::WebSearch(Searching{query})`,UI 据此渲染
+/// "Searching the web for \"query\"" loading 卡(`inline_action::web_search`)。
+fn make_web_search_searching_message(
+    task_id: &str,
+    request_id: &str,
+    query: String,
+) -> api::Message {
+    api::Message {
+        id: Uuid::new_v4().to_string(),
+        task_id: task_id.to_owned(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::WebSearch(api::message::WebSearch {
+            status: Some(api::message::web_search::Status {
+                r#type: Some(api::message::web_search::status::Type::Searching(
+                    api::message::web_search::status::Searching { query },
+                )),
+            }),
+        })),
+        request_id: request_id.to_owned(),
+        timestamp: None,
+    }
+}
+
+/// 从 exa MCP 返回的 results 字符串里抽 (url, title)。
+///
+/// 实际格式是行式 metadata block,以 `---` 分隔多条结果:
+/// ```
+/// Title: Announcing Rust 1.95.0 | Rust Blog
+/// URL: https://blog.rust-lang.org/2026/04/16/Rust-1.95.0/
+/// Published: 2026-04-16T00:00:00.000Z
+/// Author: N/A
+/// Highlights:
+/// ...
+/// ---
+/// Title: ...
+/// ```
+/// 扫到 `Title: X` 缓存 candidate,紧随的第一条 `URL: Y` 配对成 (Y, X) 入列,去重。
+/// 兼容兜底:也扫 `[title](url)` markdown link 形式(若 exa 模板未来切换)。
+fn extract_search_pages_from_exa_results(s: &str) -> Vec<(String, String)> {
+    let mut pages = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // 路线 1:Title:/URL: 行式
+    let mut current_title: Option<String> = None;
+    for line in s.lines() {
+        let trimmed = line.trim_start();
+        if let Some(rest) = trimmed.strip_prefix("Title:") {
+            current_title = Some(rest.trim().to_owned());
+        } else if let Some(rest) = trimmed.strip_prefix("URL:") {
+            let url = rest.trim().to_owned();
+            let title = current_title.take().unwrap_or_default();
+            if (url.starts_with("http://") || url.starts_with("https://"))
+                && seen.insert(url.clone())
+            {
+                pages.push((url, title));
+            }
+        }
+    }
+
+    // 路线 2:markdown link `[title](url)` 兜底(去重已生效,不会重复)
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'[' {
+            if let Some(rel_close_text) = s[i + 1..].find("](") {
+                let text_end = i + 1 + rel_close_text;
+                let url_start = text_end + 2;
+                if let Some(rel_close_url) = s[url_start..].find(')') {
+                    let url_end = url_start + rel_close_url;
+                    let title = s[i + 1..text_end].trim().to_owned();
+                    let url = s[url_start..url_end].trim().to_owned();
+                    if (url.starts_with("http://") || url.starts_with("https://"))
+                        && seen.insert(url.clone())
+                    {
+                        pages.push((url, title));
+                    }
+                    i = url_end + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+
+    pages
+}
+
+/// BYOP websearch 完成后,根据 `result_json` 决定 Success / Error 状态。
+///
+/// `pages` 从 `result_json["results"]` 这段 exa 拼好的 markdown 里扫 `[title](url)` 抽。
+fn make_web_search_status_from_result(
+    task_id: &str,
+    request_id: &str,
+    query: &str,
+    result_json: &Value,
+) -> api::Message {
+    let is_error = result_json.get("status").and_then(|v| v.as_str()) == Some("error");
+    let r#type = if is_error {
+        api::message::web_search::status::Type::Error(())
+    } else {
+        let pages = result_json
+            .get("results")
+            .and_then(|v| v.as_str())
+            .map(extract_search_pages_from_exa_results)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(url, title)| {
+                api::message::web_search::status::success::SearchedPage { url, title }
+            })
+            .collect();
+        api::message::web_search::status::Type::Success(
+            api::message::web_search::status::Success {
+                query: query.to_owned(),
+                pages,
+            },
+        )
+    };
+    api::Message {
+        id: Uuid::new_v4().to_string(),
+        task_id: task_id.to_owned(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::WebSearch(api::message::WebSearch {
+            status: Some(api::message::web_search::Status { r#type: Some(r#type) }),
+        })),
+        request_id: request_id.to_owned(),
+        timestamp: None,
+    }
+}
+
+/// BYOP 拦截 webfetch 时,emit `Message::WebFetch(Fetching{urls})`,UI 据此渲染
+/// "Fetching N URLs" loading 卡(`inline_action::web_fetch`)。
+fn make_web_fetch_fetching_message(
+    task_id: &str,
+    request_id: &str,
+    urls: Vec<String>,
+) -> api::Message {
+    api::Message {
+        id: Uuid::new_v4().to_string(),
+        task_id: task_id.to_owned(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::WebFetch(api::message::WebFetch {
+            status: Some(api::message::web_fetch::Status {
+                r#type: Some(api::message::web_fetch::status::Type::Fetching(
+                    api::message::web_fetch::status::Fetching { urls },
+                )),
+            }),
+        })),
+        request_id: request_id.to_owned(),
+        timestamp: None,
+    }
+}
+
+/// BYOP webfetch 完成后,从 `FetchOutput` JSON 抽 `url` + HTTP `status` 组装 Success
+/// 卡;status="error" 走 Error 卡。
+fn make_web_fetch_status_from_result(
+    task_id: &str,
+    request_id: &str,
+    fallback_urls: &[String],
+    result_json: &Value,
+) -> api::Message {
+    let is_error = result_json.get("status").and_then(|v| v.as_str()) == Some("error");
+    let r#type = if is_error {
+        api::message::web_fetch::status::Type::Error(())
+    } else {
+        let url = result_json
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned())
+            .unwrap_or_else(|| fallback_urls.first().cloned().unwrap_or_default());
+        // FetchOutput.status 是 HTTP 状态码,2xx 算 success。
+        let success = result_json
+            .get("status")
+            .and_then(|v| v.as_u64())
+            .map(|c| (200..300).contains(&c))
+            .unwrap_or(true);
+        api::message::web_fetch::status::Type::Success(
+            api::message::web_fetch::status::Success {
+                pages: vec![api::message::web_fetch::status::success::FetchedPage {
+                    url,
+                    title: String::new(),
+                    success,
+                }],
+            },
+        )
+    };
+    api::Message {
+        id: Uuid::new_v4().to_string(),
+        task_id: task_id.to_owned(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::WebFetch(api::message::WebFetch {
+            status: Some(api::message::web_fetch::Status { r#type: Some(r#type) }),
         })),
         request_id: request_id.to_owned(),
         timestamp: None,

@@ -107,7 +107,7 @@ impl ReasoningDepthSelector {
         let button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new("", AgentInputButtonTheme)
                 .with_icon(Icon::Stars)
-                .with_tooltip("Reasoning depth")
+                .with_tooltip(crate::t!("ai-footer-reasoning-depth-tooltip"))
                 .with_size(ButtonSize::AgentInputButton)
                 .with_disabled_theme(DisabledTheme)
                 .on_click(|ctx| {

@@ -24,7 +24,10 @@ use warpui::elements::{
 };
 use warpui::platform::Cursor;
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
-use warpui::{AppContext, Entity, FocusContext, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle};
+use warpui::{
+    AppContext, Entity, FocusContext, SingletonEntity, TypedActionView, View, ViewContext,
+    ViewHandle,
+};
 
 use warp_ssh_manager::{
     AuthType, KeychainSecretStore, NodeKind, SecretKind, SshNode, SshRepository, SshSecretStore,
@@ -90,7 +93,9 @@ pub enum SshManagerPanelAction {
 pub enum SshManagerPanelEvent {
     /// 用户右键 "编辑" 选了个 server,中央 pane 应打开/聚焦该 server 的编辑
     /// (`Workspace::open_ssh_server`)。
-    OpenServerEditor { node_id: String },
+    OpenServerEditor {
+        node_id: String,
+    },
     /// 用户单击 server 或右键 "连接",请求开 terminal pane 跑 ssh +
     /// SecretInjector。
     OpenSshTerminal {
@@ -195,8 +200,10 @@ impl SshManagerPanel {
 
         let active_ids: std::collections::HashSet<&str> =
             self.nodes.iter().map(|n| n.id.as_str()).collect();
-        self.row_states.retain(|k, _| active_ids.contains(k.as_str()));
-        self.row_drag_states.retain(|k, _| active_ids.contains(k.as_str()));
+        self.row_states
+            .retain(|k, _| active_ids.contains(k.as_str()));
+        self.row_drag_states
+            .retain(|k, _| active_ids.contains(k.as_str()));
         for n in &self.nodes {
             self.row_states
                 .entry(n.id.clone())
@@ -501,9 +508,8 @@ impl SshManagerPanel {
             return;
         }
         let id = rs.node_id.clone();
-        let result = warp_ssh_manager::with_conn(|c| {
-            Ok(SshRepository::rename_node(c, &id, &new_name)?)
-        });
+        let result =
+            warp_ssh_manager::with_conn(|c| Ok(SshRepository::rename_node(c, &id, &new_name)?));
         if let Err(e) = result {
             log::error!("ssh_manager: rename failed: {e:?}");
             ctx.emit(SshManagerPanelEvent::PersistenceError(e.to_string()));
@@ -616,7 +622,10 @@ impl SshManagerPanel {
         }
     }
 
-    fn render_toolbar(&self, appearance: &warp_core::ui::appearance::Appearance) -> Box<dyn Element> {
+    fn render_toolbar(
+        &self,
+        appearance: &warp_core::ui::appearance::Appearance,
+    ) -> Box<dyn Element> {
         let theme = appearance.theme();
         let icon_color = theme.sub_text_color(theme.background());
 
@@ -816,9 +825,13 @@ impl SshManagerPanel {
                 .finish();
             ConstrainedBox::new(input).with_width(180.0).finish()
         } else {
-            Text::new_inline(node.name.clone(), appearance.ui_font_family(), ITEM_FONT_SIZE)
-                .with_color(theme.main_text_color(theme.background()).into())
-                .finish()
+            Text::new_inline(
+                node.name.clone(),
+                appearance.ui_font_family(),
+                ITEM_FONT_SIZE,
+            )
+            .with_color(theme.main_text_color(theme.background()).into())
+            .finish()
         };
 
         let row = Flex::row()
@@ -909,9 +922,7 @@ impl SshManagerPanel {
                 }
             })
             .on_drop(move |ctx, _app, _bounds, data| {
-                if let Some(drop) =
-                    data.and_then(|d| d.as_any().downcast_ref::<SshDropData>())
-                {
+                if let Some(drop) = data.and_then(|d| d.as_any().downcast_ref::<SshDropData>()) {
                     ctx.dispatch_typed_action(SshManagerPanelAction::MoveNode {
                         node_id: dragged_id.clone(),
                         new_parent_id: drop.parent_id.clone(),
@@ -1101,8 +1112,7 @@ impl View for SshManagerPanel {
 
         // 让 tree 占满剩余垂直空间 — 这样 root DropTarget 覆盖到 panel 底部,
         // 用户在树最底下空白处拖也能落到 root(`SshDropData{parent_id:None}`)。
-        let tree_filled =
-            warpui::elements::Shrinkable::new(1.0, tree).finish();
+        let tree_filled = warpui::elements::Shrinkable::new(1.0, tree).finish();
 
         let panel_content = Container::new(
             Flex::column()
