@@ -6891,11 +6891,14 @@ impl TerminalView {
         // Otherwise submitting the password (Enter) collapses the running-command header, that
         // predicate becomes false, the steer field reappears, steals focus, and the session can
         // wedge with client-side tool warnings.
-        if active_command_block.is_active_and_long_running()
-            && active_command_block
-                .long_running_control_state()
-                .and_then(|s| s.user_take_over_reason())
-                .is_some_and(UserTakeOverReason::is_transfer_from_agent)
+        //
+        // Do not gate on `is_active_and_long_running()`: that can still be false briefly (no
+        // command_start_time yet, or before the long-running threshold), while the password prompt
+        // already needs PTY focus.
+        if active_command_block
+            .long_running_control_state()
+            .and_then(|s| s.user_take_over_reason())
+            .is_some_and(UserTakeOverReason::is_transfer_from_agent)
         {
             return false;
         }
@@ -19255,23 +19258,19 @@ impl TerminalView {
             // Agent handed the PTY to the user for an interactive prompt (password, 2FA, etc.).
             // Otherwise `has_active_user_terminal_command` stays false while the AI input is visible
             // (bootstrapped), and keystrokes go to "Steer the running agent" instead of ssh/sudo.
+            //
+            // Same as `is_input_box_visible`: do not require `is_active_and_long_running()` here —
+            // interactive prompts can appear before the block is classified as long-running.
             let agent_transferred_pty_for_interactive_prompt = block_list
                 .active_block()
-                .is_active_and_long_running()
-                && block_list
-                    .active_block()
-                    .long_running_control_state()
-                    .and_then(|state| state.user_take_over_reason())
-                    .is_some_and(UserTakeOverReason::is_transfer_from_agent);
+                .long_running_control_state()
+                .and_then(|state| state.user_take_over_reason())
+                .is_some_and(UserTakeOverReason::is_transfer_from_agent);
 
-            let has_active_user_terminal_command = block_list.active_block().is_active_and_long_running()
-                && !block_list.active_block().is_agent_in_control()
-                // The only case where terminal can take focus _while_ input is visible is
-                // pre-bootstrap, for example when oh-my-zsh prompts you to update -- at this point
-                // the input is visible but you should still be able to click into the block for the
-                // oh-my-zsh prompt and send input directly to the pty.
-                && ((!is_input_visible || !has_bootstrapped)
-                    || agent_transferred_pty_for_interactive_prompt);
+            let has_active_user_terminal_command = !block_list.active_block().is_agent_in_control()
+                && (agent_transferred_pty_for_interactive_prompt
+                    || (block_list.active_block().is_active_and_long_running()
+                        && (!is_input_visible || !has_bootstrapped)));
 
             let is_shell_mode = !self.ai_input_model.as_ref(ctx).is_ai_input_enabled();
             let are_blocks_selected = !self.selected_blocks.is_empty();
