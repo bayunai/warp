@@ -10,13 +10,23 @@ pub struct WebClient {
 	reqwest_client: reqwest::Client,
 }
 
-// Implements Default with performance optimizations
+// Implements Default with performance optimizations.
+//
+// **NOTE**: This `WebClient::default()` is **only used as a fallback** when
+// neither `with_reqwest()` nor `with_web_config()` is provided to `Client::builder()`.
+// The actual production path goes through `WebConfig::default().apply_to_builder()`
+// in `client/builder.rs::build()`. Keep `gzip` here in sync with `WebConfig::Default`
+// to avoid surprising behavior if someone constructs `WebClient::default()` directly.
+//
+// **OpenWarp fork**: gzip is **off** (upstream genai had `gzip(true)`). See
+// `client/web_config.rs::WebConfig` struct-level docs for full rationale.
 impl Default for WebClient {
 	fn default() -> Self {
 		use std::time::Duration;
 		let reqwest_client = reqwest::Client::builder()
 			.tcp_nodelay(true)
-			.gzip(true)
+			// .gzip(true)  ← REMOVED: SSE-over-gzip causes proxy deflate-frame
+			//                          buffering, see web_config.rs docs.
 			.pool_max_idle_per_host(4)
 			.http2_keep_alive_interval(Some(Duration::from_secs(20)))
 			.http2_keep_alive_timeout(Duration::from_secs(10))

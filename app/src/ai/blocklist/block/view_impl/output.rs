@@ -98,6 +98,7 @@ use crate::{
     },
     appearance::Appearance,
     code::diff_viewer::DisplayMode,
+    settings::AISettings,
     settings_view::SettingsSection,
     terminal::ShellLaunchData,
     ui_components::{blended_colors, buttons::icon_button, icons::Icon},
@@ -197,10 +198,34 @@ pub(crate) struct Props<'a> {
     pub(super) ask_user_question_view: Option<&'a ViewHandle<AskUserQuestionView>>,
 }
 
+/// T1-2: 已成功完成的 tool action 卡片是否应被隐藏。
+/// 对齐 opencode TUI 的 `showDetails` 默认行为 — 只显示 in-progress / error / cancelled,
+/// 完成成功的卡片折叠掉,长 session 不被堆积淹没。
+///
+/// **不隐藏**:
+/// - failed / cancelled action(用户需要看到错误才能 retry)
+/// - 仍在 streaming 中的卡片(状态未稳定)
+fn should_hide_completed_action(
+    action_model: &ModelHandle<BlocklistAIActionModel>,
+    id: &AIAgentActionId,
+    ai_settings: &AISettings,
+    app: &AppContext,
+) -> bool {
+    if !*ai_settings.hide_completed_tool_cards {
+        return false;
+    }
+    let Some(status) = action_model.as_ref(app).get_action_status(id) else {
+        return false;
+    };
+    // 只藏 success;failed/cancelled 仍要看到。
+    status.is_success()
+}
+
 pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
     let mut output_items = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
     let appearance = Appearance::as_ref(app);
     let request_type = props.model.request_type(app);
+    let ai_settings = AISettings::as_ref(app);
 
     let conversation_status = props.model.conversation(app).map(|c| c.status());
     let is_conversation_in_progress = conversation_status.is_some_and(|s| s.is_in_progress());
@@ -379,6 +404,16 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                                 should_render_suggestions = false;
                             }
 
+                            // T1-2:已成功完成的卡片可隐藏(失败/取消仍显示)。
+                            if should_hide_completed_action(
+                                props.action_model,
+                                id,
+                                ai_settings,
+                                app,
+                            ) {
+                                continue;
+                            }
+
                             if let Some(rendered_command) = props
                                 .requested_commands
                                 .get(id)
@@ -395,6 +430,15 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                             // Neither ratings nor suggestions should be rendered for relevant file queries.
                             should_render_footer = false;
                             should_render_suggestions = false;
+                            // T1-2 guard
+                            if should_hide_completed_action(
+                                props.action_model,
+                                id,
+                                ai_settings,
+                                app,
+                            ) {
+                                continue;
+                            }
                             if let Some(rendered_message) = render_search_codebase(props, id, app) {
                                 output_items.add_child(rendered_message);
                             }
@@ -405,6 +449,15 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                             id,
                             ..
                         }) => {
+                            // T1-2 guard
+                            if should_hide_completed_action(
+                                props.action_model,
+                                id,
+                                ai_settings,
+                                app,
+                            ) {
+                                continue;
+                            }
                             if !status.is_streaming() || !files.is_empty() {
                                 // get the results of the agent's read file actions so we can read the results for later use
                                 let agent_action_results = props
@@ -519,6 +572,15 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                         }) => {
                             should_render_footer = false;
                             should_render_suggestions = false;
+                            // T1-2 guard
+                            if should_hide_completed_action(
+                                props.action_model,
+                                id,
+                                ai_settings,
+                                app,
+                            ) {
+                                continue;
+                            }
                             output_items.add_child(render_file_retrieval_tool(
                                 props,
                                 id,
@@ -542,6 +604,15 @@ pub(super) fn render(props: Props, app: &AppContext) -> Box<dyn Element> {
                         }) => {
                             should_render_footer = false;
                             should_render_suggestions = false;
+                            // T1-2 guard
+                            if should_hide_completed_action(
+                                props.action_model,
+                                id,
+                                ai_settings,
+                                app,
+                            ) {
+                                continue;
+                            }
                             output_items.add_child(render_file_retrieval_tool(
                                 props,
                                 id,

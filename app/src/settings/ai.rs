@@ -1852,6 +1852,20 @@ define_settings_group!(AISettings, settings: [
         description: "Whether agent notifications are shown.",
     }
 
+    // OpenWarp T1-2:已完成工具卡默认隐藏(对齐 opencode TUI showDetails 行为)。
+    // true → 默认隐藏 status.is_done() 的 RequestCommandOutput / SearchCodebase /
+    // ReadFiles / Grep / FileGlob / RequestFileEdits 等卡片,只保留 in-progress + error,
+    // 长 session 不被历史卡片堆积淹没新内容。folded 状态可由外观设置面板切换。
+    hide_completed_tool_cards: HideCompletedToolCards {
+        type: bool,
+        default: false,
+        supported_platforms: SupportedPlatforms::ALL,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        private: false,
+        toml_path: "agents.warp_agent.appearance.hide_completed_tool_cards",
+        description: "When true, completed tool action cards (read files, grep, search codebase, requested commands, etc.) are hidden after they finish. In-progress and errored cards are always shown. Useful for long sessions to keep focus on the latest activity.",
+    }
+
     // Per-agent, per-host tracking of whether the user dismissed the plugin install chip.
     // Keys are "<agent_prefix>" for local sessions or "<agent_prefix>@<host>" for remote.
     // Local-only so dismissal doesn't sync across devices.

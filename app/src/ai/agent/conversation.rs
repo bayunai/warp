@@ -2476,8 +2476,27 @@ impl AIConversation {
                     })
                     .ok_or(UpdateConversationError::ExchangeNotFound)?;
 
-                let current_todo_list = self.todo_lists.last().cloned();
-                let current_comment_state = self.code_review.as_ref().cloned();
+                // OpenWarp 优化 1:文本/推理流的 fast path。
+                // mask 为 `agent_output.text` 或 `agent_reasoning.reasoning` 时
+                // 不会触发 todos_op(只有 UpdateTodos message 才会),
+                // current_todo_list / current_comment_state 在
+                // `to_client_output_message` 的 AgentOutput / AgentReasoning 分支
+                // 完全不读(见 convert_from.rs:128-143)。
+                // 高频 chunk 流(每 ~5-50ms 一帧)下,跳过 `self.todo_lists.last().cloned()`
+                // (整个 todo list 浅 clone)+ `self.code_review.as_ref().cloned()`
+                // 可显著降低单 chunk CPU 开销,缓解 view::render 帧时间被拖长。
+                let is_text_or_reasoning_append =
+                    is_pure_text_or_reasoning_mask(&mask);
+                let current_todo_list = if is_text_or_reasoning_append {
+                    None
+                } else {
+                    self.todo_lists.last().cloned()
+                };
+                let current_comment_state = if is_text_or_reasoning_append {
+                    None
+                } else {
+                    self.code_review.as_ref().cloned()
+                };
                 // Update the message and get the updated todos op, if any.
                 let todos_op = self
                     .task_store
@@ -3313,6 +3332,26 @@ impl AIConversation {
 
         Ok(exchanges_to_remove)
     }
+}
+
+/// OpenWarp 优化 1: 检测 AppendToMessageContent 的 mask 是不是纯
+/// 文本/推理 append。这两类 mask path:
+/// - `agent_output.text` —— BYOP / 云路径文本 chunk
+/// - `agent_reasoning.reasoning` —— BYOP / 云路径思考 chunk
+///
+/// 命中时 conversation 层跳过 todo_list / code_review 的 clone(高频 chunk
+/// 下省整段 vec clone + Arc bump),`to_client_output_message` 的 AgentOutput
+/// / AgentReasoning 分支也不读这两个参数(见 convert_from.rs:128-143)。
+///
+/// 任何其它 mask path(tool_call.* / web_search / web_fetch / update_todos
+/// 等)走原 slow path,保持原行为。多 path mask 只要有一条非文本/推理就走
+/// slow path,稳健起见。
+fn is_pure_text_or_reasoning_mask(mask: &prost_types::FieldMask) -> bool {
+    !mask.paths.is_empty()
+        && mask
+            .paths
+            .iter()
+            .all(|p| p == "agent_output.text" || p == "agent_reasoning.reasoning")
 }
 
 pub(super) fn update_todo_list_from_todo_op(

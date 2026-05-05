@@ -70,3 +70,6 @@ __pycache__/
 
 # Project notes
 .note/
+
+# ProcMon / 临时调试日志
+Logfile.CSV

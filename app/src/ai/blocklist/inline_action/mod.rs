@@ -12,5 +12,6 @@ pub(crate) mod requested_script;
 pub(super) mod search_codebase;
 pub(crate) mod search_results_common;
 pub(crate) mod suggested_unit_tests;
+pub(crate) mod tool_card;
 pub(super) mod web_fetch;
 pub(super) mod web_search;

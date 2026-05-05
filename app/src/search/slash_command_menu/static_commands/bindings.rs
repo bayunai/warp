@@ -26,6 +26,7 @@ pub fn default_binding_for_command(name: &'static str) -> DefaultSlashCommandBin
             mac: "alt-cmd-o",
             linux_and_windows: "ctrl-alt-o",
         }),
+        "/model" => DefaultSlashCommandBinding::Single("alt-shift-/"),
         _ => DefaultSlashCommandBinding::None,
     }
 }

@@ -17,11 +17,12 @@
 
 name: OpenWarp Release
 
+# PR 验证由 .github/workflows/pr-check.yml 负责(Linux cargo check)。
+# 本 workflow 只在 push tag / 手动 dispatch 时跑全量三平台打包,避免 PR 跑 ~3h 浪费。
 on:
   push:
     tags:
       - "v*"
-  pull_request:
   workflow_dispatch:
 
 # 创建 release + 上传 asset 需要写权限。默认 GITHUB_TOKEN 在 fork/受限仓库下是只读,
@@ -227,7 +228,6 @@ jobs:
   publish_release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
     # 必须等所有平台都 build 成功才发布;任一失败 → 此 job 跳过 → 不会出现空 Release。
     needs:
       - prepare_metadata
