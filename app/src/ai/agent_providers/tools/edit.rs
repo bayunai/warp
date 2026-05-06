@@ -56,7 +56,7 @@ fn parameters() -> Value {
                         {
                             "type": "object",
                             "properties": {
-                                "op": {"const": "edit"},
+                                "op": {"type": "string", "enum": ["edit"]},
                                 "file_path": {"type": "string"},
                                 "search": {"type": "string", "description": "要被替换掉的原文片段(必须与文件中已存在的内容完全一致,包括空白/换行)。"},
                                 "replace": {"type": "string", "description": "替换后的内容。"}
@@ -66,7 +66,7 @@ fn parameters() -> Value {
                         {
                             "type": "object",
                             "properties": {
-                                "op": {"const": "create"},
+                                "op": {"type": "string", "enum": ["create"]},
                                 "file_path": {"type": "string"},
                                 "content": {"type": "string"}
                             },
@@ -75,7 +75,7 @@ fn parameters() -> Value {
                         {
                             "type": "object",
                             "properties": {
-                                "op": {"const": "delete"},
+                                "op": {"type": "string", "enum": ["delete"]},
                                 "file_path": {"type": "string"}
                             },
                             "required": ["op", "file_path"]

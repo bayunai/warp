@@ -271,7 +271,7 @@ impl SettingsImportView {
                     font_size: Some(FONT_SIZE),
                     ..Default::default()
                 })
-                .with_centered_text_label("Import".to_owned())
+                .with_centered_text_label(crate::t!("common-import"))
                 .build()
                 .on_click(move |ctx, _, _| {
                     ctx.dispatch_typed_action(SettingsImportAction::ImportButtonClicked);
@@ -298,7 +298,7 @@ impl SettingsImportView {
                 background: Some(appearance.theme().outline().into()),
                 ..Default::default()
             })
-            .with_centered_text_label("Reset to Warp defaults".to_owned())
+            .with_centered_text_label(crate::t!("settings-import-reset-to-warp-defaults"))
             .build()
             .on_click(move |ctx, _, _| {
                 ctx.dispatch_typed_action(SettingsImportAction::ResetButtonClicked);
@@ -422,19 +422,31 @@ impl SettingsImportView {
                 .any(|setting| setting.setting_type == SettingType::Theme)
             {
                 if num_prefs == 1 {
-                    preference_text_elements.push(self.render_secondary_text(appearance, "Theme"));
+                    preference_text_elements.push(self.render_secondary_text(
+                        appearance,
+                        crate::t!("settings-import-type-theme"),
+                    ));
                 } else {
-                    preference_text_elements.push(self.render_secondary_text(appearance, "Theme,"));
+                    preference_text_elements.push(self.render_secondary_text(
+                        appearance,
+                        crate::t!("settings-import-type-theme-with-comma"),
+                    ));
                 }
                 theme_subtraction = 1;
             }
-            match num_prefs - theme_subtraction {
-                1 => preference_text_elements
-                    .push(self.render_secondary_text(appearance, "1 other setting")),
+            let other_settings_count = num_prefs - theme_subtraction;
+            match other_settings_count {
+                1 => preference_text_elements.push(self.render_secondary_text(
+                    appearance,
+                    crate::t!("settings-import-one-other-setting"),
+                )),
                 0 => (),
                 _ => preference_text_elements.push(self.render_secondary_text(
                     appearance,
-                    format!("{} other settings", num_prefs - theme_subtraction),
+                    crate::t!(
+                        "settings-import-other-settings",
+                        count = other_settings_count
+                    ),
                 )),
             }
         }

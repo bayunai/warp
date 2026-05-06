@@ -208,7 +208,7 @@ Plan 有**两条**并行的存储路径：
                  .set(content, version, title)
 ```
 
-**表**：`ai_document_panes`（Diesel schema）  
+**表**：`ai_document_panes`（Diesel schema）
 **文件**：`app/src/ai/document/ai_document_model.rs:1005–1026` + `app/src/persistence/sqlite.rs:1300–1316`
 
 ✅ **这部分本地持久化已经在工作** — Plan 的内容其实已经存入本地 SQLite。

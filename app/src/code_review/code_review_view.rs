@@ -317,11 +317,6 @@ const CODE_REVIEW_EDITOR_LINE_HEIGHT_RATIO: f32 = 1.4;
 /// Extra scroll buffer (in pixels) added when scrolling to a line that has a comment editor below it.
 const COMMENT_EDITOR_SCROLL_BUFFER: f32 = 200.0;
 
-pub const CODE_REVIEW_TOOLTIP_TEXT: &str = "View changes";
-const REMOTE_TEXT: &str = "Diffs only work for local workspaces.";
-const DISABLED_TEXT: &str = "Diffs only work for git repositories.";
-const WSL_TEXT: &str = "Diffs don't currently work in WSL.";
-
 #[cfg(not(target_family = "wasm"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -545,26 +540,41 @@ impl DiscardOperationType {
     pub fn title(&self) -> String {
         match self {
             DiscardOperationType::AllUncommittedChanges => {
-                "Discard uncommitted changes?".to_string()
+                crate::t!("code-review-discard-uncommitted-changes-title")
             }
             DiscardOperationType::FileUncommittedChanges => {
-                "Discard all uncommitted changes to file?".to_string()
+                crate::t!("code-review-discard-file-uncommitted-changes-title")
             }
-            DiscardOperationType::AllChangesAgainstBranch(_) => "Discard all changes?".to_string(),
+            DiscardOperationType::AllChangesAgainstBranch(_) => {
+                crate::t!("code-review-discard-all-changes-title")
+            }
             DiscardOperationType::FileChangesAgainstBranch(_) => {
-                "Discard all changes to file?".to_string()
+                crate::t!("code-review-discard-file-changes-title")
             }
         }
     }
 
     pub fn description(&self) -> Option<String> {
         match self {
-            DiscardOperationType::AllUncommittedChanges => Some("You're about to discard all local changes that haven't been committed.".to_string()),
-            DiscardOperationType::FileUncommittedChanges => Some("This will restore this file to the last committed version and discard local edits.".to_string()),
-            DiscardOperationType::AllChangesAgainstBranch(None) => Some("You're about to discard all committed and uncommitted changes.".to_string()),
-            DiscardOperationType::FileChangesAgainstBranch(None) => Some("This will restore this file to the main branch version and discard all committed and uncommitted edits.".to_string()),
-            DiscardOperationType::AllChangesAgainstBranch(Some(_)) => Some("You're about to discard all committed and uncommitted changes.".to_string()),
-            DiscardOperationType::FileChangesAgainstBranch(Some(branch)) => Some(format!("This will reset this file to the {branch} branch version and discard all committed and uncommitted edits.")),
+            DiscardOperationType::AllUncommittedChanges => Some(crate::t!(
+                "code-review-discard-uncommitted-changes-description"
+            )),
+            DiscardOperationType::FileUncommittedChanges => Some(crate::t!(
+                "code-review-discard-file-uncommitted-changes-description"
+            )),
+            DiscardOperationType::AllChangesAgainstBranch(None) => {
+                Some(crate::t!("code-review-discard-all-changes-description"))
+            }
+            DiscardOperationType::FileChangesAgainstBranch(None) => Some(crate::t!(
+                "code-review-discard-file-main-branch-description"
+            )),
+            DiscardOperationType::AllChangesAgainstBranch(Some(_)) => {
+                Some(crate::t!("code-review-discard-all-changes-description"))
+            }
+            DiscardOperationType::FileChangesAgainstBranch(Some(branch)) => Some(crate::t!(
+                "code-review-discard-file-branch-description",
+                branch = branch
+            )),
         }
     }
 
@@ -4175,7 +4185,7 @@ impl CodeReviewView {
     fn render_no_repo_found_state_with_buttons(
         &self,
         appearance: &Appearance,
-        message: &'static str,
+        message: String,
         buttons: InitButtons,
     ) -> Box<dyn Element> {
         let theme = appearance.theme();
@@ -4252,7 +4262,7 @@ impl CodeReviewView {
 
     pub fn render_no_repo_found_state(
         appearance: &Appearance,
-        message: &'static str,
+        message: String,
         open_repo_button: Option<Box<dyn Element>>,
     ) -> Box<dyn Element> {
         let theme = appearance.theme();
@@ -4320,28 +4330,40 @@ impl CodeReviewView {
         appearance: &Appearance,
         open_repo_button: Option<Box<dyn Element>>,
     ) -> Box<dyn Element> {
-        Self::render_no_repo_found_state(appearance, REMOTE_TEXT, open_repo_button)
+        Self::render_no_repo_found_state(
+            appearance,
+            crate::t!("code-review-diffs-local-workspaces-only"),
+            open_repo_button,
+        )
     }
 
     pub fn render_wsl_state(
         appearance: &Appearance,
         open_repo_button: Option<Box<dyn Element>>,
     ) -> Box<dyn Element> {
-        Self::render_no_repo_found_state(appearance, WSL_TEXT, open_repo_button)
+        Self::render_no_repo_found_state(
+            appearance,
+            crate::t!("code-review-diffs-wsl-unsupported"),
+            open_repo_button,
+        )
     }
 
     pub fn render_not_repo_state(
         appearance: &Appearance,
         open_repo_button: Option<Box<dyn Element>>,
     ) -> Box<dyn Element> {
-        Self::render_no_repo_found_state(appearance, DISABLED_TEXT, open_repo_button)
+        Self::render_no_repo_found_state(
+            appearance,
+            crate::t!("code-review-diffs-git-repositories-only"),
+            open_repo_button,
+        )
     }
 
     #[cfg(not(target_family = "wasm"))]
     fn render_remote_state_with_buttons(&self, appearance: &Appearance) -> Box<dyn Element> {
         self.render_no_repo_found_state_with_buttons(
             appearance,
-            REMOTE_TEXT,
+            crate::t!("code-review-diffs-local-workspaces-only"),
             InitButtons::OpenRepository,
         )
     }
@@ -4350,7 +4372,7 @@ impl CodeReviewView {
     fn render_wsl_state_with_buttons(&self, appearance: &Appearance) -> Box<dyn Element> {
         self.render_no_repo_found_state_with_buttons(
             appearance,
-            WSL_TEXT,
+            crate::t!("code-review-diffs-wsl-unsupported"),
             InitButtons::OpenRepository,
         )
     }
@@ -4359,7 +4381,7 @@ impl CodeReviewView {
     fn render_not_repo_state_with_buttons(&self, appearance: &Appearance) -> Box<dyn Element> {
         self.render_no_repo_found_state_with_buttons(
             appearance,
-            DISABLED_TEXT,
+            crate::t!("code-review-diffs-git-repositories-only"),
             InitButtons::OpenRepository,
         )
     }
@@ -4624,7 +4646,8 @@ impl CodeReviewView {
 
                 self.clear_review_comments(ctx);
                 ToastStack::handle(ctx).update(ctx, |stack, ctx| {
-                    let toast = DismissibleToast::default("Comments sent to agent".into());
+                    let toast =
+                        DismissibleToast::default(crate::t!("code-review-comments-sent-to-agent"));
                     stack.add_ephemeral_toast(toast, self.window_id, ctx);
                 });
                 ctx.emit(CodeReviewViewEvent::ReviewSubmitted);
@@ -4632,9 +4655,9 @@ impl CodeReviewView {
             }
             ReviewSubmissionResult::Error => {
                 log::error!("Failed to submit review comments");
-                let error_message = "Could not submit comments to the agent".to_string();
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                    let toast = DismissibleToast::error(error_message);
+                    let toast =
+                        DismissibleToast::error(crate::t!("code-review-could-not-submit-comments"));
                     toast_stack.add_ephemeral_toast(toast, self.window_id, ctx);
                 });
             }
@@ -5829,8 +5852,10 @@ impl CodeReviewView {
                     )
                     .check(self.discard_dialog_state.stash_changes_enabled)
                     .with_label(
-                        appearance.ui_builder().span("Stash changes").with_style(
-                            UiComponentStyles {
+                        appearance
+                            .ui_builder()
+                            .span(crate::t!("code-review-stash-changes"))
+                            .with_style(UiComponentStyles {
                                 font_size: Some(appearance.ui_font_size()),
                                 font_color: Some(
                                     appearance
@@ -5839,8 +5864,7 @@ impl CodeReviewView {
                                         .into(),
                                 ),
                                 ..Default::default()
-                            },
-                        ),
+                            }),
                     )
                     .build()
                     .on_click(|ctx, _, _| {
@@ -6769,10 +6793,13 @@ impl CodeReviewView {
             PrimaryGitActionMode::Commit => {
                 let disabled = !self.has_uncommitted_changes(ctx);
                 self.git_primary_action_button.update(ctx, |button, ctx| {
-                    button.set_label("Commit", ctx);
+                    button.set_label(crate::t!("common-commit"), ctx);
                     button.set_icon(Some(Icon::GitCommit), ctx);
                     button.set_disabled(disabled, ctx);
-                    button.set_tooltip(disabled.then_some("No changes to commit"), ctx);
+                    button.set_tooltip(
+                        disabled.then_some(crate::t!("code-review-no-changes-to-commit")),
+                        ctx,
+                    );
                     button.set_on_click(
                         |ctx| ctx.dispatch_typed_action(CodeReviewAction::OpenCommitDialog),
                         ctx,
@@ -6781,12 +6808,15 @@ impl CodeReviewView {
                 });
                 self.git_operations_chevron.update(ctx, |button, ctx| {
                     button.set_disabled(disabled, ctx);
-                    button.set_tooltip(disabled.then_some("No git actions available"), ctx);
+                    button.set_tooltip(
+                        disabled.then_some(crate::t!("code-review-no-git-actions-available")),
+                        ctx,
+                    );
                 });
             }
             PrimaryGitActionMode::Push => {
                 self.git_primary_action_button.update(ctx, |button, ctx| {
-                    button.set_label("Push", ctx);
+                    button.set_label(crate::t!("common-push"), ctx);
                     button.set_icon(Some(Icon::ArrowUp), ctx);
                     button.set_disabled(false, ctx);
                     button.set_on_click(
@@ -6801,7 +6831,7 @@ impl CodeReviewView {
             }
             PrimaryGitActionMode::CreatePr => {
                 self.git_primary_action_button.update(ctx, |button, ctx| {
-                    button.set_label("Create PR", ctx);
+                    button.set_label(crate::t!("code-review-create-pr"), ctx);
                     button.set_icon(Some(Icon::Github), ctx);
                     button.set_disabled(false, ctx);
                     button.set_on_click(

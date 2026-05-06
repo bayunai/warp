@@ -886,7 +886,7 @@ impl CommentListView {
                     ButtonVariant::Text,
                     self.view_state.cancel_button_mouse_state.clone(),
                 )
-                .with_text_label("Cancel".to_string())
+                .with_text_label(crate::t!("common-cancel"))
                 .build()
                 .finish(),
         )
@@ -913,22 +913,27 @@ impl CommentListView {
     ) -> Cow<'static, str> {
         if let ReviewDestination::Cli(agent) = destination {
             if !has_sendable_comments {
-                Cow::Borrowed("No non-outdated comments to send")
+                Cow::Owned(crate::t!("code-review-no-non-outdated-comments-to-send"))
             } else {
                 let cmd = agent.command_prefix();
                 let label = if cmd.is_empty() { "CLI agent" } else { cmd };
-                Cow::Owned(format!("Send diff comments to {label}"))
+                Cow::Owned(crate::t!(
+                    "code-review-send-diff-comments-to",
+                    label = label
+                ))
             }
         } else if !ai_enabled {
-            Cow::Borrowed("AI must be enabled to send comments to Agent")
+            Cow::Owned(crate::t!("code-review-ai-must-be-enabled-to-send-comments"))
         } else if !ai_available {
-            Cow::Borrowed("Agent code review requires AI credits")
+            Cow::Owned(crate::t!(
+                "code-review-agent-code-review-requires-ai-credits"
+            ))
         } else if matches!(destination, ReviewDestination::None) {
-            Cow::Borrowed("All terminals are busy")
+            Cow::Owned(crate::t!("code-review-all-terminals-are-busy"))
         } else if !has_sendable_comments {
-            Cow::Borrowed("No non-outdated comments to send")
+            Cow::Owned(crate::t!("code-review-no-non-outdated-comments-to-send"))
         } else {
-            Cow::Borrowed("Send diff comments to Agent")
+            Cow::Owned(crate::t!("code-review-send-diff-comments-to-agent"))
         }
     }
 
@@ -963,7 +968,7 @@ impl CommentListView {
                 ButtonVariant::Accent,
                 self.view_state.submit_button_mouse_state.clone(),
             )
-            .with_text_label("Send to Agent".to_string())
+            .with_text_label(crate::t!("code-review-send-to-agent"))
             .with_tooltip(|| tooltip)
             .with_tooltip_position(ButtonTooltipPosition::AboveLeft);
 

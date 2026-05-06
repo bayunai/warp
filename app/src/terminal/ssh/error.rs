@@ -236,16 +236,28 @@ impl View for SshErrorBlock {
         let ui_builder = appearance.ui_builder();
 
         if self.should_show_report_to_warp_button() {
-            let report_issue_text = build_description_row(FormattedText::new([FormattedTextLine::Line(vec![
-                    FormattedTextFragment::plain_text("We are actively working on improving the stability of SSH in Warp. Please consider "),
-                    FormattedTextFragment::hyperlink("filing an issue", get_ssh_github_issue_url(self.error_reason.error_title())),
-                    FormattedTextFragment::plain_text(" on GitHub so we can better identify the problem."),
+            let report_issue_text = build_description_row(
+                FormattedText::new([FormattedTextLine::Line(vec![
+                    FormattedTextFragment::plain_text(crate::t!(
+                        "terminal-ssh-report-issue-prefix"
+                    )),
+                    FormattedTextFragment::hyperlink(
+                        crate::t!("terminal-ssh-report-issue-link"),
+                        get_ssh_github_issue_url(self.error_reason.error_title()),
+                    ),
+                    FormattedTextFragment::plain_text(crate::t!(
+                        "terminal-ssh-report-issue-suffix"
+                    )),
                 ])]),
-                theme, appearance, self.report_link_highlight_index.clone())
-                .with_hyperlink_font_color(theme.accent().into())
-                .register_default_click_handlers(|link, ctx, _| {
-                    ctx.dispatch_typed_action(SshErrorBlockAction::OpenUrl(link.url));
-                }).finish();
+                theme,
+                appearance,
+                self.report_link_highlight_index.clone(),
+            )
+            .with_hyperlink_font_color(theme.accent().into())
+            .register_default_click_handlers(|link, ctx, _| {
+                ctx.dispatch_typed_action(SshErrorBlockAction::OpenUrl(link.url));
+            })
+            .finish();
             content.add_child(apply_spacing_styles(Container::new(report_issue_text)).finish());
         }
 
@@ -258,7 +270,7 @@ impl View for SshErrorBlock {
                             ButtonVariant::Accent,
                             self.warpify_without_tmux_button_mouse_state.clone(),
                         )
-                        .with_centered_text_label("Warpify without TMUX".into())
+                        .with_centered_text_label(crate::t!("terminal-warpify-without-tmux"))
                         .with_style(UiComponentStyles {
                             font_size: Some(appearance.monospace_font_size()),
                             ..Default::default()
@@ -279,7 +291,7 @@ impl View for SshErrorBlock {
                         ButtonVariant::Secondary,
                         self.continue_button_mouse_state.clone(),
                     )
-                    .with_centered_text_label("Continue without Warpification".into())
+                    .with_centered_text_label(crate::t!("terminal-continue-without-warpification"))
                     .with_style(UiComponentStyles {
                         font_size: Some(appearance.monospace_font_size()),
                         ..Default::default()

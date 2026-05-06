@@ -2812,7 +2812,10 @@ impl PaneGroup {
                     FormattedTextFragment::plain_text(
                         "Warp doesn't currently support your default shell, falling back to zsh.  ",
                     ),
-                    FormattedTextFragment::hyperlink("Learn more", WARP_SHELL_COMPATIBILITY_DOCS),
+                    FormattedTextFragment::hyperlink(
+                        crate::t!("common-learn-more"),
+                        WARP_SHELL_COMPATIBILITY_DOCS,
+                    ),
                 ]),
             )
         });

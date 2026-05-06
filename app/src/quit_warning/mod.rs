@@ -408,17 +408,20 @@ impl<'a> QuitWarningDialog<'a> {
         }
 
         if let Some(callback) = on_save_changes {
-            buttons.push(ModalButton::for_app("Save".to_string(), callback));
+            buttons.push(ModalButton::for_app(crate::t!("common-save"), callback));
         }
 
         if let Some(callback) = on_discard_changes {
-            buttons.push(ModalButton::for_app("Don't Save".to_string(), callback));
+            buttons.push(ModalButton::for_app(
+                crate::t!("quit-warning-dont-save"),
+                callback,
+            ));
         }
 
         if let Some(callback) = on_show_processes {
             if state.total_long_running_commands > 0 {
                 buttons.push(ModalButton::for_app(
-                    "Show running processes".to_string(),
+                    crate::t!("quit-warning-show-running-processes"),
                     move |app| {
                         callback(app);
                     },
@@ -427,16 +430,16 @@ impl<'a> QuitWarningDialog<'a> {
         }
 
         if let Some(callback) = on_cancel {
-            buttons.push(ModalButton::for_app("Cancel".to_string(), callback));
+            buttons.push(ModalButton::for_app(crate::t!("common-cancel"), callback));
         }
 
         let title = match &state.scope {
-            QuitScope::Pane { .. } => "Close pane?",
-            QuitScope::Tabs(tabs) if tabs.len() == 1 => "Close tab?",
-            QuitScope::Tabs(_) => "Close tabs?",
-            QuitScope::Window(_) => "Close window?",
-            QuitScope::App => "Quit Warp?",
-            QuitScope::EditorTab { .. } => "Save changes?",
+            QuitScope::Pane { .. } => "Close pane?".to_string(),
+            QuitScope::Tabs(tabs) if tabs.len() == 1 => "Close tab?".to_string(),
+            QuitScope::Tabs(_) => "Close tabs?".to_string(),
+            QuitScope::Window(_) => "Close window?".to_string(),
+            QuitScope::App => "Quit Warp?".to_string(),
+            QuitScope::EditorTab { .. } => crate::t!("quit-warning-save-changes-title"),
         };
 
         AlertDialogWithCallbacks::for_app(

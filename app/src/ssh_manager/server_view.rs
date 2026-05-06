@@ -91,7 +91,7 @@ pub struct SshServerView {
 impl SshServerView {
     pub fn new(node_id: String, ctx: &mut ViewContext<Self>) -> Self {
         // 6 个 single-line editors。password 走 is_password=true。
-        let name_editor = make_editor(false, "Name", ctx);
+        let name_editor = make_editor(false, &crate::t!("common-name"), ctx);
         let host_editor = make_editor(false, "example.com", ctx);
         let port_editor = make_editor(false, "22", ctx);
         let user_editor = make_editor(false, "root", ctx);

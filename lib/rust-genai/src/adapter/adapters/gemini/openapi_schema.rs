@@ -524,7 +524,7 @@ mod tests {
 	}
 
 	#[test]
-	fn test_non_object_schema_passthrough() {
+	fn test_non_object_passthrough() {
 		let mut schema = json!("string");
 		to_openapi_schema(&mut schema);
 		assert_eq!(schema, json!("string"));

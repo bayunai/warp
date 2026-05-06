@@ -447,7 +447,7 @@ impl SearchItem for ModelSearchItem {
                         ButtonVariant::Outlined,
                         self.manage_api_key_mouse_state.clone(),
                     )
-                    .with_text_label("Manage".to_string())
+                    .with_text_label(crate::t!("common-manage"))
                     .with_style(UiComponentStyles {
                         height: Some(24.),
                         padding: Some(Coords {
@@ -498,7 +498,7 @@ impl SearchItem for ModelSearchItem {
                     ButtonVariant::Outlined,
                     self.manage_api_key_mouse_state.clone(),
                 )
-                .with_text_label("Manage".to_string())
+                .with_text_label(crate::t!("common-manage"))
                 .with_style(UiComponentStyles {
                     height: Some(24.),
                     padding: Some(Coords {

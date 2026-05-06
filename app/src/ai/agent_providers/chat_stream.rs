@@ -1802,7 +1802,13 @@ pub async fn generate_byop_output(
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
     let force_echo_reasoning = super::reasoning::model_requires_reasoning_echo(api_type, &model_id);
     let chat_req = build_chat_request(&params, force_echo_reasoning, api_type, &model_id);
-    let chat_opts = build_chat_options(api_type, &base_url, &model_id, reasoning_effort, extra_headers);
+    let chat_opts = build_chat_options(
+        api_type,
+        &base_url,
+        &model_id,
+        reasoning_effort,
+        extra_headers,
+    );
     let client = build_client(api_type, base_url, api_key);
     let conversation_id = params
         .conversation_token

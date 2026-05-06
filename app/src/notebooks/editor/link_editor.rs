@@ -254,7 +254,7 @@ impl View for LinkEditor {
         let mut link_button = appearance
             .ui_builder()
             .button(ButtonVariant::Accent, self.apply_link_mouse_state.clone())
-            .with_centered_text_label("Apply link".to_string());
+            .with_centered_text_label(crate::t!("notebook-apply-link"));
 
         // Disable the link button if either of the editors are empty.
         if !self.is_valid(app) {

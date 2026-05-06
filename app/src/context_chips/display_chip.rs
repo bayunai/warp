@@ -8,7 +8,6 @@ use crate::ai::{
     document::ai_document_model::{AIDocumentId, AIDocumentVersion},
 };
 use crate::code::editor::{add_color, remove_color};
-use crate::code_review::code_review_view::CODE_REVIEW_TOOLTIP_TEXT;
 use crate::code_review::diff_state::DiffStats;
 use crate::context_chips::node_version_popup::{NodeVersionPopupEvent, NodeVersionPopupView};
 use crate::context_chips::spacing;
@@ -1174,7 +1173,7 @@ impl DisplayChip {
                     let tool_tip = appearance
                         .ui_builder()
                         .tool_tip_with_sublabel(
-                            CODE_REVIEW_TOOLTIP_TEXT.to_string(),
+                            crate::t!("code-review-tooltip-view-changes"),
                             code_review_keybinding.clone(),
                         )
                         .build()

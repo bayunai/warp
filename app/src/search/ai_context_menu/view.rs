@@ -1389,7 +1389,7 @@ impl AIContextMenu {
         let theme = appearance.theme();
         Container::new(
             Text::new(
-                "No results found",
+                crate::t!("common-no-results"),
                 appearance.ui_font_family(),
                 appearance.monospace_font_size(),
             )

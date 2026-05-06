@@ -71,9 +71,9 @@ impl EditorView {
         ctx: &mut ViewContext<EditorView>,
     ) -> ViewHandle<FeaturePopup> {
         let voice_new_feature_popup = ctx.add_typed_action_view(|_| {
-            FeaturePopup::new_feature(NewFeaturePopupLabel::FromString(
-                "Try Voice Input".to_string(),
-            ))
+            FeaturePopup::new_feature(NewFeaturePopupLabel::FromString(crate::t!(
+                "voice-try-input"
+            )))
         });
 
         ctx.subscribe_to_view(&voice_new_feature_popup, |_me, _, event, ctx| {
@@ -266,7 +266,7 @@ impl EditorView {
                     .as_ref(ctx)
                     .can_request_voice()
                 {
-                    self.voice_error_toast(super::VOICE_LIMIT_HIT_TOAST_TEXT, ctx);
+                    self.voice_error_toast(&crate::t!("editor-voice-limit-hit-toast"), ctx);
                     return false;
                 }
 
@@ -329,11 +329,10 @@ impl EditorView {
                             if let Some(toggle_key) = settings.maybe_setup_first_time_voice(ctx) {
                                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                                     let toast = crate::view_components::DismissibleToast::success(
-                                        format!(
-                                            "Voice input is enabled. You can also press and hold the `{}` key to activate voice input (configure in Settings > AI > Voice)",
-                                            toggle_key.display_name()
-                                        )
-                                            .to_string(),
+                                        crate::t!(
+                                            "voice-input-enabled-toast",
+                                            key = toggle_key.display_name()
+                                        ),
                                     );
                                     toast_stack.add_ephemeral_toast(toast, window_id, ctx);
                                 });
@@ -360,7 +359,7 @@ impl EditorView {
         let active_window_id = ctx.window_id();
         ToastStack::handle(ctx).update(ctx, move |toast_stack, ctx| {
             let mut toast = crate::view_components::DismissibleToast::error(String::from(
-                "Failed to start voice input (you may need to enable Microphone access)",
+                crate::t!("voice-input-microphone-access-error"),
             ));
             // Set an id so the toast is shown at most once.
             toast = toast.with_object_id(MICROPHONE_ACCESS_ERROR_ID.to_string());
@@ -500,11 +499,11 @@ impl EditorView {
             }
             Err(e) => match e {
                 TranscribeError::QuotaLimit => {
-                    self.voice_error_toast(super::VOICE_LIMIT_HIT_TOAST_TEXT, ctx)
+                    self.voice_error_toast(&crate::t!("editor-voice-limit-hit-toast"), ctx)
                 }
                 _ => {
                     log::error!("Failed to transcribe voice input: {e:?}");
-                    self.voice_error_toast(super::VOICE_ERROR_TOAST_TEXT, ctx)
+                    self.voice_error_toast(&crate::t!("editor-voice-error-toast"), ctx)
                 }
             },
         }
@@ -532,13 +531,13 @@ impl EditorView {
 
         let modifier_key = AISettings::handle(app).as_ref(app).voice_input_toggle_key;
         let tooltip_text = if mic_access_denied {
-            "Voice transcription is disabled because Microphone access was not granted.".to_string()
+            crate::t!("voice-transcription-disabled-microphone")
         } else if modifier_key == VoiceInputToggleKey::None {
-            "Voice transcription".to_string()
+            crate::t!("voice-transcription")
         } else {
-            format!(
-                "Voice transcription (hold `{}` key)",
-                modifier_key.display_name().to_lowercase()
+            crate::t!(
+                "voice-transcription-hold-key",
+                key = modifier_key.display_name().to_lowercase()
             )
         };
 

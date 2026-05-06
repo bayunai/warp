@@ -384,7 +384,10 @@ impl View for SshInstallTmuxBlock {
 
         let warpify_description = vec![
             FormattedTextFragment::plain_text(explanation),
-            FormattedTextFragment::hyperlink("Why do I need tmux?", WHY_INSTALL_TMUX_URL),
+            FormattedTextFragment::hyperlink(
+                crate::t!("terminal-ssh-why-need-tmux"),
+                WHY_INSTALL_TMUX_URL,
+            ),
         ];
 
         let text_color =

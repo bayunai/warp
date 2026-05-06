@@ -265,12 +265,16 @@ impl BuildPlanMigrationModal {
             })
             .finish();
 
-        let label = FormattedTextElement::from_str("Auto-reload", appearance.ui_font_family(), 12.)
-            .with_color(blended_colors::text_sub(
-                theme,
-                blended_colors::neutral_4(theme),
-            ))
-            .finish();
+        let label = FormattedTextElement::from_str(
+            crate::t!("workspace-auto-reload"),
+            appearance.ui_font_family(),
+            12.,
+        )
+        .with_color(blended_colors::text_sub(
+            theme,
+            blended_colors::neutral_4(theme),
+        ))
+        .finish();
 
         let checkbox_row = Flex::row()
             .with_child(checkbox)

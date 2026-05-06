@@ -76,9 +76,7 @@ use super::inline_action_icons::{self, icon_size};
 /// For horizontal padding, use [`INLINE_ACTION_HORIZONTAL_PADDING`] for consistency.
 pub const REQUESTED_COMMAND_BODY_VERTICAL_PADDING: f32 = 16.;
 
-const REQUESTED_COMMAND_REJECT_LABEL: &str = "Reject";
 const REQUESTED_COMMAND_ACCEPT_LABEL: &str = "Run";
-const REQUESTED_COMMAND_EDIT_LABEL: &str = "Edit";
 const REQUESTED_COMMAND_MINIMIZE_LABEL: &str = "Done";
 
 const LOADING_MESSAGE: &str = "Generating command...";
@@ -268,7 +266,7 @@ impl RequestedCommandView {
         ctx: &mut ViewContext<Self>,
     ) -> Self {
         let cancel_button = CompactibleActionButton::new(
-            REQUESTED_COMMAND_REJECT_LABEL.to_string(),
+            crate::t!("common-reject"),
             Some(KeystrokeSource::Fixed(
                 CANCEL_REQUESTED_COMMAND_KEYSTROKE.clone(),
             )),
@@ -297,7 +295,7 @@ impl RequestedCommandView {
         );
 
         let edit_button = CompactibleActionButton::new(
-            REQUESTED_COMMAND_EDIT_LABEL.to_string(),
+            crate::t!("common-edit"),
             Some(KeystrokeSource::Binding(EDIT_COMMAND_ACTION_NAME)),
             ButtonSize::InlineActionHeader,
             RequestedCommandViewAction::OpenEditMode,
@@ -1427,7 +1425,7 @@ impl View for RequestedCommandView {
                     CallMCPToolResult::Error(error) => {
                         format!("Error: {error}")
                     }
-                    CallMCPToolResult::Cancelled => "Tool call was cancelled".to_string(),
+                    CallMCPToolResult::Cancelled => crate::t!("ai-tool-call-cancelled"),
                 };
                 format!("{command_text}\n\nResponse: {result_text}")
             } else if self.is_header_expanded {

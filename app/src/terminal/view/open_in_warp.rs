@@ -252,7 +252,7 @@ impl TerminalView {
             }
             OpenInWarpBannerAction::LearnMore => {
                 ActionAccessibilityContent::Custom(AccessibilityContent::new(
-                    "Learn more",
+                    crate::t!("common-learn-more"),
                     "Learn more about opening Markdown files in Warp",
                     WarpA11yRole::UserAction,
                 ))

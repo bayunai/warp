@@ -78,19 +78,21 @@ pub enum SettingType {
 }
 
 impl SettingType {
-    pub fn get_name(&self) -> &'static str {
+    pub fn get_name(&self) -> String {
         match self {
-            SettingType::Theme => "Theme",
-            SettingType::OptionAsMeta => "Option as Meta",
-            SettingType::MouseAndScrollReporting => "Mouse/Scroll Reporting",
-            SettingType::Font => "Font",
-            SettingType::DefaultShell => "Default Shell",
-            SettingType::WorkingDirectory => "Working Directory",
-            SettingType::HotkeyMode => "Global hotkey",
-            SettingType::WindowSize => "Window Dimensions",
-            SettingType::CopyOnSelect => "Copy On Select",
-            SettingType::Opacity => "Window Opacity",
-            SettingType::CursorBlinking => "Cursor Blinking",
+            SettingType::Theme => crate::t!("settings-import-type-theme"),
+            SettingType::OptionAsMeta => crate::t!("settings-import-type-option-as-meta"),
+            SettingType::MouseAndScrollReporting => {
+                crate::t!("settings-import-type-mouse-scroll-reporting")
+            }
+            SettingType::Font => crate::t!("settings-import-type-font"),
+            SettingType::DefaultShell => crate::t!("settings-import-type-default-shell"),
+            SettingType::WorkingDirectory => crate::t!("settings-import-type-working-directory"),
+            SettingType::HotkeyMode => crate::t!("settings-import-type-global-hotkey"),
+            SettingType::WindowSize => crate::t!("settings-import-type-window-dimensions"),
+            SettingType::CopyOnSelect => crate::t!("settings-import-type-copy-on-select"),
+            SettingType::Opacity => crate::t!("settings-import-type-window-opacity"),
+            SettingType::CursorBlinking => crate::t!("settings-import-type-cursor-blinking"),
         }
     }
 }

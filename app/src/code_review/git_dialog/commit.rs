@@ -66,18 +66,9 @@ pub enum CommitSubAction {
 
 const EDITOR_FONT_SIZE: f32 = 12.;
 const EDITOR_MIN_HEIGHT: f32 = 72.;
-/// Placeholder shown while the open-time AI commit-message autogen is in
-/// flight.
-const GENERATING_PLACEHOLDER_TEXT: &str = "Generating commit message\u{2026}";
-/// Placeholder shown once the open-time autogen resolves — either as a
-/// nudge if the user later clears the generated draft, or as guidance when
-/// autogen failed and the editor is blank. Also used when autogen is off.
-const FALLBACK_PLACEHOLDER_TEXT: &str = "Type a commit message";
-/// Loading-state label while the commit / chain runs. Static regardless of
-/// which chain is in flight — the success toast communicates what actually
-/// ran.
+/// Loading-state label while the commit / chain runs. Static because the shared
+/// button API currently stores borrowed labels.
 const LOADING_LABEL: &str = "Committing\u{2026}";
-
 pub struct CommitState {
     intent: CommitIntent,
     include_unstaged: bool,
@@ -118,9 +109,9 @@ pub(super) fn new_state(
     // land on the manual-type prompt immediately.
     let ai_autogen_enabled = should_send_git_ops_ai_request(ctx);
     let initial_placeholder = if ai_autogen_enabled {
-        GENERATING_PLACEHOLDER_TEXT
+        crate::t!("code-review-generating-commit-message-placeholder")
     } else {
-        FALLBACK_PLACEHOLDER_TEXT
+        crate::t!("code-review-type-commit-message-placeholder")
     };
     let message_editor = ctx.add_typed_action_view(|ctx| {
         let appearance = Appearance::as_ref(ctx);
@@ -299,7 +290,10 @@ fn generate_commit_message(
                         // Swap "Generating\u{2026}" for the manual-type
                         // prompt so it shows if the user later clears the
                         // generated draft.
-                        editor.set_placeholder_text(FALLBACK_PLACEHOLDER_TEXT, ctx);
+                        editor.set_placeholder_text(
+                            crate::t!("code-review-type-commit-message-placeholder"),
+                            ctx,
+                        );
                         // User input wins — don't clobber their text.
                         if !user_typed {
                             editor.system_reset_buffer_text(generated.trim(), ctx);
@@ -311,7 +305,10 @@ fn generate_commit_message(
                 Err(err) => {
                     log::warn!("Failed to autogenerate commit message: {err}");
                     editor_handle.update(ctx, |editor, ctx| {
-                        editor.set_placeholder_text(FALLBACK_PLACEHOLDER_TEXT, ctx);
+                        editor.set_placeholder_text(
+                            crate::t!("code-review-type-commit-message-placeholder"),
+                            ctx,
+                        );
                     });
                     me.refresh_confirm_enabled(ctx);
                     ctx.notify();
@@ -610,7 +607,7 @@ fn render_message_editor(
     app: &AppContext,
 ) -> Box<dyn Element> {
     let label = Text::new(
-        "Commit message",
+        crate::t!("code-review-commit-message-label"),
         appearance.ui_font_family(),
         appearance.ui_font_size(),
     )

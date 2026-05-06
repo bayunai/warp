@@ -122,7 +122,6 @@ use ai::diff_validation::{
     SearchAndReplace, V4AHunk,
 };
 
-const REQUESTED_EDIT_CANCEL_LABEL: &str = "Cancel";
 const REQUESTED_EDIT_REFINE_LABEL: &str = "Refine";
 const REQUESTED_EDIT_ACCEPT_LABEL: &str = "Accept";
 const REQUESTED_EDIT_ACCEPT_AND_AUTOEXECUTE_LABEL: &str = "Auto-approve";
@@ -1881,7 +1880,7 @@ impl CodeDiffView {
                         file_name
                     }
                 }
-                None => "No file name".to_string(),
+                None => crate::t!("ai-inline-code-diff-no-file-name"),
             };
 
             // Get the full path for the tooltip
@@ -2184,7 +2183,7 @@ impl CodeDiffView {
             let label = if self.is_passive {
                 SUGGESTED_EDIT_DISMISS_LABEL
             } else {
-                REQUESTED_EDIT_CANCEL_LABEL
+                &crate::t!("common-cancel")
             };
             self.cancel_button.set_label(label.to_string(), ctx);
         }
@@ -2541,7 +2540,7 @@ impl CodeDiffView {
 
         let checkbox_text = appearance
             .ui_builder()
-            .span("Don't show me suggested code banners again")
+            .span(crate::t!("ai-dont-show-suggested-code-banners-again"))
             .with_style(UiComponentStyles {
                 font_color: Some(font_color),
                 font_size: Some(font_size),

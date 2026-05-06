@@ -27,7 +27,6 @@ const BUTTON_BORDER_RADIUS: f32 = 4.;
 const BORDER_WIDTH: f32 = 1.;
 
 const MODAL_SUBHEADER: &str = "This will permanently delete the theme.";
-const CANCEL_BUTTON_TEXT: &str = "Cancel";
 const DELETE_BUTTON_TEXT: &str = "Delete theme";
 
 #[derive(Default)]
@@ -107,7 +106,7 @@ impl ThemeDeletionBody {
             }
         }
         if errored {
-            self.send_error_toast("Something went wrong", ctx);
+            self.send_error_toast(&crate::t!("common-something-went-wrong"), ctx);
         }
     }
 
@@ -196,7 +195,7 @@ impl View for ThemeDeletionBody {
                 Some(cancel_hovered_styles),
                 Some(disabled_styles),
             )
-            .with_centered_text_label(CANCEL_BUTTON_TEXT.into());
+            .with_centered_text_label(crate::t!("common-cancel"));
 
         let create_button = appearance
             .ui_builder()

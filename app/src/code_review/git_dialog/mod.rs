@@ -502,7 +502,7 @@ impl GitDialog {
         // communicates which of commit / commit-and-push / commit-and-create-PR
         // will actually run on click.
         let (confirm_button, cancel_button, close_button) =
-            Self::build_dialog_buttons("Confirm", None, ctx);
+            Self::build_dialog_buttons(crate::t!("common-confirm"), None, ctx);
         let state = commit::new_state(&repo_path, allow_create_pr, has_upstream, ctx);
         let this = Self {
             repo_path,
@@ -562,7 +562,7 @@ impl GitDialog {
     }
 
     fn build_dialog_buttons(
-        confirm_label: &'static str,
+        confirm_label: String,
         confirm_icon: Option<Icon>,
         ctx: &mut ViewContext<Self>,
     ) -> (

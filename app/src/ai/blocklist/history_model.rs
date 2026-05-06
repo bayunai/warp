@@ -2292,12 +2292,14 @@ pub enum AIQueryHistoryOutputStatus {
 
 impl AIQueryHistoryOutputStatus {
     /// Returns a string representation of the output status.
-    pub(crate) fn display_text(&self) -> &'static str {
+    pub(crate) fn display_text(&self) -> String {
         match self {
-            AIQueryHistoryOutputStatus::Completed => "Completed successfully",
-            AIQueryHistoryOutputStatus::Pending => "Pending",
-            AIQueryHistoryOutputStatus::Cancelled => "Cancelled by user",
-            AIQueryHistoryOutputStatus::Failed => "Failed",
+            AIQueryHistoryOutputStatus::Completed => {
+                crate::t!("ai-history-completed-successfully")
+            }
+            AIQueryHistoryOutputStatus::Pending => crate::t!("ai-history-pending"),
+            AIQueryHistoryOutputStatus::Cancelled => crate::t!("ai-history-cancelled-by-user"),
+            AIQueryHistoryOutputStatus::Failed => crate::t!("common-failed"),
         }
     }
 

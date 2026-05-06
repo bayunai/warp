@@ -169,10 +169,10 @@ impl SearchItem for RuleSearchItem {
             if !name.is_empty() {
                 name.clone()
             } else {
-                "Rule".to_string()
+                crate::t!("common-rule")
             }
         } else {
-            "Rule".to_string()
+            crate::t!("common-rule")
         };
 
         // Create title element

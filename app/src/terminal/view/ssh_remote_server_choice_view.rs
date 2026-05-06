@@ -276,7 +276,7 @@ impl TypedActionView for SshRemoteServerChoiceView {
                     });
                     send_telemetry_from_ctx!(
                         TelemetryEvent::SetSshExtensionInstallMode {
-                            mode: mode.display_name(),
+                            mode: mode.telemetry_name(),
                         },
                         ctx
                     );
@@ -293,7 +293,7 @@ impl TypedActionView for SshRemoteServerChoiceView {
                     });
                     send_telemetry_from_ctx!(
                         TelemetryEvent::SetSshExtensionInstallMode {
-                            mode: mode.display_name(),
+                            mode: mode.telemetry_name(),
                         },
                         ctx
                     );

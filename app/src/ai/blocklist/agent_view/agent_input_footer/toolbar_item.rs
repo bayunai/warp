@@ -107,19 +107,19 @@ impl AgentToolbarItemKind {
         }
     }
 
-    pub fn display_label(&self) -> &'static str {
+    pub fn display_label(&self) -> String {
         match self {
-            Self::ContextChip(_) => "Context Chip",
-            Self::ModelSelector => "Model Selector",
-            Self::NLDToggle => "Autodetection",
-            Self::VoiceInput => "Voice Input",
-            Self::FileAttach => "Attach File",
-            Self::ContextWindowUsage => "Context Usage",
-            Self::FileExplorer => "File Explorer",
-            Self::RichInput => "Rich Input",
-            Self::ShareSession => "/remote-control",
-            Self::Settings => "Settings",
-            Self::FastForwardToggle => "Fast Forward",
+            Self::ContextChip(_) => crate::t!("ai-toolbar-context-chip"),
+            Self::ModelSelector => crate::t!("ai-toolbar-model-selector"),
+            Self::NLDToggle => crate::t!("ai-toolbar-autodetection"),
+            Self::VoiceInput => crate::t!("ai-toolbar-voice-input"),
+            Self::FileAttach => crate::t!("ai-toolbar-attach-file"),
+            Self::ContextWindowUsage => crate::t!("ai-toolbar-context-usage"),
+            Self::FileExplorer => crate::t!("ai-toolbar-file-explorer"),
+            Self::RichInput => crate::t!("ai-toolbar-rich-input"),
+            Self::ShareSession => "/remote-control".to_string(),
+            Self::Settings => crate::t!("common-settings"),
+            Self::FastForwardToggle => crate::t!("ai-toolbar-fast-forward"),
         }
     }
 

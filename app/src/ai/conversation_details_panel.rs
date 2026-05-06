@@ -624,7 +624,7 @@ impl ConversationDetailsPanel {
 
                 let window_id = ctx.window_id();
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                    let toast = DismissibleToast::default("Copied branch name".to_string());
+                    let toast = DismissibleToast::default(crate::t!("ai-copied-branch-name-toast"));
                     toast_stack.add_ephemeral_toast(toast, window_id, ctx);
                 });
             }

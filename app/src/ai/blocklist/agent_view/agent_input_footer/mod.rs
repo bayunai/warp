@@ -125,15 +125,6 @@ use crate::view_components::ToastLink;
 #[cfg(not(target_family = "wasm"))]
 use crate::workspace::WorkspaceAction;
 
-const ENABLE_NLD_TOOLTIP: &str = "Enable terminal command autodetection";
-const DISABLE_NLD_TOOLTIP: &str = "Disable terminal command autodetection";
-
-const FAST_FORWARD_ON_TOOLTIP: &str = "Turn off auto-approve all agent actions";
-const FAST_FORWARD_OFF_TOOLTIP: &str = "Auto-approve all agent actions for this task";
-
-const START_REMOTE_CONTROL_TOOLTIP: &str = "Start remote control";
-const START_REMOTE_CONTROL_LOGIN_REQUIRED_TOOLTIP: &str = "Log in to use /remote-control";
-
 const CLOUD_MODE_V2_FOOTER_GAP: f32 = 4.;
 
 /// Voice input state for the CLI agent footer. Unlike the editor-based voice
@@ -265,9 +256,9 @@ impl AgentInputFooter {
             button.set_active(is_nld_enabled, ctx);
             button.set_tooltip(
                 Some(if is_nld_enabled {
-                    DISABLE_NLD_TOOLTIP
+                    crate::t!("ai-footer-disable-terminal-command-autodetection")
                 } else {
-                    ENABLE_NLD_TOOLTIP
+                    crate::t!("ai-footer-enable-terminal-command-autodetection")
                 }),
                 ctx,
             );
@@ -282,9 +273,9 @@ impl AgentInputFooter {
                 button.set_active(is_nld_enabled, ctx);
                 button.set_tooltip(
                     Some(if is_nld_enabled {
-                        DISABLE_NLD_TOOLTIP
+                        crate::t!("ai-footer-disable-terminal-command-autodetection")
                     } else {
-                        ENABLE_NLD_TOOLTIP
+                        crate::t!("ai-footer-enable-terminal-command-autodetection")
                     }),
                     ctx,
                 );
@@ -344,7 +335,7 @@ impl AgentInputFooter {
         let fast_forward_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new("", FastForwardButtonTheme)
                 .with_icon(Icon::FastForward)
-                .with_tooltip(FAST_FORWARD_OFF_TOOLTIP)
+                .with_tooltip(crate::t!("ai-footer-auto-approve-agent-actions-for-task"))
                 .with_size(button_size)
                 .with_tooltip_alignment(TooltipAlignment::Left)
                 .on_click(|ctx| {
@@ -537,8 +528,8 @@ impl AgentInputFooter {
                 let is_open = matches!(new_input_state, CLIAgentInputState::Open { .. });
                 me.rich_input_button.update(ctx, |button, ctx| {
                     if is_open {
-                        button.set_label("Hide Rich Input", ctx);
-                        button.set_tooltip(Some("Hide Rich Input"), ctx);
+                        button.set_label(crate::t!("ai-footer-hide-rich-input"), ctx);
+                        button.set_tooltip(Some(crate::t!("ai-footer-hide-rich-input")), ctx);
                         button.set_keybinding(
                             Some(KeystrokeSource::Binding(
                                 OPEN_CLI_AGENT_RICH_INPUT_KEYBINDING,
@@ -546,8 +537,8 @@ impl AgentInputFooter {
                             ctx,
                         );
                     } else {
-                        button.set_label("Rich Input", ctx);
-                        button.set_tooltip(Some("Open Rich Input"), ctx);
+                        button.set_label(crate::t!("ai-footer-rich-input"), ctx);
+                        button.set_tooltip(Some(crate::t!("ai-footer-open-rich-input")), ctx);
                         button.set_keybinding(
                             Some(KeystrokeSource::Binding(
                                 OPEN_CLI_AGENT_RICH_INPUT_KEYBINDING,
@@ -563,7 +554,7 @@ impl AgentInputFooter {
         let start_remote_control_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new("/remote-control", AgentInputButtonTheme)
                 .with_icon(Icon::Phone01)
-                .with_tooltip(START_REMOTE_CONTROL_TOOLTIP)
+                .with_tooltip(crate::t!("ai-footer-start-remote-control"))
                 .with_size(cli_button_size)
                 .with_tooltip_alignment(TooltipAlignment::Left)
                 .on_click(|ctx| {
@@ -1084,9 +1075,9 @@ impl AgentInputFooter {
     #[cfg(not(target_family = "wasm"))]
     fn handle_plugin_operation<F, Fut>(
         &mut self,
-        progress_toast: &str,
-        error_label: &str,
-        success_toast: &str,
+        progress_toast: String,
+        error_label: String,
+        success_toast: String,
         operation_kind: PluginChipTelemetryKind,
         operation: F,
         ctx: &mut ViewContext<Self>,
@@ -1145,16 +1136,13 @@ impl AgentInputFooter {
 
         ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
             toast_stack.add_persistent_toast(
-                DismissibleToast::default(progress_toast.to_owned())
-                    .with_object_id(toast_id.clone()),
+                DismissibleToast::default(progress_toast).with_object_id(toast_id.clone()),
                 window_id,
                 ctx,
             );
         });
 
         let toast_id_for_callback = toast_id.clone();
-        let error_label = error_label.to_owned();
-        let success_toast = success_toast.to_owned();
         ctx.spawn(
             async move {
                 let path_env_var = path_future.await;
@@ -1218,7 +1206,7 @@ impl AgentInputFooter {
                                 DismissibleToast::error(format!("{error_label}: {err}"));
                             if let Some(log_path) = log_path {
                                 toast = toast.with_link(
-                                    ToastLink::new("See logs for details".to_owned())
+                                    ToastLink::new(crate::t!("ai-footer-see-logs-for-details"))
                                         .with_onclick_action(WorkspaceAction::OpenFilePath {
                                             path: log_path,
                                         }),
@@ -1245,10 +1233,11 @@ impl AgentInputFooter {
             .cli_agent(ctx)
             .and_then(plugin_manager_for)
             .map(|m| m.install_success_message())
-            .unwrap_or("Warp plugin installed. Please restart the session to activate.");
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| crate::t!("ai-footer-plugin-installed-restart-session"));
         self.handle_plugin_operation(
-            "Installing Warp plugin...",
-            "Failed to install Warp plugin",
+            crate::t!("ai-footer-installing-warp-plugin"),
+            crate::t!("ai-footer-failed-install-warp-plugin"),
             success_msg,
             PluginChipTelemetryKind::Install,
             |manager| async move { manager.install().await },
@@ -1262,10 +1251,11 @@ impl AgentInputFooter {
             .cli_agent(ctx)
             .and_then(plugin_manager_for)
             .map(|m| m.update_success_message())
-            .unwrap_or("Warp plugin updated. Please restart the session to activate.");
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| crate::t!("ai-footer-plugin-updated-restart-session"));
         self.handle_plugin_operation(
-            "Updating Warp plugin...",
-            "Failed to update Warp plugin",
+            crate::t!("ai-footer-updating-warp-plugin"),
+            crate::t!("ai-footer-failed-update-warp-plugin"),
             success_msg,
             PluginChipTelemetryKind::Update,
             |manager| async move { manager.update().await },
@@ -1603,7 +1593,7 @@ impl AgentInputFooter {
         match &self.cli_voice_input_state {
             CLIVoiceInputState::Stopped => {
                 if !crate::ai::AIRequestUsageModel::as_ref(ctx).can_request_voice() {
-                    self.show_cli_voice_error_toast("Voice input limit reached", ctx);
+                    self.show_cli_voice_error_toast(crate::t!("voice-input-limit-reached"), ctx);
                     return;
                 }
 
@@ -1719,11 +1709,14 @@ impl AgentInputFooter {
             }
             Err(e) => match e {
                 TranscribeError::QuotaLimit => {
-                    self.show_cli_voice_error_toast("Voice input limit reached", ctx);
+                    self.show_cli_voice_error_toast(crate::t!("voice-input-limit-reached"), ctx);
                 }
                 _ => {
                     log::error!("Failed to transcribe CLI voice input: {e:?}");
-                    self.show_cli_voice_error_toast("Failed to transcribe voice input", ctx);
+                    self.show_cli_voice_error_toast(
+                        crate::t!("voice-input-transcription-failed"),
+                        ctx,
+                    );
                 }
             },
         }
@@ -1751,10 +1744,10 @@ impl AgentInputFooter {
     }
 
     #[cfg(feature = "voice_input")]
-    fn show_cli_voice_error_toast(&self, message: &str, ctx: &mut ViewContext<Self>) {
+    fn show_cli_voice_error_toast(&self, message: String, ctx: &mut ViewContext<Self>) {
         let window_id = ctx.window_id();
         ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-            let toast = DismissibleToast::error(message.to_string());
+            let toast = DismissibleToast::error(message);
             toast_stack.add_ephemeral_toast(toast, window_id, ctx);
         });
     }
@@ -1763,9 +1756,9 @@ impl AgentInputFooter {
     fn show_cli_microphone_access_toast(&self, ctx: &mut ViewContext<Self>) {
         let window_id = ctx.window_id();
         ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-            let toast = DismissibleToast::error(String::from(
-                "Failed to start voice input (you may need to enable Microphone access)",
-            ));
+            let toast = DismissibleToast::error(String::from(crate::t!(
+                "voice-input-microphone-access-error"
+            )));
             toast_stack.add_ephemeral_toast(toast, window_id, ctx);
         });
     }
@@ -1799,9 +1792,9 @@ impl AgentInputFooter {
             Icon::FastForward
         };
         let tooltip = if is_active {
-            FAST_FORWARD_ON_TOOLTIP
+            crate::t!("ai-footer-turn-off-auto-approve-agent-actions")
         } else {
-            FAST_FORWARD_OFF_TOOLTIP
+            crate::t!("ai-footer-auto-approve-agent-actions-for-task")
         };
         self.fast_forward_button.update(ctx, |button, ctx| {
             button.set_icon(Some(icon), ctx);
@@ -1818,9 +1811,9 @@ impl AgentInputFooter {
             .get()
             .is_anonymous_or_logged_out();
         let tooltip = if login_required {
-            START_REMOTE_CONTROL_LOGIN_REQUIRED_TOOLTIP
+            crate::t!("ai-footer-login-required-remote-control")
         } else {
-            START_REMOTE_CONTROL_TOOLTIP
+            crate::t!("ai-footer-start-remote-control")
         };
         self.start_remote_control_button.update(ctx, |button, ctx| {
             button.set_disabled(login_required, ctx);

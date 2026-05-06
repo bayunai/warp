@@ -2,6 +2,7 @@
 
 mod agent_onboarding_view;
 pub mod callout;
+mod localization;
 mod model;
 pub mod slides;
 pub mod telemetry;
@@ -22,7 +23,8 @@ impl std::fmt::Display for OnboardingIntention {
     }
 }
 
-pub use callout::{set_localizer, OnboardingCalloutView, OnboardingKeybindings};
+pub use callout::{OnboardingCalloutView, OnboardingKeybindings};
+pub use localization::set_localizer;
 
 /// User-facing names of the AI features enabled when the agent intention is selected.
 /// Shared by the intention slide's agent card checklist and the login slide's

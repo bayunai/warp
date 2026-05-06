@@ -422,11 +422,15 @@ impl KeybindingsView {
             Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Stretch);
 
         let title = match section {
-            KeybindingSection::Essentials => "Essentials",
-            KeybindingSection::Blocks => "Blocks",
-            KeybindingSection::InputEditor => "Input Editor",
-            KeybindingSection::Terminal => "Terminal",
-            KeybindingSection::Fundamentals => "Fundamentals",
+            KeybindingSection::Essentials => crate::t!("resource-center-keybindings-essentials"),
+            KeybindingSection::Blocks => crate::t!("resource-center-keybindings-blocks"),
+            KeybindingSection::InputEditor => {
+                crate::t!("resource-center-keybindings-input-editor")
+            }
+            KeybindingSection::Terminal => crate::t!("resource-center-keybindings-terminal"),
+            KeybindingSection::Fundamentals => {
+                crate::t!("resource-center-keybindings-fundamentals")
+            }
         };
 
         let mut section_header = self.render_text(

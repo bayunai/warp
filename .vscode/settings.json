@@ -5,17 +5,17 @@
     "editor.quickSuggestions": {
       "comments": "off",
       "strings": "off",
-      "other": "off"
-    }
+      "other": "off",
+    },
   },
   "[powershell]": {
     "editor.semanticHighlighting.enabled": true,
-    "editor.formatOnSave": true
+    "editor.formatOnSave": true,
   },
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
   "files.associations": {
-    "**/ui/src/platform/mac/**/*.h": "objective-c"
+    "**/ui/src/platform/mac/**/*.h": "objective-c",
   },
   "graphql-config.load.rootDir": "graphql/",
   "rust-analyzer.cargo.targetDir": true,

@@ -771,7 +771,7 @@ impl UpdateEnvironmentForm {
                 self.remove_setup_command_mouse_states.clear();
                 // Update button text for Create mode
                 self.submit_button.update(ctx, |button, ctx| {
-                    button.set_label("Create", ctx);
+                    button.set_label(crate::t!("common-create"), ctx);
                 });
             }
             EnvironmentFormInitArgs::Edit {
@@ -812,7 +812,7 @@ impl UpdateEnvironmentForm {
                     .collect();
                 // Update button text for Edit mode
                 self.submit_button.update(ctx, |button, ctx| {
-                    button.set_label("Save", ctx);
+                    button.set_label(crate::t!("common-save"), ctx);
                 });
             }
         }
@@ -1544,9 +1544,13 @@ impl UpdateEnvironmentForm {
                         theme.active_ui_text_color()
                     };
 
-                    Text::new_inline("Share with team", font_family, font_size)
-                        .with_color(color.into())
-                        .finish()
+                    Text::new_inline(
+                        crate::t!("settings-share-with-team"),
+                        font_family,
+                        font_size,
+                    )
+                    .with_color(color.into())
+                    .finish()
                 },
             )
             .with_cursor(Cursor::PointingHand)
@@ -1658,10 +1662,11 @@ impl UpdateEnvironmentForm {
     }
 
     fn render_form_label(
-        label: &'static str,
+        label: impl Into<String>,
         required: bool,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
+        let label = label.into();
         let theme = appearance.theme();
         let mut row = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -1691,7 +1696,7 @@ impl UpdateEnvironmentForm {
     }
 
     fn render_form_field(
-        label: &'static str,
+        label: String,
         required: bool,
         helper_text: Option<&'static str>,
         editor: &ViewHandle<EditorView>,
@@ -3502,7 +3507,7 @@ impl View for UpdateEnvironmentForm {
 
         // Form fields
         page.add_child(Self::render_form_field(
-            "Name",
+            crate::t!("common-name"),
             true,
             None,
             &self.name_editor,

@@ -1,3 +1,4 @@
+use crate::localization::localized;
 use crate::model::{
     OnboardingAuthState, OnboardingStateEvent, OnboardingStateModel, OnboardingStep,
     SelectedSettings,
@@ -457,7 +458,7 @@ impl View for AgentOnboardingView {
             let close_button = self.close_button.render(
                 appearance,
                 button::Params {
-                    content: button::Content::Label("Skip".into()),
+                    content: button::Content::Label(localized("common-skip", "Skip").into()),
                     theme: &button::themes::Naked,
                     options: button::Options {
                         size: button::Size::Small,

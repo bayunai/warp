@@ -59,11 +59,11 @@ pub(super) fn new_state(publish: bool, commits: Vec<Commit>) -> PushState {
     }
 }
 
-pub(super) fn confirm_label(publish: bool) -> &'static str {
+pub(super) fn confirm_label(publish: bool) -> String {
     if publish {
-        "Publish"
+        crate::t!("common-publish")
     } else {
-        "Push"
+        crate::t!("common-push")
     }
 }
 

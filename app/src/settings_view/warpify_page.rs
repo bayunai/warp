@@ -485,7 +485,7 @@ impl TypedActionView for WarpifyPageView {
                         .set_value(*mode, ctx));
                     send_telemetry_from_ctx!(
                         TelemetryEvent::SetSshExtensionInstallMode {
-                            mode: mode.display_name(),
+                            mode: mode.telemetry_name(),
                         },
                         ctx
                     );

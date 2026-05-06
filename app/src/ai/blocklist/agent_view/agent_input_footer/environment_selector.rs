@@ -345,9 +345,9 @@ impl EnvironmentSelector {
             button.set_label(label, ctx);
             button.set_tooltip(
                 if is_configuring {
-                    Some("Choose an environment")
+                    Some(crate::t!("ai-footer-choose-environment"))
                 } else {
-                    Some("Agent environment")
+                    Some(crate::t!("ai-footer-agent-environment"))
                 },
                 ctx,
             );

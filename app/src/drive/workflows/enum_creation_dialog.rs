@@ -50,14 +50,6 @@ const SECTION_FONT_SIZE: f32 = 16.;
 const SPAN_FONT_SIZE: f32 = 16.;
 const VARIANT_FONT_SIZE: f32 = 13.;
 
-const CANCEL_BUTTON_LABEL: &str = "Close";
-const NEW_ENUM_SPAN: &str = "New enum";
-const EXISTING_ENUM_SPAN: &str = "Edit enum";
-const NAME_PLACEHOLDER_TEXT: &str = "Name";
-const CREATE_BUTTON_LABEL: &str = "Create";
-const SAVE_BUTTON_LABEL: &str = "Save";
-const VARIANT_PLACEHOLDER_TEXT: &str = "Variant";
-const STATIC_LABEL_TEXT: &str = "Variants";
 const DYNAMIC_PLACEHOLDER_TEXT: &str =
     "# Enter a shell command that generates variants, delimited by newlines.\n\ngit branch -a";
 
@@ -163,7 +155,7 @@ impl EnumCreationDialog {
                 };
 
                 let mut editor = EditorView::single_line(options, ctx);
-                editor.set_placeholder_text(NAME_PLACEHOLDER_TEXT, ctx);
+                editor.set_placeholder_text(crate::t!("common-name"), ctx);
                 editor
             })
         };
@@ -549,7 +541,7 @@ impl EnumCreationDialog {
                 },
                 ctx,
             );
-            editor.set_placeholder_text(VARIANT_PLACEHOLDER_TEXT, ctx);
+            editor.set_placeholder_text(crate::t!("workflow-enum-variant-placeholder"), ctx);
             editor
         });
 
@@ -580,10 +572,11 @@ impl EnumCreationDialog {
         appearance: &Appearance,
         button_mouse_state: MouseStateHandle,
         action: EnumCreationDialogAction,
-        label_text: &str,
+        label_text: impl Into<String>,
         is_save: bool,
         is_disabled: bool,
     ) -> Box<dyn Element> {
+        let label_text = label_text.into();
         let mut button = appearance
             .ui_builder()
             .button(
@@ -594,7 +587,7 @@ impl EnumCreationDialog {
                 },
                 button_mouse_state,
             )
-            .with_centered_text_label(label_text.to_owned())
+            .with_centered_text_label(label_text)
             .with_style(UiComponentStyles {
                 font_size: Some(BUTTON_FONT_SIZE),
                 font_weight: Some(warpui::fonts::Weight::Normal),
@@ -628,8 +621,8 @@ impl EnumCreationDialog {
 
     fn render_dialog_header(&self, appearance: &Appearance) -> Box<dyn Element> {
         let text = match self.sync_id {
-            Some(_) => EXISTING_ENUM_SPAN,
-            None => NEW_ENUM_SPAN,
+            Some(_) => crate::t!("workflow-edit-enum"),
+            None => crate::t!("workflow-new-enum"),
         };
 
         appearance
@@ -821,7 +814,7 @@ impl EnumCreationDialog {
                 1.,
                 appearance
                     .ui_builder()
-                    .span(STATIC_LABEL_TEXT.to_string())
+                    .span(crate::t!("workflow-enum-variants"))
                     .with_style(UiComponentStyles {
                         font_size: Some(SECTION_FONT_SIZE),
                         ..Default::default()
@@ -862,8 +855,8 @@ impl EnumCreationDialog {
     fn render_footer_buttons(&self, appearance: &Appearance, app: &AppContext) -> Box<dyn Element> {
         let disable_save = self.should_disable_save(app);
         let save_button_label = match self.sync_id {
-            None => CREATE_BUTTON_LABEL,
-            Some(_) => SAVE_BUTTON_LABEL,
+            None => crate::t!("common-create"),
+            Some(_) => crate::t!("common-save"),
         };
 
         Flex::row()
@@ -877,7 +870,7 @@ impl EnumCreationDialog {
                                 .cancel_button_mouse_state_handle
                                 .clone(),
                             EnumCreationDialogAction::Close,
-                            CANCEL_BUTTON_LABEL,
+                            crate::t!("common-close"),
                             false,
                             false,
                         ),

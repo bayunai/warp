@@ -174,13 +174,13 @@ impl DetailsBar {
         match editor.state {
             EditorState::None => appearance
                 .ui_builder()
-                .span("Viewing")
+                .span(crate::t!("common-viewing"))
                 .with_style(base_text_styles)
                 .build()
                 .finish(),
             EditorState::CurrentUser => appearance
                 .ui_builder()
-                .span("Editing")
+                .span(crate::t!("common-editing"))
                 .with_style(base_text_styles)
                 .build()
                 .finish(),

@@ -176,7 +176,7 @@ impl<T: Action + Clone> Banner<T> {
 
     fn permanent_dismissal_button() -> BannerTextButton {
         BannerTextButton::new(
-            String::from("Don't show me again"),
+            crate::t!("banner-dont-show-again"),
             Rc::new(|ctx, _, _| {
                 ctx.dispatch_typed_action(BannerAction::<T>::Dismiss(DismissalType::Permanent));
             }),

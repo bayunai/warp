@@ -439,10 +439,10 @@ impl FileUpload {
         appearance: &Appearance,
     ) -> Box<dyn Element> {
         let view_session_text = if file.local_session_open {
-            String::from("Close")
+            crate::t!("terminal-ssh-close-upload-session")
         } else {
-            String::from("View")
-        } + " upload session";
+            crate::t!("terminal-ssh-view-upload-session")
+        };
         let upload_id = file.upload_id;
         Container::new(
             appearance
@@ -465,7 +465,9 @@ impl FileUpload {
             FormattedTextElement::new(
                 FormattedText::new(vec![FormattedTextLine::Heading(FormattedTextHeader {
                     heading_size: 3,
-                    text: vec![FormattedTextFragment::plain_text("File Uploads")],
+                    text: vec![FormattedTextFragment::plain_text(crate::t!(
+                        "terminal-ssh-file-uploads-title"
+                    ))],
                 })]),
                 appearance.ui_font_size(),
                 appearance.ui_font_family(),

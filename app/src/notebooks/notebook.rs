@@ -126,11 +126,6 @@ const EDIT_BUTTON_MARGIN: f32 = 6.;
 const HEADER_MARGIN: f32 = 15.;
 const BANNER_VERTICAL_MARGIN: f32 = 10.;
 
-const CONFLICT_RESOLUTION_MESSAGE: &str = "This notebook could not be saved because changes were made while you were editing. Please copy your work and refresh.";
-const REFRESH_BUTTON_TEXT: &str = "Refresh";
-
-const FEATURE_NOT_AVAILABLE_MESSAGE: &str = "This notebook could not be saved to the server because the feature is temporarily unavailable. The changes are saved locally. Please retry later.";
-
 /// The frequency at which we check for modifications and save the notebook to the server. This
 /// lets us trade off how quickly edits appear on other clients with the load on the server for RTC
 /// object updates.
@@ -2069,8 +2064,12 @@ impl NotebookView {
                 .ui_builder()
                 .wrappable_text(
                     match sync_error {
-                        NotebookSyncError::FeatureNotAvailable => FEATURE_NOT_AVAILABLE_MESSAGE,
-                        NotebookSyncError::InConflict => CONFLICT_RESOLUTION_MESSAGE,
+                        NotebookSyncError::FeatureNotAvailable => {
+                            crate::t!("notebook-sync-feature-not-available-message")
+                        }
+                        NotebookSyncError::InConflict => {
+                            crate::t!("notebook-sync-conflict-resolution-message")
+                        }
                     },
                     true,
                 )
@@ -2144,7 +2143,7 @@ impl NotebookView {
                                     .build()
                                     .finish()
                             })
-                            .with_text_label(REFRESH_BUTTON_TEXT.to_string())
+                            .with_text_label(crate::t!("common-refresh"))
                             .build()
                             .on_click(|ctx, _, _| {
                                 ctx.dispatch_typed_action(

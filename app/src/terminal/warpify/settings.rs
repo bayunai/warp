@@ -103,7 +103,15 @@ maybe_define_setting!(SshExtensionInstallModeSetting, group: WarpifySettings, {
 });
 
 impl SshExtensionInstallMode {
-    pub fn display_name(&self) -> &'static str {
+    pub fn display_name(&self) -> String {
+        match self {
+            SshExtensionInstallMode::AlwaysAsk => crate::t!("ai-execution-profile-always-ask"),
+            SshExtensionInstallMode::AlwaysInstall => crate::t!("terminal-always-install"),
+            SshExtensionInstallMode::NeverInstall => crate::t!("terminal-never-install"),
+        }
+    }
+
+    pub fn telemetry_name(&self) -> &'static str {
         match self {
             SshExtensionInstallMode::AlwaysAsk => "Always ask",
             SshExtensionInstallMode::AlwaysInstall => "Always install",

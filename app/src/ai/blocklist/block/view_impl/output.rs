@@ -2284,19 +2284,25 @@ fn create_formatted_text_for_grep(
             .expect("Queries slice should have an element");
         let mut fragments = if is_cancelled || is_queued {
             vec![
-                FormattedTextFragment::plain_text("Grep for "),
+                FormattedTextFragment::plain_text(crate::t!("ai-tool-output-grep-for")),
                 FormattedTextFragment::inline_code(query),
             ]
         } else {
             vec![
-                FormattedTextFragment::plain_text("Grepping for "),
+                FormattedTextFragment::plain_text(crate::t!("ai-tool-output-grepping-for")),
                 FormattedTextFragment::inline_code(query),
             ]
         };
         fragments.push(if is_cancelled {
-            FormattedTextFragment::plain_text(format!(" in {display_path} cancelled"))
+            FormattedTextFragment::plain_text(crate::t!(
+                "ai-tool-output-in-path-cancelled",
+                path = display_path
+            ))
         } else {
-            FormattedTextFragment::plain_text(format!(" in {display_path}"))
+            FormattedTextFragment::plain_text(crate::t!(
+                "ai-tool-output-in-path",
+                path = display_path
+            ))
         });
         FormattedText::new([FormattedTextLine::Line(fragments)])
     } else {
@@ -2304,25 +2310,28 @@ fn create_formatted_text_for_grep(
 
         if is_cancelled {
             lines.push(FormattedTextLine::Line(vec![
-                FormattedTextFragment::plain_text(format!(
-                    "Cancelled grep for the following patterns in {display_path}"
+                FormattedTextFragment::plain_text(crate::t!(
+                    "ai-tool-output-grep-patterns-cancelled",
+                    path = display_path
                 )),
             ]));
         } else {
             lines.push(FormattedTextLine::Line(vec![if is_queued {
-                FormattedTextFragment::plain_text(format!(
-                    "Grep for the following patterns in {display_path}"
+                FormattedTextFragment::plain_text(crate::t!(
+                    "ai-tool-output-grep-patterns-queued",
+                    path = display_path
                 ))
             } else {
-                FormattedTextFragment::plain_text(format!(
-                    "Grepping for the following patterns in {display_path}"
+                FormattedTextFragment::plain_text(crate::t!(
+                    "ai-tool-output-grep-patterns-running",
+                    path = display_path
                 ))
             }]));
         }
 
         for query in queries {
             lines.push(FormattedTextLine::Line(vec![
-                FormattedTextFragment::plain_text(" - "),
+                FormattedTextFragment::plain_text(crate::t!("common-list-prefix")),
                 FormattedTextFragment::inline_code(query),
             ]));
         }
@@ -2372,7 +2381,9 @@ fn create_formatted_text_for_file_glob(
         .as_ref()
         .is_some_and(|status| status.is_queued());
 
-    let path = path.unwrap_or("the current directory");
+    let path = path
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| crate::t!("common-current-directory"));
 
     let formatted_text = if patterns.len() == 1 {
         let pattern = patterns
@@ -2381,19 +2392,22 @@ fn create_formatted_text_for_file_glob(
 
         let mut fragments = if is_cancelled || is_queued {
             vec![
-                FormattedTextFragment::plain_text("Search for files that match "),
+                FormattedTextFragment::plain_text(crate::t!("ai-tool-output-search-files-match")),
                 FormattedTextFragment::inline_code(pattern),
             ]
         } else {
             vec![
-                FormattedTextFragment::plain_text("Finding files that match "),
+                FormattedTextFragment::plain_text(crate::t!("ai-tool-output-finding-files-match")),
                 FormattedTextFragment::inline_code(pattern),
             ]
         };
         fragments.push(if is_cancelled {
-            FormattedTextFragment::plain_text(format!(" in {path} cancelled"))
+            FormattedTextFragment::plain_text(crate::t!(
+                "ai-tool-output-in-path-cancelled",
+                path = path
+            ))
         } else {
-            FormattedTextFragment::plain_text(format!(" in {path}"))
+            FormattedTextFragment::plain_text(crate::t!("ai-tool-output-in-path", path = path))
         });
         FormattedText::new([FormattedTextLine::Line(fragments)])
     } else {
@@ -2401,25 +2415,28 @@ fn create_formatted_text_for_file_glob(
 
         if is_cancelled {
             lines.push(FormattedTextLine::Line(vec![
-                FormattedTextFragment::plain_text(format!(
-                    "Cancelled search for files that match the following patterns in {path}"
+                FormattedTextFragment::plain_text(crate::t!(
+                    "ai-tool-output-file-patterns-cancelled",
+                    path = path
                 )),
             ]));
         } else {
             lines.push(FormattedTextLine::Line(vec![if is_queued {
-                FormattedTextFragment::plain_text(format!(
-                    "Find files that match the following patterns in {path}"
+                FormattedTextFragment::plain_text(crate::t!(
+                    "ai-tool-output-file-patterns-queued",
+                    path = path
                 ))
             } else {
-                FormattedTextFragment::plain_text(format!(
-                    "Finding files that match the following patterns in {path}"
+                FormattedTextFragment::plain_text(crate::t!(
+                    "ai-tool-output-file-patterns-running",
+                    path = path
                 ))
             }]));
         }
 
         for pattern in patterns {
             lines.push(FormattedTextLine::Line(vec![
-                FormattedTextFragment::plain_text(" - "),
+                FormattedTextFragment::plain_text(crate::t!("common-list-prefix")),
                 FormattedTextFragment::inline_code(pattern),
             ]));
         }
@@ -3477,16 +3494,19 @@ fn conversation_search_phase(task: &crate::ai::agent::task::Task) -> Conversatio
 
 fn format_conversation_search_phase(phase: &ConversationSearchPhase) -> String {
     match phase {
-        ConversationSearchPhase::ListingMessages => "Listing messages".to_string(),
+        ConversationSearchPhase::ListingMessages => crate::t!("ai-tool-output-listing-messages"),
         ConversationSearchPhase::Grepping { patterns } => {
             if patterns.is_empty() {
-                return "Grepping for patterns".to_string();
+                return crate::t!("ai-tool-output-grepping-patterns");
             }
             let joined = truncate_from_end(&patterns.join(", "), 60);
-            format!("Grepping for patterns: {joined}")
+            crate::t!(
+                "ai-tool-output-grepping-patterns-with-query",
+                query = joined
+            )
         }
         ConversationSearchPhase::ReadingMessages { count } => {
-            format!("Reading {count} messages")
+            crate::t!("ai-tool-output-reading-messages", count = count)
         }
     }
 }
