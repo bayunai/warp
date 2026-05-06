@@ -8,7 +8,10 @@ use crate::ai::agent::ImageContext;
 use crate::ai::blocklist::agent_view::agent_input_footer::{
     AgentInputFooter, AgentInputFooterEvent,
 };
-use crate::terminal::cli_agent_sessions::{CLIAgentInputEntrypoint, CLIAgentSessionsModel};
+use crate::terminal::cli_agent_sessions::{
+    event::{CLIAgentEvent, CLIAgentEventPayload, CLIAgentEventType},
+    CLIAgentInputEntrypoint, CLIAgentSessionsModel,
+};
 use crate::terminal::shared_session::{SharedSessionActionSource, SharedSessionScrollbackType};
 use base64::Engine;
 use session_sharing_protocol::sharer::SessionSourceType;
@@ -120,7 +123,7 @@ enum RichInputSubmitStrategy {
 /// Returns the strategy for submitting rich input text to a CLI agent's PTY.
 fn rich_input_submit_strategy(agent: CLIAgent) -> RichInputSubmitStrategy {
     match agent {
-        CLIAgent::Codex => RichInputSubmitStrategy::BracketedPaste,
+        CLIAgent::Codex | CLIAgent::DeepSeek => RichInputSubmitStrategy::BracketedPaste,
         CLIAgent::Copilot => RichInputSubmitStrategy::BracketedPasteDelayedEnter,
         CLIAgent::Claude
         | CLIAgent::OpenCode
@@ -634,10 +637,10 @@ impl TerminalView {
         }
 
         let prompt_length = text.chars().count();
-        let cli_agent: Option<CLIAgentType> = CLIAgentSessionsModel::as_ref(ctx)
+        let session_agent = CLIAgentSessionsModel::as_ref(ctx)
             .session(self.view_id)
-            .map(|s| s.agent.into());
-        if let Some(cli_agent) = cli_agent {
+            .map(|s| s.agent);
+        if let Some(cli_agent) = session_agent.map(CLIAgentType::from) {
             send_telemetry_from_ctx!(
                 TelemetryEvent::CLIAgentRichInputSubmitted {
                     cli_agent,
@@ -645,6 +648,25 @@ impl TerminalView {
                 },
                 ctx
             );
+        }
+
+        if let Some(agent) = session_agent {
+            let view_id = self.view_id;
+            let event = CLIAgentEvent {
+                v: 1,
+                agent,
+                event: CLIAgentEventType::PromptSubmit,
+                session_id: None,
+                cwd: None,
+                project: None,
+                payload: CLIAgentEventPayload {
+                    query: Some(text.clone()),
+                    ..Default::default()
+                },
+            };
+            CLIAgentSessionsModel::handle(ctx).update(ctx, |sessions_model, ctx| {
+                sessions_model.update_from_event(view_id, &event, ctx);
+            });
         }
 
         // Clear any saved draft so submitted text isn't restored on the next open.

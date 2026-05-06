@@ -104,6 +104,7 @@ use crate::{
     ui_components::{blended_colors, buttons::icon_button, icons::Icon},
     view_components::action_button::ActionButton,
     workspace::WorkspaceAction,
+    workspaces::user_workspaces::UserWorkspaces,
     FeatureFlag,
 };
 use itertools::Itertools;
@@ -2909,6 +2910,10 @@ fn render_response_footer(props: Props, app: &AppContext) -> Option<Box<dyn Elem
 
 /// Renders the usage button that, on click, will expand & collapse the usage summary footer.
 fn render_usage_button(props: Props, app: &AppContext) -> Box<dyn Element> {
+    if UserWorkspaces::as_ref(app).is_byo_api_key_enabled() {
+        return Empty::new().finish();
+    }
+
     let Some(conversation) = props.model.conversation(app) else {
         return Empty::new().finish();
     };

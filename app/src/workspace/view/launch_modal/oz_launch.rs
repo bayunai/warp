@@ -57,7 +57,7 @@ impl Slide for OzLaunchSlide {
             OzLaunchSlide::CloudAgents => "Cloud agents",
             OzLaunchSlide::AgentAutomations => "Agent automations",
             OzLaunchSlide::AgentManagement => "Agent management",
-            OzLaunchSlide::LaunchCredits => "A little gift",
+            OzLaunchSlide::LaunchCredits => "Get started",
         })
     }
 
@@ -66,7 +66,7 @@ impl Slide for OzLaunchSlide {
             OzLaunchSlide::CloudAgents => "Cloud agents",
             OzLaunchSlide::AgentAutomations => "Agent automations",
             OzLaunchSlide::AgentManagement => "Agent management",
-            OzLaunchSlide::LaunchCredits => "Launch credits",
+            OzLaunchSlide::LaunchCredits => "Get started",
         }
     }
 
@@ -77,9 +77,7 @@ impl Slide for OzLaunchSlide {
                 "Orchestrate agents, turning Skills into automations"
             }
             OzLaunchSlide::AgentManagement => "Track local and cloud agents seamlessly",
-            OzLaunchSlide::LaunchCredits => {
-                "1,000 free cloud agent credits when you upgrade to Warp Build"
-            }
+            OzLaunchSlide::LaunchCredits => "Start your first cloud agent run",
         }
     }
 
@@ -99,7 +97,7 @@ impl Slide for OzLaunchSlide {
                 "View all of your agents across local and cloud sessions in the Warp app or at [oz.warp.dev](https://oz.warp.dev). Join live agent sessions, continue tasks locally, and steer agents with one click."
             }
             OzLaunchSlide::LaunchCredits => {
-                "Upgrade to Build this month and receive 1,000 extra credits to try using Oz. Credits are only eligible for Oz runs in Warp-hosted cloud environments."
+                "Open Oz and launch an agent in a hosted environment, then monitor progress and continue work from Warp whenever you need."
             }
         }
     }

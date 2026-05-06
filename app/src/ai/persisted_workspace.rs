@@ -67,7 +67,10 @@ pub enum LspTask {
         server_type: LSPServerType,
     },
     /// Spawn LSP servers for a file path.
-    Spawn { file_path: PathBuf },
+    Spawn {
+        file_path: PathBuf,
+        server_type: Option<LSPServerType>,
+    },
 }
 
 pub enum LSPEnablementResultForFile {
@@ -166,7 +169,6 @@ pub enum PersistedWorkspaceEvent {
     },
     /// Emitted when LSP installation completes successfully.
     /// Toast notification is shown directly by PersistedWorkspace.
-    /// The server is also spawned automatically by PersistedWorkspace.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     InstallationSucceeded,
     /// Emitted when LSP installation fails.
@@ -264,33 +266,14 @@ impl PersistedWorkspace {
             });
         }
 
-        // Collect workspace paths before metadata is moved into Self.
-        #[cfg(feature = "local_fs")]
-        let startup_workspace_paths: Vec<PathBuf> = metadata.keys().cloned().collect();
+        let _ = ctx;
 
-        #[allow(unused_mut)]
-        let mut result = Self {
+        Self {
             workspaces: metadata,
             model_event_sender,
             #[cfg(feature = "local_fs")]
             lsp_installation_status: HashMap::new(),
-        };
-
-        // Kick off LSP suggestion scanning for all existing workspaces so that
-        // the available-server state is fresh by the time any footer is created.
-        // We pass skip_cached=true so workspaces with persisted entries are still
-        // re-scanned to discover newly relevant server types.
-        #[cfg(feature = "local_fs")]
-        if !cfg!(any(
-            test,
-            feature = "fast_dev",
-            feature = "integration_tests"
-        )) && !startup_workspace_paths.is_empty()
-        {
-            result.detect_available_servers_for_workspaces(startup_workspace_paths, true, ctx);
         }
-
-        result
     }
 
     /// Given a repo path, enables the specified LSP server. If the workspace doesn't exist, it will be created.
@@ -675,7 +658,23 @@ impl PersistedWorkspace {
             status: LSPInstallationStatus::Installing,
         });
 
+        let install_toast_id = format!("lsp-install-{}", server_type.binary_name());
+        if let Some(window_id) = WindowManager::as_ref(ctx).active_window() {
+            ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
+                toast_stack.add_persistent_toast(
+                    DismissibleToast::default(format!(
+                        "Installing {}... This may take a few minutes.",
+                        server_type.binary_name()
+                    ))
+                    .with_object_id(install_toast_id.clone()),
+                    window_id,
+                    ctx,
+                );
+            });
+        }
+
         let _ = repo_root;
+        let should_spawn_after_install = !file_path.as_os_str().is_empty();
         let file_path_clone = file_path.clone();
         let executor = lsp::CommandBuilder::new(path_env_var);
         let http_client = ServerApiProvider::as_ref(ctx).get_http_client();
@@ -709,7 +708,8 @@ impl PersistedWorkspace {
                                 DismissibleToast::success(format!(
                                     "{} installed and enabled successfully.",
                                     server_type.binary_name()
-                                )),
+                                ))
+                                .with_object_id(install_toast_id.clone()),
                                 window_id,
                                 ctx,
                             );
@@ -724,18 +724,30 @@ impl PersistedWorkspace {
                         status: LSPInstallationStatus::Installed,
                     });
 
-                    // Spawn the server now that it's installed and enabled.
-                    // This is done here so it happens exactly once, rather
-                    // than relying on each subscriber to spawn independently.
-                    me.execute_lsp_task(
-                        LspTask::Spawn {
-                            file_path: file_path_clone,
-                        },
-                        ctx,
-                    );
+                    // 全局 LSP 管理页只负责安装和启用，不从历史 workspace 推导启动目标。
+                    // 只有来自当前文件/仓库上下文的安装请求才立即尝试启动 LSP。
+                    if should_spawn_after_install {
+                        me.execute_lsp_task(
+                            LspTask::Spawn {
+                                file_path: file_path_clone,
+                                server_type: Some(server_type),
+                            },
+                            ctx,
+                        );
+                    }
                 }
                 Err(e) => {
                     log::info!("Failed to install LSP server: {e}");
+
+                    // 安装失败：撤销安装前的 enable 操作，
+                    // 避免每次打开文件都尝试启动一个未安装的服务器。
+                    CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+                        let mut enabled_servers = settings.enabled_lsp_servers.value().clone();
+                        enabled_servers.retain(|&s| s != server_type);
+                        report_if_error!(settings
+                            .enabled_lsp_servers
+                            .set_value(enabled_servers, ctx));
+                    });
 
                     // Update installation status to NotInstalled
                     me.lsp_installation_status
@@ -749,7 +761,8 @@ impl PersistedWorkspace {
                                     "Failed to install {}: {}",
                                     server_type.binary_name(),
                                     e
-                                )),
+                                ))
+                                .with_object_id(install_toast_id.clone()),
                                 window_id,
                                 ctx,
                             );
@@ -774,6 +787,7 @@ impl PersistedWorkspace {
     fn handle_spawn_lsp(
         &self,
         file_path: &Path,
+        server_type_filter: Option<LSPServerType>,
         path_env_var: Option<String>,
         ctx: &mut ModelContext<Self>,
     ) {
@@ -786,6 +800,10 @@ impl PersistedWorkspace {
             .value()
             .iter()
             .copied()
+            .filter(|server_type| match server_type_filter {
+                Some(filter) => *server_type == filter,
+                None => true,
+            })
             .collect::<Vec<LSPServerType>>();
 
         if supported_servers.is_empty() {
@@ -866,9 +884,16 @@ impl PersistedWorkspace {
                     if let Some(window_id) = WindowManager::as_ref(ctx).active_window()
                     {
                         ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                            let toast = DismissibleToast::error(format!(
-                                "Failed to start LSP server for {workspace_root_display} with error {e}",
-                            ));
+                            let error_str = e.to_string();
+                            let toast = if error_str.contains("is not installed") {
+                                DismissibleToast::error(format!(
+                                    "{server_type_name} is not installed. Go to Settings > LSP Management to install it."
+                                ))
+                            } else {
+                                DismissibleToast::error(format!(
+                                    "Failed to start LSP server for {workspace_root_display} with error {e}",
+                                ))
+                            };
                             toast_stack.add_ephemeral_toast(toast, window_id, ctx);
                         });
                     }
@@ -892,7 +917,7 @@ impl PersistedWorkspace {
         // For Spawn tasks, check synchronously whether there are any enabled LSP
         // servers for this workspace before kicking off the expensive interactive
         // shell PATH capture.
-        if let LspTask::Spawn { ref file_path } = task {
+        if let LspTask::Spawn { ref file_path, .. } = task {
             let has_servers = self.root_for_workspace(file_path).is_some()
                 && !CodeSettings::as_ref(ctx)
                     .enabled_lsp_servers
@@ -916,8 +941,11 @@ impl PersistedWorkspace {
             } => {
                 me.handle_install_lsp(file_path, repo_root, server_type, path_env_var, ctx);
             }
-            LspTask::Spawn { file_path } => {
-                me.handle_spawn_lsp(&file_path, path_env_var, ctx);
+            LspTask::Spawn {
+                file_path,
+                server_type,
+            } => {
+                me.handle_spawn_lsp(&file_path, server_type, path_env_var, ctx);
             }
         });
     }

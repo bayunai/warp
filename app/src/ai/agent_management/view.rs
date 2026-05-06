@@ -1706,7 +1706,7 @@ impl AgentManagementView {
                 .with_child(Self::render_header_row(
                     card_state, card_data, appearance, app,
                 ))
-                .with_child(Self::render_metadata_row(card_data, appearance, app));
+                .with_child(Self::render_metadata_row(card_data, appearance));
 
             // Add artifacts row if there is a buttons view
             if let Some(buttons_element) = artifact_buttons_element {
@@ -1855,7 +1855,6 @@ impl AgentManagementView {
     fn render_metadata_row(
         card_data: &ConversationOrTask,
         appearance: &Appearance,
-        app: &AppContext,
     ) -> Box<dyn Element> {
         let theme = appearance.theme();
         let font_family = appearance.ui_font_family();
@@ -1885,13 +1884,6 @@ impl AgentManagementView {
             metadata_parts.push(crate::t!(
                 "agent-management-metadata-run-time",
                 run_time = run_time.as_str()
-            ));
-        }
-
-        if let Some(usage) = card_data.display_request_usage(app) {
-            metadata_parts.push(crate::t!(
-                "agent-management-metadata-credits-used",
-                usage = usage.as_str()
             ));
         }
 

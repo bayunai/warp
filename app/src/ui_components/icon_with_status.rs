@@ -3,9 +3,13 @@ use pathfinder_geometry::vector::vec2f;
 use warp_core::ui::icons::Icon as WarpIcon;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::{Fill as WarpThemeFill, WarpTheme};
-use warpui::elements::{
-    ChildAnchor, ConstrainedBox, Container, CornerRadius, Element, OffsetPositioning, ParentAnchor,
-    ParentElement, ParentOffsetBounds, Radius, Stack,
+use warpui::{
+    assets::asset_cache::AssetSource,
+    elements::{
+        CacheOption, ChildAnchor, ConstrainedBox, Container, CornerRadius, Element,
+        Fill as ElementFill, Image, OffsetPositioning, ParentAnchor, ParentElement,
+        ParentOffsetBounds, Radius, Stack,
+    },
 };
 
 use crate::ai::agent::conversation::ConversationStatus;
@@ -24,6 +28,33 @@ pub(crate) struct IconWithStatusSizing {
     /// Offset of the status badge from the bottom-right corner of the circle.
     /// Positive x pushes right, positive y pushes down.
     pub(crate) badge_offset: (f32, f32),
+}
+
+const DEEPSEEK_LOGO_PATH: &str = "bundled/svg/deepseek.svg";
+
+pub(crate) fn render_cli_agent_logo(
+    agent: CLIAgent,
+    icon_color: WarpThemeFill,
+    fallback_icon_color: WarpThemeFill,
+) -> Box<dyn Element> {
+    if matches!(agent, CLIAgent::DeepSeek) {
+        Image::new(
+            AssetSource::Bundled {
+                path: DEEPSEEK_LOGO_PATH,
+            },
+            CacheOption::BySize,
+        )
+        .finish()
+    } else {
+        agent
+            .icon()
+            .map(|icon| icon.to_warpui_icon(icon_color).finish())
+            .unwrap_or_else(|| {
+                WarpIcon::Terminal
+                    .to_warpui_icon(fallback_icon_color)
+                    .finish()
+            })
+    }
 }
 
 /// What to render inside the circle.
@@ -116,20 +147,20 @@ pub(crate) fn render_icon_with_status(
                 .brand_color()
                 .unwrap_or(ColorU::new(100, 100, 100, 255));
             let icon_color = agent.brand_icon_color();
-            let icon_element = agent
-                .icon()
-                .map(|icon| {
-                    icon.to_warpui_icon(WarpThemeFill::Solid(icon_color))
-                        .finish()
-                })
-                .unwrap_or_else(|| WarpIcon::Terminal.to_warpui_icon(sub_text).finish());
+            let icon_element =
+                render_cli_agent_logo(agent, WarpThemeFill::Solid(icon_color), sub_text);
             let inner = ConstrainedBox::new(icon_element)
                 .with_width(sizing.icon_size)
                 .with_height(sizing.icon_size)
                 .finish();
+            let background: ElementFill = if matches!(agent, CLIAgent::DeepSeek) {
+                theme.background().into()
+            } else {
+                ThemeFill::Solid(brand_color).into()
+            };
             let circle = Container::new(inner)
                 .with_uniform_padding(sizing.padding)
-                .with_background(ThemeFill::Solid(brand_color))
+                .with_background(background)
                 .with_corner_radius(CornerRadius::with_all(Radius::Pixels(
                     (sizing.icon_size + sizing.padding * 2.) / 2.,
                 )))

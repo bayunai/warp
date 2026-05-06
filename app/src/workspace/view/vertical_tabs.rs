@@ -6,12 +6,12 @@ use crate::code::editor::{add_color, remove_color};
 use crate::code::icon_from_file_path;
 use crate::safe_triangle::SafeTriangle;
 use crate::send_telemetry_from_app_ctx;
-use crate::terminal::cli_agent_sessions::listener::agent_supports_rich_status;
+use crate::terminal::cli_agent_sessions::listener::session_supports_rich_status;
 use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
 use crate::terminal::view::TerminalViewState;
 use crate::terminal::CLIAgent;
 use crate::ui_components::icon_with_status::{
-    render_icon_with_status, IconWithStatusSizing, IconWithStatusVariant,
+    render_cli_agent_logo, render_icon_with_status, IconWithStatusSizing, IconWithStatusVariant,
 };
 use crate::workspace::view::vertical_tabs::telemetry::{
     VerticalTabsChipEntrypoint, VerticalTabsTelemetryEvent,
@@ -1252,12 +1252,13 @@ fn render_detail_kind_badge_icon(
             let terminal_view = terminal_pane.terminal_view(app);
             let terminal_view = terminal_view.as_ref(app);
             let cli_agent_session = CLIAgentSessionsModel::as_ref(app).session(terminal_view.id());
-            if let Some(icon) = cli_agent_session.and_then(|session| session.agent.icon()) {
-                let color = cli_agent_session
-                    .and_then(|session| session.agent.brand_color())
+            if let Some(session) = cli_agent_session {
+                let color = session
+                    .agent
+                    .brand_color()
                     .map(WarpThemeFill::Solid)
                     .unwrap_or_else(|| theme.accent());
-                return icon.to_warpui_icon(color).finish();
+                return render_cli_agent_logo(session.agent, color, disabled_text);
             }
 
             let icon = if terminal_view.is_ambient_agent_session(app) {
@@ -2353,7 +2354,7 @@ fn resolve_icon_with_status_variant(
             {
                 IconWithStatusVariant::CLIAgent {
                     agent: session.agent,
-                    status: if agent_supports_rich_status(&session.agent) {
+                    status: if session_supports_rich_status(session) {
                         Some(session.status.to_conversation_status())
                     } else {
                         None
@@ -3745,25 +3746,23 @@ fn render_summary_pane_kind_icon_circle(
         }
         SummaryPaneKind::CLIAgent { agent } => {
             let icon_color = agent.brand_icon_color();
-            let icon_element = agent
-                .icon()
-                .map(|icon| {
-                    icon.to_warpui_icon(WarpThemeFill::Solid(icon_color))
-                        .finish()
-                })
-                .unwrap_or_else(|| {
-                    WarpIcon::Terminal
-                        .to_warpui_icon(theme.sub_text_color(theme.background()))
-                        .finish()
-                });
+            let icon_element = render_cli_agent_logo(
+                agent,
+                WarpThemeFill::Solid(icon_color),
+                theme.sub_text_color(theme.background()),
+            );
             (
                 icon_element,
-                ThemeFill::Solid(
-                    agent
-                        .brand_color()
-                        .unwrap_or(ColorU::new(100, 100, 100, 255)),
-                )
-                .into(),
+                if matches!(agent, CLIAgent::DeepSeek) {
+                    theme.background().into()
+                } else {
+                    ThemeFill::Solid(
+                        agent
+                            .brand_color()
+                            .unwrap_or(ColorU::new(100, 100, 100, 255)),
+                    )
+                    .into()
+                },
             )
         }
         SummaryPaneKind::Code { title } => (
@@ -5454,7 +5453,7 @@ fn render_terminal_detail_section(
         preferred_agent_tab_titles(&agent_text, agent_tab_text_preference(app));
     let kind_label = terminal_kind_badge_label(agent_text.is_oz_agent, agent_text.cli_agent);
     let status = if let Some(session) =
-        cli_agent_session.filter(|s| s.listener.is_some() && agent_supports_rich_status(&s.agent))
+        cli_agent_session.filter(|s| s.listener.is_some() && session_supports_rich_status(s))
     {
         Some(session.status.to_conversation_status())
     } else if agent_text.is_oz_agent {

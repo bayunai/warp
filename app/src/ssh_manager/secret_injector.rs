@@ -111,8 +111,6 @@ async fn watch_for_prompt(rx: InactiveReceiver<Arc<Vec<u8>>>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     fn matches(input: &str) -> bool {
         let re = regex::bytes::Regex::new(r"(?im)(password|passphrase)[^\n]*:\s*$").unwrap();
         re.is_match(input.as_bytes())

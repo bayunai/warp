@@ -135,6 +135,10 @@ impl PromptAlertView {
             return PromptAlertState::NoConnection;
         }
 
+        if UserWorkspaces::as_ref(app).is_byo_api_key_enabled() {
+            return PromptAlertState::NoAlert;
+        }
+
         // Check if telemetry is disabled for free tier users.
         // Free tier users must enable telemetry or upgrade to use AI features.
         let privacy_settings = PrivacySettings::as_ref(app);

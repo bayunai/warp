@@ -2,11 +2,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::language_server_candidate::{LanguageServerCandidate, LanguageServerMetadata};
+#[cfg(feature = "local_fs")]
+use crate::supported_servers::CustomBinaryConfig;
 use crate::CommandBuilder;
 use async_trait::async_trait;
 
 #[cfg(feature = "local_fs")]
-use crate::install::fetch_latest_metadata_from_github;
+const SERVER_NAME: &str = "gopls";
 
 #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
 pub struct GoPlsCandidate {
@@ -16,6 +18,30 @@ pub struct GoPlsCandidate {
 impl GoPlsCandidate {
     pub fn new(client: Arc<http_client::Client>) -> Self {
         Self { client }
+    }
+
+    #[cfg(feature = "local_fs")]
+    pub async fn find_installed_binary_config() -> Option<CustomBinaryConfig> {
+        let binary_path = warp_core::paths::data_dir()
+            .join(SERVER_NAME)
+            .join(if cfg!(windows) { "gopls.exe" } else { "gopls" });
+        if !binary_path.is_file() {
+            return None;
+        }
+
+        let output = command::r#async::Command::new(&binary_path)
+            .arg("version")
+            .output()
+            .await
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+
+        Some(CustomBinaryConfig {
+            binary_path,
+            prepend_args: vec![],
+        })
     }
 }
 
@@ -38,8 +64,7 @@ impl LanguageServerCandidate for GoPlsCandidate {
     }
 
     async fn is_installed_in_data_dir(&self, _executor: &CommandBuilder) -> bool {
-        // gopls doesn't support custom installation yet
-        false
+        Self::find_installed_binary_config().await.is_some()
     }
 
     async fn is_installed_on_path(&self, executor: &CommandBuilder) -> bool {
@@ -57,9 +82,13 @@ impl LanguageServerCandidate for GoPlsCandidate {
         _metadata: LanguageServerMetadata,
         executor: &CommandBuilder,
     ) -> anyhow::Result<()> {
+        let install_dir = warp_core::paths::data_dir().join(SERVER_NAME);
+        async_fs::create_dir_all(&install_dir).await?;
+
         let output = executor
             .command("go")
             .args(["install", "golang.org/x/tools/gopls@latest"])
+            .env("GOBIN", &install_dir)
             .output()
             .await?;
 
@@ -72,8 +101,14 @@ impl LanguageServerCandidate for GoPlsCandidate {
     }
 
     async fn fetch_latest_server_metadata(&self) -> anyhow::Result<LanguageServerMetadata> {
-        // gopls doesn't provide prebuilt binaries; it must be installed via `go install`
-        fetch_latest_metadata_from_github(&self.client, "golang", "tools", None).await
+        // gopls 通过 `go install ...@latest` 安装，不需要预先访问 GitHub 获取 metadata。
+        // 这样与 opencode 一致，也避免 GitHub API rate limit 阻断安装链路。
+        let _ = &self.client;
+        Ok(LanguageServerMetadata {
+            version: "latest".to_string(),
+            url: None,
+            digest: None,
+        })
     }
 }
 

@@ -1,22 +1,21 @@
 use super::{
-    flags,
+    SettingsAction, SettingsSection, ToggleSettingActionPair, flags,
     settings_page::{
-        render_body_item, render_customer_type_badge, AdditionalInfo, LocalOnlyIconState,
-        MatchData, PageType, SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, ToggleState,
-        HEADER_PADDING,
+        AdditionalInfo, HEADER_PADDING, LocalOnlyIconState, MatchData, PageType, SettingsPageMeta,
+        SettingsPageViewHandle, SettingsWidget, ToggleState, render_body_item,
+        render_customer_type_badge,
     },
-    SettingsAction, SettingsSection, ToggleSettingActionPair,
 };
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::autoupdate::{self, AutoupdateStage, AutoupdateState};
 use crate::send_telemetry_from_ctx;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{
+    TelemetryEvent,
     appearance::Appearance,
     auth::{auth_state::AuthState, auth_view_modal::AuthViewVariant},
     report_if_error,
     settings::cloud_preferences::CloudPreferencesSettings,
-    TelemetryEvent,
 };
 use crate::{auth::auth_manager::AuthManager, server::ids::ServerId};
 use crate::{auth::auth_manager::LoginGatedFeature, workspaces::workspace::CustomerType};
@@ -30,18 +29,21 @@ use warp_core::features::FeatureFlag;
 use warp_core::ui::icons::Icon;
 use warp_core::{channel::ChannelState, context_flag::ContextFlag};
 use warpui::{
+    Action, AppContext,
+    elements::{
+        Align, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Element, Flex,
+        MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
+    },
+};
+use warpui::{
+    Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
+};
+use warpui::{
     assets::asset_cache::AssetSource,
     elements::{Border, Empty, MainAxisAlignment, MainAxisSize},
     id,
     platform::Cursor,
     ui_components::switch::SwitchStateHandle,
-};
-use warpui::{
-    elements::{
-        Align, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Element, Flex,
-        MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
-    },
-    Action, AppContext,
 };
 use warpui::{
     elements::{CacheOption, Image},
@@ -51,9 +53,6 @@ use warpui::{
     },
 };
 use warpui::{fonts::Weight, keymap::ContextPredicate};
-use warpui::{
-    Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
-};
 
 const PHOTO_SIZE: f32 = 40.;
 const REGULAR_TEXT_FONT_SIZE: f32 = 12.;
@@ -206,9 +205,11 @@ impl TypedActionView for MainSettingsPageView {
             MainPageAction::ToggleSettingsSync => {
                 let new_value =
                     CloudPreferencesSettings::handle(ctx).update(ctx, |prefs_settings, ctx| {
-                        report_if_error!(prefs_settings
-                            .settings_sync_enabled
-                            .toggle_and_save_value(ctx));
+                        report_if_error!(
+                            prefs_settings
+                                .settings_sync_enabled
+                                .toggle_and_save_value(ctx)
+                        );
                         *prefs_settings.settings_sync_enabled
                     });
                 send_telemetry_from_ctx!(

@@ -607,6 +607,13 @@ impl CommandSearchView {
         appearance: &Appearance,
     ) -> Box<dyn Element> {
         if is_ratelimit_error {
+            if UserWorkspaces::as_ref(app).is_byo_api_key_enabled() {
+                return self.render_error_header_text(
+                    "Request limit reached. Please try again later.".to_string(),
+                    appearance,
+                );
+            }
+
             let current_user_id = self.auth_state.user_id().unwrap_or_default();
             if let Some(team) = UserWorkspaces::as_ref(app).current_team() {
                 let current_user_email = self.auth_state.user_email().unwrap_or_default();

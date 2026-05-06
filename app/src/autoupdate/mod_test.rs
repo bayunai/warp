@@ -6,13 +6,18 @@ use crate::{
     server::{
         server_api::ServerApiProvider, telemetry::context_provider::AppTelemetryContextProvider,
     },
+    settings::AutoupdateSettings,
 };
 
+use settings::{Setting as _, SettingsManager};
 use warp_core::execution_mode::{AppExecutionMode, ExecutionMode};
 
 use super::*;
 
 fn initialize_app(app: &mut App) -> ModelHandle<AutoupdateState> {
+    app.add_singleton_model(|_| SettingsManager::default());
+    app.update(crate::settings::init_and_register_user_preferences);
+    AutoupdateSettings::register(app);
     let server_api_provider = app.add_singleton_model(|_| ServerApiProvider::new_for_test());
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
     app.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
@@ -23,6 +28,34 @@ fn initialize_app(app: &mut App) -> ModelHandle<AutoupdateState> {
     });
 
     app.add_model(|_| AutoupdateState::new(server_api))
+}
+
+#[test]
+fn test_disabled_automatic_updates_skip_background_requests() {
+    App::test((), |mut app| async move {
+        app.add_singleton_model(|ctx| AppExecutionMode::new(ExecutionMode::App, false, ctx));
+        let autoupdate_state = initialize_app(&mut app);
+
+        app.update_model(&autoupdate_state, |autoupdate, ctx| {
+            AutoupdateSettings::handle(ctx).update(ctx, |settings, ctx| {
+                settings
+                    .automatic_updates_enabled
+                    .set_value(false, ctx)
+                    .expect("setting should update");
+            });
+
+            autoupdate.request_queue.push_back(RequestType::Poll);
+            autoupdate.request_queue.push_back(RequestType::DailyCheck);
+            assert_eq!(autoupdate.get_next_request(ctx), None);
+            assert_eq!(autoupdate.request_queue.len(), 0);
+
+            autoupdate.request_queue.push_back(RequestType::ManualCheck);
+            assert_eq!(
+                autoupdate.get_next_request(ctx),
+                Some(RequestType::ManualCheck)
+            );
+        });
+    });
 }
 
 #[test]

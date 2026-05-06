@@ -7,16 +7,16 @@ use std::{
 use pathfinder_color::ColorU;
 use warp_core::{paths::home_relative_path, ui::theme::color::internal_colors};
 use warpui::{
+    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
+    r#async::{SpawnedFutureHandle, Timer},
     elements::{
         Align, Border, ChildView, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,
         Container, CornerRadius, CrossAxisAlignment, Dismiss, Element, Empty, Expanded, Flex,
         MainAxisSize, MouseStateHandle, ParentElement, Radius, ScrollbarWidth, Text,
     },
     fonts::{Properties, Weight},
-    platform::{file_picker::FilePickerError, FilePickerConfiguration},
-    r#async::{SpawnedFutureHandle, Timer},
+    platform::{FilePickerConfiguration, file_picker::FilePickerError},
     ui_components::components::UiComponent,
-    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
 
 use crate::{
@@ -24,12 +24,12 @@ use crate::{
     themes::theme::Blend,
     ui_components::{
         buttons::icon_button,
-        dialog::{dialog_styles, Dialog},
+        dialog::{Dialog, dialog_styles},
         icons::Icon,
     },
     view_components::{
-        action_button::{ActionButton, ButtonSize, PrimaryTheme, SecondaryTheme},
         DismissibleToast,
+        action_button::{ActionButton, ButtonSize, PrimaryTheme, SecondaryTheme},
     },
     workspace::ToastStack,
 };

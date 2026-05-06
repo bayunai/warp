@@ -6,10 +6,10 @@ use thiserror::Error;
 use validator::ValidateEmail;
 
 use super::{
-    settings_page::{
-        MatchData, PageType, SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, PAGE_PADDING,
-    },
     SettingsSection,
+    settings_page::{
+        MatchData, PAGE_PADDING, PageType, SettingsPageMeta, SettingsPageViewHandle, SettingsWidget,
+    },
 };
 use crate::{
     appearance::Appearance,
@@ -24,6 +24,8 @@ use crate::{
     view_components::ToastFlavor,
 };
 use warpui::{
+    AppContext, Entity, EventContext, FocusContext, SingletonEntity, TypedActionView, View,
+    ViewContext, ViewHandle,
     clipboard::ClipboardContent,
     elements::{
         Align, Border, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Element, Fill,
@@ -35,8 +37,6 @@ use warpui::{
         button::ButtonVariant,
         components::{Coords, UiComponent, UiComponentStyles},
     },
-    AppContext, Entity, EventContext, FocusContext, SingletonEntity, TypedActionView, View,
-    ViewContext, ViewHandle,
 };
 
 const HEADER_FONT_SIZE: f32 = 18.;
@@ -81,8 +81,7 @@ const CLAIMED_REFERRAL_COUNT_LEFT_MARGIN: f32 = 40.;
 
 const CLAIMED_REFERRAL_CLIP: usize = 999;
 
-const TERMS_URL: &str =
-    "https://docs.warp.dev/support-and-community/community/refer-a-friend#referral-program-terms-and-conditions";
+const TERMS_URL: &str = "https://docs.warp.dev/support-and-community/community/refer-a-friend#referral-program-terms-and-conditions";
 
 enum ApiState {
     Loading,

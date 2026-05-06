@@ -66,6 +66,7 @@ use crate::view_components::DismissibleToast;
 use crate::workspace::{ForkedConversationDestination, ToastStack, WorkspaceAction};
 #[cfg(target_family = "wasm")]
 use crate::workspaces::user_profiles::UserProfiles;
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 const FIELD_SPACING: f32 = 16.0;
 const HEADER_SPACING: f32 = 12.0;
@@ -1740,29 +1741,31 @@ impl View for ConversationDetailsPanel {
             }
         }
 
-        match &self.data.credits {
-            Some(CreditsInfo::AmbientConversation { inference, compute }) => {
-                content.add_child(
-                    Container::new(
-                        self.render_credits_with_split(*inference, *compute, appearance),
-                    )
-                    .with_margin_bottom(FIELD_SPACING)
-                    .finish(),
-                );
+        if !UserWorkspaces::as_ref(app).is_byo_api_key_enabled() {
+            match &self.data.credits {
+                Some(CreditsInfo::AmbientConversation { inference, compute }) => {
+                    content.add_child(
+                        Container::new(
+                            self.render_credits_with_split(*inference, *compute, appearance),
+                        )
+                        .with_margin_bottom(FIELD_SPACING)
+                        .finish(),
+                    );
+                }
+                Some(CreditsInfo::LocalConversation(credits)) => {
+                    let formatted = format!("{credits:.1}");
+                    content.add_child(
+                        Container::new(self.render_simple_field(
+                            "Credits used",
+                            &formatted,
+                            appearance,
+                        ))
+                        .with_margin_bottom(FIELD_SPACING)
+                        .finish(),
+                    );
+                }
+                None => {}
             }
-            Some(CreditsInfo::LocalConversation(credits)) => {
-                let formatted = format!("{credits:.1}");
-                content.add_child(
-                    Container::new(self.render_simple_field(
-                        "Credits used",
-                        &formatted,
-                        appearance,
-                    ))
-                    .with_margin_bottom(FIELD_SPACING)
-                    .finish(),
-                );
-            }
-            None => {}
         }
 
         if let Some(duration) = self.data.run_time {

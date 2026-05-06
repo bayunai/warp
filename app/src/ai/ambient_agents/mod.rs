@@ -18,7 +18,7 @@ pub use task::{
     AmbientAgentTaskState, TaskStatusMessage,
 };
 pub const OUT_OF_CREDITS_TASK_FAILURE_MESSAGE: &str =
-    "Out of credits. Upgrade your Warp plan to continue running cloud agents.";
+    "Cloud agent usage limit reached. Please try again later.";
 pub const SERVER_OVERLOADED_TASK_FAILURE_MESSAGE: &str =
     "Warp is temporarily overloaded. Please try again shortly.";
 

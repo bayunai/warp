@@ -253,6 +253,8 @@ fn test_detect_known_agents() {
                 ("claude", CLIAgent::Claude),
                 ("gemini", CLIAgent::Gemini),
                 ("codex", CLIAgent::Codex),
+                ("deepseek", CLIAgent::DeepSeek),
+                ("deepseek-tui", CLIAgent::DeepSeek),
                 ("amp", CLIAgent::Amp),
                 ("droid", CLIAgent::Droid),
                 ("opencode", CLIAgent::OpenCode),

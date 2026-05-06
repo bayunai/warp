@@ -558,6 +558,8 @@ settings-debug-hide-inband-blocks = Hide in-band command blocks
 
 # about_page.rs
 settings-about-copyright = Copyright 2026 Warp
+settings-about-automatic-updates-label = Automatic updates
+settings-about-automatic-updates-description = When enabled, OpenWarp checks for and downloads new versions in the background. When disabled, you can still check for updates manually.
 
 # main_page.rs — referral / account
 settings-main-referral-cta = Earn rewards by sharing Warp with friends & colleagues
@@ -2991,6 +2993,10 @@ cli-agent-plugin-codex-install-subtitle = Update Codex to the latest version, th
 cli-agent-plugin-codex-update-step = Update Codex to the latest version.
 cli-agent-plugin-codex-notification-step = Set the notification condition to "always" in your Codex config. Open or create ~/.codex/config.toml and add:
 cli-agent-plugin-codex-restart-note = Restart Codex to apply the changes.
+cli-agent-plugin-deepseek-install-title = Enable Warp Notifications for DeepSeek
+cli-agent-plugin-deepseek-install-subtitle = Add the following to your DeepSeek config file (~/.deepseek/config.toml) to enable turn-completion notifications.
+cli-agent-plugin-deepseek-notification-step = Set the notification condition to "always" in ~/.deepseek/config.toml:
+cli-agent-plugin-deepseek-restart-note = Restart DeepSeek to apply the changes.
 cli-agent-plugin-claude-install-title = Install Warp Plugin for Claude Code
 cli-agent-plugin-claude-install-subtitle = Ensure that jq is installed on your machine. Then, run these commands.
 cli-agent-plugin-claude-add-marketplace-step = Add the Warp plugin marketplace repository

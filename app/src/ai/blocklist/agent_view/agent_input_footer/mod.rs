@@ -32,7 +32,7 @@ use crate::{
     settings_view::SettingsSection,
     terminal::{
         cli_agent_sessions::{
-            listener::agent_supports_rich_status, CLIAgentInputState, CLIAgentSessionsModel,
+            listener::session_supports_rich_status, CLIAgentInputState, CLIAgentSessionsModel,
             CLIAgentSessionsModelEvent,
         },
         input::{models::InlineModelSelectorTab, MenuPositioningProvider},
@@ -45,7 +45,7 @@ use crate::{
         view::TerminalAction,
         CLIAgent, TerminalModel,
     },
-    ui_components::icons::Icon,
+    ui_components::{icon_with_status::render_cli_agent_logo, icons::Icon},
     view_components::{
         action_button::{
             ActionButton, ActionButtonTheme, AdjoinedSide, ButtonSize, KeystrokeSource, NakedTheme,
@@ -482,7 +482,7 @@ impl AgentInputFooter {
                 // (Codex always has a listener but no actual plugin to install.)
                 if CLIAgentSessionsModel::as_ref(ctx)
                     .session(me.terminal_view_id)
-                    .is_some_and(|s| s.listener.is_some() && agent_supports_rich_status(&s.agent))
+                    .is_some_and(|s| s.listener.is_some() && session_supports_rich_status(s))
                 {
                     me.plugin_chip_ready = false;
                 }
@@ -505,7 +505,7 @@ impl AgentInputFooter {
                                             .session(me.terminal_view_id)
                                             .is_some_and(|s| {
                                                 s.listener.is_some()
-                                                    && agent_supports_rich_status(&s.agent)
+                                                    && session_supports_rich_status(s)
                                             });
                                         if !suppress {
                                             me.plugin_chip_ready = true;
@@ -1370,22 +1370,24 @@ impl AgentInputFooter {
 
         // CLI agent brand icon is always rendered (not configurable).
         if let Some(agent) = self.cli_agent(app) {
-            if let Some(icon) = agent.icon() {
-                let icon_color = agent
-                    .brand_color()
-                    .map(|c| c.on_background(background_color, MinimumAllowedContrast::NonText))
-                    .unwrap_or_else(|| appearance.theme().foreground().into_solid());
-                left_buttons.add_child(
-                    Container::new(
-                        ConstrainedBox::new(icon.to_warpui_icon(Fill::Solid(icon_color)).finish())
-                            .with_width(cli_icon_size)
-                            .with_height(cli_icon_size)
-                            .finish(),
-                    )
-                    .with_padding_right(8.)
+            let icon_color = agent
+                .brand_color()
+                .map(|c| c.on_background(background_color, MinimumAllowedContrast::NonText))
+                .unwrap_or_else(|| appearance.theme().foreground().into_solid());
+            left_buttons.add_child(
+                Container::new(
+                    ConstrainedBox::new(render_cli_agent_logo(
+                        agent,
+                        Fill::Solid(icon_color),
+                        appearance.theme().foreground(),
+                    ))
+                    .with_width(cli_icon_size)
+                    .with_height(cli_icon_size)
                     .finish(),
-                );
-            }
+                )
+                .with_padding_right(8.)
+                .finish(),
+            );
         }
 
         if let Some(chip_kind) = self.plugin_chip_kind(app) {

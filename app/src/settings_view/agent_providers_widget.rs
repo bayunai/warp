@@ -39,7 +39,7 @@ use crate::settings::{AISettings, AgentProvider, AgentProviderApiType, AgentProv
 use strum::IntoEnumIterator;
 
 use super::ai_page::{AISettingsPageAction, AISettingsPageView, ModelCapabilityKind};
-use super::settings_page::{build_sub_header, SettingsWidget, HEADER_PADDING};
+use super::settings_page::{HEADER_PADDING, SettingsWidget, build_sub_header};
 
 const CARD_BUTTON_FONT_SIZE: f32 = 12.0;
 const CARD_BUTTON_PADDING: f32 = 6.0;
@@ -1206,6 +1206,7 @@ fn single_line_editor_options(
 ) -> SingleLineEditorOptions {
     SingleLineEditorOptions {
         is_password,
+        clear_selections_on_blur: true,
         text: TextOptions {
             font_size_override: Some(appearance.ui_font_size()),
             font_family_override: Some(appearance.monospace_font_family()),

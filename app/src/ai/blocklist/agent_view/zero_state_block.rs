@@ -50,6 +50,7 @@ use crate::{
         TerminalModel,
     },
     util::time_format::format_approx_duration_from_now_utc,
+    workspaces::user_workspaces::UserWorkspaces,
 };
 
 const CLOUD_AGENT_DOCS_URL: &str = "https://docs.warp.dev/agent-platform/cloud-agents/overview";
@@ -1188,6 +1189,10 @@ fn render_oz_updates(props: OzUpdatesProps<'_>, app: &AppContext) -> Option<Box<
 /// Renders the ambient credits banner showing free cloud credits.
 /// If `link_mouse_state` is provided, a "Launch cloud agent" link is shown.
 pub fn render_ambient_credits_banner(credits: i32, app: &AppContext) -> Box<dyn Element> {
+    if UserWorkspaces::as_ref(app).is_byo_api_key_enabled() {
+        return Empty::new().finish();
+    }
+
     let appearance = Appearance::as_ref(app);
     let theme = appearance.theme();
     let font_family = appearance.ui_font_family();

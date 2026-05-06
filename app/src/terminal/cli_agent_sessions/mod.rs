@@ -174,8 +174,12 @@ impl CLIAgentSession {
                 CLIAgentSessionStatus::InProgress
             }
             CLIAgentEventType::Stop => {
-                self.session_context.query = event.payload.query.clone();
-                self.session_context.response = event.payload.response.clone();
+                if event.payload.query.is_some() {
+                    self.session_context.query = event.payload.query.clone();
+                }
+                if event.payload.response.is_some() {
+                    self.session_context.response = event.payload.response.clone();
+                }
                 CLIAgentSessionStatus::Success
             }
             CLIAgentEventType::PermissionRequest => {

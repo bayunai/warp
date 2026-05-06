@@ -1,11 +1,17 @@
 use super::{
     settings_page::{
-        MatchData, PageType, SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle,
-        SettingsWidget,
+        render_body_item, MatchData, PageType, SettingsPageEvent, SettingsPageMeta,
+        SettingsPageViewHandle, SettingsWidget,
     },
-    SettingsSection,
+    LocalOnlyIconState, SettingsSection, ToggleState,
 };
-use crate::{appearance::Appearance, channel::ChannelState, workspace::WorkspaceAction};
+use crate::{
+    appearance::Appearance, channel::ChannelState, report_if_error, settings::AutoupdateSettings,
+    workspace::WorkspaceAction,
+};
+use settings::Setting as _;
+use warp_core::{execution_mode::AppExecutionMode, settings::ToggleableSetting as _};
+use warpui::ui_components::switch::SwitchStateHandle;
 use warpui::{
     assets::asset_cache::AssetSource,
     elements::{
@@ -13,8 +19,13 @@ use warpui::{
         MainAxisAlignment, MouseStateHandle, ParentElement, Wrap,
     },
     ui_components::components::UiComponent,
-    AppContext, Entity, View, ViewContext, ViewHandle,
+    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
+
+#[derive(Debug, Clone)]
+pub enum AboutPageAction {
+    ToggleAutomaticUpdates,
+}
 
 pub struct AboutPageView {
     page: PageType<Self>,
@@ -32,6 +43,23 @@ impl Entity for AboutPageView {
     type Event = SettingsPageEvent;
 }
 
+impl TypedActionView for AboutPageView {
+    type Action = AboutPageAction;
+
+    fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
+        match action {
+            AboutPageAction::ToggleAutomaticUpdates => {
+                AutoupdateSettings::handle(ctx).update(ctx, |settings, ctx| {
+                    report_if_error!(settings
+                        .automatic_updates_enabled
+                        .toggle_and_save_value(ctx));
+                });
+                ctx.notify();
+            }
+        }
+    }
+}
+
 impl View for AboutPageView {
     fn ui_name() -> &'static str {
         "AboutPage"
@@ -45,20 +73,21 @@ impl View for AboutPageView {
 #[derive(Default)]
 struct AboutPageWidget {
     copy_version_button_mouse_state: MouseStateHandle,
+    automatic_updates_switch_state: SwitchStateHandle,
 }
 
 impl SettingsWidget for AboutPageWidget {
     type View = AboutPageView;
 
     fn search_terms(&self) -> &str {
-        "about warp version"
+        "about warp version automatic updates auto update 自动更新"
     }
 
     fn render(
         &self,
         _view: &AboutPageView,
         appearance: &Appearance,
-        _app: &AppContext,
+        app: &AppContext,
     ) -> Box<dyn Element> {
         let ui_builder = appearance.ui_builder();
 
@@ -94,39 +123,69 @@ impl SettingsWidget for AboutPageWidget {
                     .finish(),
             ]);
 
-        Align::new(
-            Flex::column()
-                .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(
-                    ConstrainedBox::new(
-                        Image::new(
-                            AssetSource::Bundled { path: image_path },
-                            CacheOption::BySize,
-                        )
-                        .finish(),
+        let mut content = Flex::column()
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_child(
+                ConstrainedBox::new(
+                    Image::new(
+                        AssetSource::Bundled { path: image_path },
+                        CacheOption::BySize,
                     )
-                    .with_max_height(100.)
-                    .with_max_width(350.)
                     .finish(),
                 )
-                .with_child(
-                    ui_builder
-                        .span("OpenWarp")
-                        .build()
-                        .with_margin_top(12.)
-                        .finish(),
-                )
-                .with_child(version_row.finish())
-                .with_child(
-                    ui_builder
-                        .span(crate::t!("settings-about-copyright"))
-                        .build()
-                        .with_margin_top(16.)
-                        .finish(),
-                )
+                .with_max_height(100.)
+                .with_max_width(350.)
                 .finish(),
-        )
-        .finish()
+            )
+            .with_child(
+                ui_builder
+                    .span("OpenWarp")
+                    .build()
+                    .with_margin_top(12.)
+                    .finish(),
+            )
+            .with_child(version_row.finish())
+            .with_child(
+                ui_builder
+                    .span(crate::t!("settings-about-copyright"))
+                    .build()
+                    .with_margin_top(16.)
+                    .finish(),
+            );
+
+        if AppExecutionMode::as_ref(app).can_autoupdate() {
+            content.add_child(
+                Container::new(
+                    ConstrainedBox::new(render_body_item::<AboutPageAction>(
+                        crate::t!("settings-about-automatic-updates-label"),
+                        None,
+                        LocalOnlyIconState::Hidden,
+                        ToggleState::Enabled,
+                        appearance,
+                        appearance
+                            .ui_builder()
+                            .switch(self.automatic_updates_switch_state.clone())
+                            .check(
+                                *AutoupdateSettings::as_ref(app)
+                                    .automatic_updates_enabled
+                                    .value(),
+                            )
+                            .build()
+                            .on_click(move |ctx, _, _| {
+                                ctx.dispatch_typed_action(AboutPageAction::ToggleAutomaticUpdates);
+                            })
+                            .finish(),
+                        Some(crate::t!("settings-about-automatic-updates-description")),
+                    ))
+                    .with_max_width(520.)
+                    .finish(),
+                )
+                .with_margin_top(24.)
+                .finish(),
+            );
+        }
+
+        Align::new(content.finish()).finish()
     }
 }
 

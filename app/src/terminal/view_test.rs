@@ -11,11 +11,10 @@ use warpui::{notification::UserNotification, Presenter, WindowInvalidation};
 
 use crate::ai::agent::task::TaskId;
 use crate::ai::blocklist::block::cli_controller::UserTakeOverReason;
-use warpui::{App, ReadModel};
+use warpui::App;
 
 use crate::pane_group::focus_state::PaneGroupFocusState;
-use crate::pane_group::{pane::PaneStack, BackingView, TerminalPaneId};
-use crate::settings::import::model::ImportedConfigModel;
+use crate::pane_group::{BackingView, TerminalPaneId};
 use crate::terminal::model::grid::Dimensions as _;
 use crate::{
     terminal::alt_screen::should_intercept_mouse,

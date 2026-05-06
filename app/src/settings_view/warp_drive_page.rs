@@ -1,13 +1,14 @@
 use super::{
-    settings_page::{
-        render_body_item, AdditionalInfo, MatchData, PageType, SettingsPageMeta,
-        SettingsPageViewHandle, SettingsWidget,
-    },
     LocalOnlyIconState, SettingsSection, ToggleState,
+    settings_page::{
+        AdditionalInfo, MatchData, PageType, SettingsPageMeta, SettingsPageViewHandle,
+        SettingsWidget, render_body_item,
+    },
 };
 use crate::{appearance::Appearance, auth::AuthStateProvider, drive::settings::WarpDriveSettings};
 use warp_core::{features::FeatureFlag, report_if_error, settings::ToggleableSetting as _};
 use warpui::{
+    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
     elements::{Container, Element, Flex, MouseStateHandle, ParentElement, Shrinkable, Text},
     fonts::Weight,
     ui_components::{
@@ -15,7 +16,6 @@ use warpui::{
         components::{Coords, UiComponent, UiComponentStyles},
         switch::SwitchStateHandle,
     },
-    AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
 
 #[derive(Debug, Clone)]

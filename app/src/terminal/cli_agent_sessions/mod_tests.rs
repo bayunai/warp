@@ -278,6 +278,49 @@ fn apply_event_preserves_input_session() {
 }
 
 #[test]
+fn stop_without_query_preserves_previous_prompt() {
+    let mut session = CLIAgentSession {
+        agent: CLIAgent::DeepSeek,
+        status: CLIAgentSessionStatus::InProgress,
+        session_context: CLIAgentSessionContext {
+            query: Some("explain the diff".to_owned()),
+            ..Default::default()
+        },
+        input_state: CLIAgentInputState::Closed,
+        should_auto_toggle_input: false,
+        listener: None,
+        remote_host: None,
+        plugin_version: None,
+        draft_text: None,
+        custom_command_prefix: None,
+    };
+
+    let event = CLIAgentEvent {
+        v: 1,
+        agent: CLIAgent::DeepSeek,
+        event: CLIAgentEventType::Stop,
+        session_id: None,
+        cwd: None,
+        project: None,
+        payload: CLIAgentEventPayload {
+            response: Some("deepseek: turn complete".to_owned()),
+            ..Default::default()
+        },
+    };
+
+    session.apply_event(&event);
+
+    assert_eq!(
+        session.session_context.query.as_deref(),
+        Some("explain the diff")
+    );
+    assert_eq!(
+        session.session_context.response.as_deref(),
+        Some("deepseek: turn complete")
+    );
+}
+
+#[test]
 fn is_remote_returns_true_when_remote_host_is_set() {
     let session = CLIAgentSession {
         agent: CLIAgent::Claude,

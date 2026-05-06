@@ -136,7 +136,7 @@ impl LanguageServerCandidate for RustAnalyzerCandidate {
     async fn install(
         &self,
         metadata: LanguageServerMetadata,
-        _executor: &CommandBuilder,
+        executor: &CommandBuilder,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             !cfg!(target_os = "freebsd"),
@@ -145,6 +145,36 @@ impl LanguageServerCandidate for RustAnalyzerCandidate {
              `rustup component add rust-analyzer` or `pkg install \
              rust-analyzer` and warp will pick it up off PATH."
         );
+
+        // 优先通过 rustup 安装：无需访问 GitHub API，可绕开 rate limit 限制。
+        // 安装后 rust-analyzer 会出现在 ~/.cargo/bin/ 目录（常规在 PATH 中）。
+        let rustup_ok = executor
+            .command("rustup")
+            .arg("component")
+            .arg("add")
+            .arg("rust-analyzer")
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if rustup_ok {
+            log::info!("rust-analyzer installed via rustup");
+            return Ok(());
+        }
+
+        // rustup 不可用或安装失败，回退到 GitHub Release 下载。
+        log::info!("rustup not available or failed, falling back to GitHub download");
+        let metadata = if metadata.url.is_some() {
+            metadata
+        } else {
+            fetch_latest_metadata_from_github(
+                &self.client,
+                "rust-lang",
+                "rust-analyzer",
+                Some(asset_name()),
+            )
+            .await?
+        };
         let asset_kind = AssetKind::from_filename(asset_name()).ok_or_else(|| {
             anyhow::anyhow!("Unsupported archive format for asset: {}", asset_name())
         })?;
@@ -158,13 +188,14 @@ impl LanguageServerCandidate for RustAnalyzerCandidate {
             "rust-analyzer release metadata is unavailable on FreeBSD: \
              upstream GitHub releases publish no FreeBSD asset."
         );
-        fetch_latest_metadata_from_github(
-            &self.client,
-            "rust-lang",
-            "rust-analyzer",
-            Some(asset_name()),
-        )
-        .await
+
+        // rust-analyzer 优先通过 rustup 安装。这里不能先访问 GitHub API，
+        // 否则 GitHub rate limit 会让安装在进入 rustup 之前就失败。
+        Ok(LanguageServerMetadata {
+            version: "rustup".to_string(),
+            url: None,
+            digest: None,
+        })
     }
 }
 

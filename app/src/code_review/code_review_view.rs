@@ -1004,6 +1004,7 @@ impl CodeReviewView {
             workspace.execute_lsp_task(
                 LspTask::Spawn {
                     file_path: path.to_path_buf(),
+                    server_type: Some(server_type),
                 },
                 ctx,
             );

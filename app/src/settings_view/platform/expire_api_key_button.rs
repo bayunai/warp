@@ -1,8 +1,8 @@
 use crate::server::{ids::ApiKeyUid, server_api::auth::AuthClient};
 use warp_core::ui::appearance::Appearance;
 use warpui::{
-    elements::MouseStateHandle, ui_components::components::UiComponent, AppContext, Element,
-    Entity, SingletonEntity, TypedActionView, View, ViewContext,
+    AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewContext,
+    elements::MouseStateHandle, ui_components::components::UiComponent,
 };
 
 use crate::ui_components::{buttons::icon_button, icons::Icon};

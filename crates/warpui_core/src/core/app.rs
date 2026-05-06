@@ -1540,7 +1540,11 @@ impl AppContext {
         arg: &dyn Any,
     ) {
         if let Some((name, mut handlers)) = self.global_actions.remove_entry(name) {
-            log::info!("dispatching global action for {}", &name);
+            if name == "workspace:save_app" {
+                log::debug!("dispatching global action for {}", &name);
+            } else {
+                log::info!("dispatching global action for {}", &name);
+            }
             self.pending_flushes += 1;
             for handler in handlers.iter_mut().rev() {
                 handler(arg, location, self);

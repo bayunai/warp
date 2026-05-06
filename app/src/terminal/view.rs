@@ -10469,13 +10469,13 @@ impl TerminalView {
                                         },
                                     );
 
-                                    // Codex doesn't use the sentinel-based plugin protocol,
-                                    // so create the listener proactively on command detection
-                                    // (rather than waiting for a SessionStart event).
-                                    if matches!(detection, Some((CLIAgent::Codex, _))) {
+                                    // 使用 OSC 9 通知的 agent 不会发结构化 SessionStart 事件，
+                                    // 因此在命令检测时主动创建监听器。
+                                    if let Some((agent @ (CLIAgent::Codex | CLIAgent::DeepSeek), _)) =
+                                        detection
+                                    {
                                         me.register_cli_agent_listener_without_session_start_event(
-                                            CLIAgent::Codex,
-                                            ctx,
+                                            agent, ctx,
                                         );
                                     }
 
@@ -11307,13 +11307,15 @@ impl TerminalView {
                     return;
                 }
 
-                // Suppress OSC 9 notifications when a Codex listener is active.
-                // The listener's subscription handles these via CodexSessionHandler.
+                // 如果当前 agent 已有监听器，OSC 9 通知由 agent 专属 handler 处理。
                 if title.is_none() {
-                    let has_codex_listener = CLIAgentSessionsModel::as_ref(ctx)
+                    let has_osc9_listener = CLIAgentSessionsModel::as_ref(ctx)
                         .session(self.view_id)
-                        .is_some_and(|s| s.agent == CLIAgent::Codex && s.listener.is_some());
-                    if has_codex_listener {
+                        .is_some_and(|s| {
+                            matches!(s.agent, CLIAgent::Codex | CLIAgent::DeepSeek)
+                                && s.listener.is_some()
+                        });
+                    if has_osc9_listener {
                         return;
                     }
                 }
@@ -11849,10 +11851,10 @@ impl TerminalView {
             }
         }
 
-        // Desktop notifications — only when navigated away and not in-progress.
-        if !self.is_navigated_away_from_window(ctx)
-            || matches!(status, CLIAgentSessionStatus::InProgress)
-        {
+        // Desktop notifications for CLI agents use the user's notification settings
+        // directly. CLI agent notifications are explicit agent lifecycle events,
+        // so they should still notify when Warp is focused.
+        if matches!(status, CLIAgentSessionStatus::InProgress) {
             return;
         }
 
@@ -23560,7 +23562,13 @@ impl TerminalView {
         };
 
         PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
-            workspace.execute_lsp_task(LspTask::Spawn { file_path: cwd }, ctx);
+            workspace.execute_lsp_task(
+                LspTask::Spawn {
+                    file_path: cwd,
+                    server_type: None,
+                },
+                ctx,
+            );
         });
     }
 

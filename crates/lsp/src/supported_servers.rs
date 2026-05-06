@@ -97,10 +97,7 @@ impl LSPServerType {
                         prepend_args: vec![],
                     })
             }
-            LSPServerType::GoPls => {
-                // gopls doesn't support custom installation yet
-                None
-            }
+            LSPServerType::GoPls => GoPlsCandidate::find_installed_binary_config().await,
             LSPServerType::Pyright => {
                 PyrightCandidate::find_installed_binary_config(path_env_var).await
             }

@@ -1,13 +1,14 @@
 #[cfg(feature = "local_fs")]
 use super::features::external_editor::ExternalEditorView;
 use super::{
-    settings_page::{
-        build_sub_header, render_body_item, render_separator, Category, MatchData, PageType,
-        SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, HEADER_PADDING,
-    },
     LocalOnlyIconState, SettingsAction, SettingsSection, ToggleState,
+    settings_page::{
+        Category, HEADER_PADDING, MatchData, PageType, SettingsPageMeta, SettingsPageViewHandle,
+        SettingsWidget, build_sub_header, render_body_item, render_separator,
+    },
 };
 use crate::{
+    TelemetryEvent,
     ai::persisted_workspace::{
         EnablementState, LspRepoStatus, PersistedWorkspace, PersistedWorkspaceEvent,
     },
@@ -23,7 +24,6 @@ use crate::{
     },
     workspace::tab_settings::TabSettings,
     workspaces::update_manager::TeamUpdateManager,
-    TelemetryEvent,
 };
 
 use ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
@@ -40,6 +40,8 @@ use warp_core::{
 };
 use warp_util::path::user_friendly_path;
 use warpui::{
+    Action, AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
+    ViewHandle,
     elements::{
         ChildView, Container, CornerRadius, CrossAxisAlignment, Element, Empty, Expanded, Fill,
         Flex, MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable,
@@ -52,8 +54,6 @@ use warpui::{
         components::{Coords, UiComponent, UiComponentStyles},
         switch::SwitchStateHandle,
     },
-    Action, AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
-    ViewHandle,
 };
 
 const MAIN_SECTION_MARGIN: f32 = 12.;
@@ -136,22 +136,6 @@ impl CodeSettingsPageView {
                 enabled_servers.retain(|s| *s != server_type);
             }
             report_if_error!(settings.enabled_lsp_servers.set_value(enabled_servers, ctx));
-        });
-    }
-
-    #[cfg(feature = "local_fs")]
-    fn spawn_global_lsp_for_known_workspaces(ctx: &mut ViewContext<Self>) {
-        let workspace_paths: Vec<PathBuf> = PersistedWorkspace::as_ref(ctx)
-            .workspaces()
-            .map(|workspace| workspace.path)
-            .collect();
-        PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
-            for file_path in workspace_paths {
-                workspace.execute_lsp_task(
-                    crate::ai::persisted_workspace::LspTask::Spawn { file_path },
-                    ctx,
-                );
-            }
         });
     }
 
@@ -571,9 +555,11 @@ impl TypedActionView for CodeSettingsPageView {
             }
             CodeSettingsPageAction::ToggleShowCodeReviewDiffStats => {
                 TabSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .show_code_review_diff_stats
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .show_code_review_diff_stats
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 ctx.notify();
             }
@@ -591,9 +577,11 @@ impl TypedActionView for CodeSettingsPageView {
             }
             CodeSettingsPageAction::ToggleAutoOpenCodeReviewPane => {
                 GeneralSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .auto_open_code_review_pane_on_first_agent_change
-                        .toggle_and_save_value(ctx));
+                    report_if_error!(
+                        settings
+                            .auto_open_code_review_pane_on_first_agent_change
+                            .toggle_and_save_value(ctx)
+                    );
                 });
                 send_telemetry_from_ctx!(
                     TelemetryEvent::FeaturesPageAction {
@@ -641,7 +629,7 @@ impl TypedActionView for CodeSettingsPageView {
                 ctx.notify();
             }
             CodeSettingsPageAction::EnableSuggestedLspServer {
-                workspace_path: _,
+                workspace_path,
                 server_type,
             } => {
                 Self::set_global_lsp_server_enabled(*server_type, true, ctx);
@@ -654,7 +642,18 @@ impl TypedActionView for CodeSettingsPageView {
                     ctx
                 );
                 #[cfg(feature = "local_fs")]
-                Self::spawn_global_lsp_for_known_workspaces(ctx);
+                if !workspace_path.as_os_str().is_empty() {
+                    let file_path = workspace_path.clone();
+                    PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
+                        workspace.execute_lsp_task(
+                            crate::ai::persisted_workspace::LspTask::Spawn {
+                                file_path,
+                                server_type: Some(*server_type),
+                            },
+                            ctx,
+                        );
+                    });
+                }
                 #[cfg(not(feature = "local_fs"))]
                 let _ = workspace_path;
                 ctx.notify();

@@ -910,7 +910,13 @@ impl LocalCodeEditorView {
             {
                 use crate::ai::persisted_workspace::LspTask;
                 PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
-                    workspace.execute_lsp_task(LspTask::Spawn { file_path: path }, ctx);
+                    workspace.execute_lsp_task(
+                        LspTask::Spawn {
+                            file_path: path,
+                            server_type: None,
+                        },
+                        ctx,
+                    );
                 });
             }
             return;
@@ -1397,7 +1403,13 @@ impl LocalCodeEditorView {
         let path = path.to_path_buf();
         PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
             workspace.enable_lsp_server_for_path(&repo_root, lsp_server_type);
-            workspace.execute_lsp_task(LspTask::Spawn { file_path: path }, ctx);
+            workspace.execute_lsp_task(
+                LspTask::Spawn {
+                    file_path: path,
+                    server_type: Some(lsp_server_type),
+                },
+                ctx,
+            );
         });
     }
 

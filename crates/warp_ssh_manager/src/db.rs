@@ -53,6 +53,7 @@ pub fn with_conn<R>(f: impl FnOnce(&mut SqliteConnection) -> Result<R>) -> Resul
 /// 测试用:直接注入一个内存连接,绕过 OnceLock。**不可重复**(OnceLock 一旦
 /// set 就不能再设)— 测试间共享内存 DB 是有意为之,各测试自己 cleanup 即可。
 #[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn install_for_test(conn: SqliteConnection) {
     let _ = CONN.set(Mutex::new(conn));
 }

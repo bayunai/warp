@@ -32,6 +32,14 @@ use crate::{
 use super::super::{AIBlockMetadata, RichContentMetadata, RichContentType};
 use super::*;
 
+#[test]
+fn deepseek_uses_bracketed_paste_submission() {
+    assert_eq!(
+        rich_input_submit_strategy(CLIAgent::DeepSeek),
+        RichInputSubmitStrategy::BracketedPaste
+    );
+}
+
 struct PendingAIBlockModel {
     conversation_id: AIConversationId,
     input: Vec<AIAgentInput>,

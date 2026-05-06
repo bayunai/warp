@@ -14405,8 +14405,13 @@ impl Workspace {
     }
 
     /// Opens the LSP log file in a new terminal pane using `tail -f`.
+    ///
+    /// `log_path` 可能指向具体日志文件，也可能指向日志目录（LSP 未运行时的回退路径）。
+    /// 当路径是目录时，自动查找目录下最新修改的 `.log` 文件；若目录不存在或为空，
+    /// 则在终端中输出友好提示而非执行会报错的 tail 命令。
     fn open_lsp_logs(&mut self, log_path: &PathBuf, ctx: &mut ViewContext<Self>) {
         use crate::workflows::local_workflows::tail_command_for_shell;
+        use warp_util::path::ShellFamily;
 
         let active_pane_group = self.active_tab_pane_group();
 
@@ -14421,10 +14426,38 @@ impl Workspace {
             return;
         };
 
+        // 若 log_path 是目录（LSP 未运行时的回退路径），找目录下最新修改的 .log 文件
+        let resolved_path: Option<PathBuf> = if log_path.is_file() {
+            Some(log_path.clone())
+        } else if log_path.is_dir() {
+            std::fs::read_dir(log_path).ok().and_then(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().and_then(|ext| ext.to_str()) == Some("log"))
+                    .max_by_key(|e| e.metadata().ok().and_then(|m| m.modified().ok()))
+                    .map(|e| e.path())
+            })
+        } else {
+            None
+        };
+
         terminal_view_handle.update(ctx, |terminal, ctx| {
             let shell_family = terminal.shell_family(ctx);
-            let tail_command = tail_command_for_shell(shell_family, log_path);
-            terminal.set_pending_command(&tail_command, ctx);
+            let command = match resolved_path {
+                Some(ref path) => tail_command_for_shell(shell_family, path),
+                None => {
+                    let dir = log_path.display();
+                    match shell_family {
+                        ShellFamily::PowerShell => {
+                            format!(
+                                "Write-Host 'No log files found in: {dir}' -ForegroundColor Yellow"
+                            )
+                        }
+                        ShellFamily::Posix => format!("echo 'No log files found in: {dir}'"),
+                    }
+                }
+            };
+            terminal.set_pending_command(&command, ctx);
         });
     }
 

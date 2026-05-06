@@ -16,9 +16,13 @@ use crate::undo_close::UndoCloseStack;
 use crate::workspace::{Workspace, WorkspaceAction};
 use crate::GlobalResourceHandlesProvider;
 use std::path::PathBuf;
+use std::time::Duration;
+
+use futures::stream::AbortHandle;
 use warp_graphql::mutations::create_anonymous_user::AnonymousUserType;
+use warpui::r#async::Timer;
 use warpui::windowing::WindowManager;
-use warpui::{AppContext, SingletonEntity, TypedActionView};
+use warpui::{AppContext, Entity, ModelContext, SingletonEntity, TypedActionView};
 
 /// Specifies where a forked conversation should be opened.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -66,9 +70,47 @@ pub struct ForkAIConversationParams {
     pub destination: ForkedConversationDestination,
 }
 
+const SAVE_APP_COALESCE_DELAY: Duration = Duration::from_millis(250);
+
+struct SaveAppSnapshotDebouncer {
+    pending_save: Option<AbortHandle>,
+}
+
+impl SaveAppSnapshotDebouncer {
+    fn new() -> Self {
+        Self { pending_save: None }
+    }
+
+    fn request_save(&mut self, ctx: &mut ModelContext<Self>) {
+        if self.pending_save.is_some() {
+            return;
+        }
+
+        self.pending_save = Some(
+            ctx.spawn(
+                async {
+                    Timer::after(SAVE_APP_COALESCE_DELAY).await;
+                },
+                |me, _, ctx| {
+                    me.pending_save = None;
+                    save_app_snapshot_now(ctx);
+                },
+            )
+            .abort_handle(),
+        );
+    }
+}
+
+impl Entity for SaveAppSnapshotDebouncer {
+    type Event = ();
+}
+
+impl SingletonEntity for SaveAppSnapshotDebouncer {}
+
 /// DEPRECATED. Global actions are being phased out.
 /// Do not add any more global actions; use typed actions instead.
 pub fn init_global_actions(app: &mut AppContext) {
+    app.add_singleton_model(|_| SaveAppSnapshotDebouncer::new());
     app.add_global_action("workspace:toggle_mouse_reporting", toggle_mouse_reporting);
     app.add_global_action("workspace:toggle_scroll_reporting", toggle_scroll_reporting);
     app.add_global_action("workspace:toggle_focus_reporting", toggle_focus_reporting);
@@ -120,6 +162,12 @@ fn toggle_focus_reporting(_: &(), ctx: &mut AppContext) {
 }
 
 fn save_app(_: &(), ctx: &mut AppContext) {
+    SaveAppSnapshotDebouncer::handle(ctx).update(ctx, |debouncer, ctx| {
+        debouncer.request_save(ctx);
+    });
+}
+
+fn save_app_snapshot_now(ctx: &mut AppContext) {
     if !AppExecutionMode::as_ref(ctx).can_save_session() {
         return;
     }

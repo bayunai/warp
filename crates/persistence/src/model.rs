@@ -1355,6 +1355,7 @@ mod tests {
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: Some(42),
+            compaction_state_json: None,
         };
         let json = serde_json::to_string(&data).expect("serialize");
         let roundtripped: AgentConversationData = serde_json::from_str(&json).expect("deserialize");
@@ -1385,6 +1386,7 @@ mod tests {
             run_id: None,
             autoexecute_override: None,
             last_event_sequence: None,
+            compaction_state_json: None,
         };
         let json = serde_json::to_string(&data).expect("serialize");
         assert!(

@@ -1,12 +1,12 @@
+use super::SettingsSection;
 use super::admin_actions::AdminActions;
-use super::settings_page::{render_customer_type_badge, MatchData, PageType, SettingsWidget};
+use super::settings_page::{MatchData, PageType, SettingsWidget, render_customer_type_badge};
 use super::transfer_ownership_confirmation_modal::{
     TransferOwnershipConfirmationEvent, TransferOwnershipConfirmationModal,
 };
-use super::SettingsSection;
 use super::{
     settings_page::{
-        render_separator, render_sub_header, SettingsPageMeta, SettingsPageViewHandle,
+        SettingsPageMeta, SettingsPageViewHandle, render_separator, render_sub_header,
     },
     tab_menu::Tabs,
 };
@@ -24,7 +24,7 @@ use crate::workspaces::team::{MembershipRole, TeamDeleteDisabledReason};
 use crate::{
     appearance::Appearance,
     channel::ChannelState,
-    cloud_object::{model::persistence::CloudModel, CloudObjectEventEntrypoint, Space},
+    cloud_object::{CloudObjectEventEntrypoint, Space, model::persistence::CloudModel},
     drive::cloud_action_confirmation_dialog::{
         CloudActionConfirmationDialog, CloudActionConfirmationDialogEvent,
         CloudActionConfirmationDialogVariant,
@@ -62,6 +62,8 @@ use warp_core::ui::theme::color::internal_colors;
 use warpui::FocusContext;
 
 use warpui::{
+    AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
+    ViewHandle,
     clipboard::ClipboardContent,
     elements::{
         Align, Border, ChildAnchor, ClippedScrollStateHandle, ConstrainedBox, Container,
@@ -79,8 +81,6 @@ use warpui::{
         switch::SwitchStateHandle,
         text_input::TextInput,
     },
-    AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
-    ViewHandle,
 };
 
 const TEAM_MEMBERS_HEADER_POSITION_ID: &str = "team_settings:team_members_header";
@@ -113,8 +113,7 @@ const INVALID_EMAILS_INSTRUCTIONS: &str =
 const LIMIT_HIT_ADMIN_TEXT: &str =
     "You've reached the team member limit for your plan. Upgrade to add more teammates.";
 const LIMIT_HIT_ADMIN_NOT_AUTO_UPGRADEABLE_TEXT: &str = "You've reached the team member limit for your plan. Contact support@warp.dev to add more teammates.";
-const LIMIT_HIT_NON_ADMIN_TEXT: &str =
-    "You've reached the team member limit for your plan. Contact a team admin to add more teammates.";
+const LIMIT_HIT_NON_ADMIN_TEXT: &str = "You've reached the team member limit for your plan. Contact a team admin to add more teammates.";
 
 const DELINQUENT_ADMIN_NON_SELF_SERVE_TEXT: &str = "Team invites have been restricted due to a payment issue. Please contact support@warp.dev to restore access.";
 const DELINQUENT_NON_ADMIN_TEXT: &str = "Team invites have been restricted due to a payment issue. Please contact a team admin to restore access.";
@@ -125,8 +124,7 @@ const DELINQUENT_ADMIN_SELF_SERVE_LINE_2_LINK_TEXT: &str = "update your payment 
 const DELINQUENT_ADMIN_SELF_SERVE_LINE_2_SUFFIX_TEXT: &str = " to restore access.";
 
 const TEAM_LIMIT_EXCEEDED_ADMIN_NOT_AUTO_UPGRADEABLE_TEXT: &str = "You've exceeded the team member limit for your plan. Please contact support@warp.dev to upgrade your team.";
-const TEAM_LIMIT_EXCEEDED_NON_ADMIN_TEXT: &str =
-    "You've exceeded the team member limit for your plan. Contact a team admin to upgrade your team.";
+const TEAM_LIMIT_EXCEEDED_NON_ADMIN_TEXT: &str = "You've exceeded the team member limit for your plan. Contact a team admin to upgrade your team.";
 const TEAM_LIMIT_EXCEEDED_ADMIN_UPGRADEABLE: &str =
     "You've exceeded the team member limit for your plan. Upgrade to add more teammates.";
 
@@ -1820,7 +1818,9 @@ impl TeamsWidget {
         let additional_members_cost_money_msg = if let Some((monthly_cost, yearly_cost)) =
             self.get_per_seat_costs(team_metadata, pricing_info_model)
         {
-            format!("Additional members are billed at your plan's per-user rate: ${monthly_cost:.0}/month or ${yearly_cost:.0}/year, depending on your billing interval. {prorated_message}")
+            format!(
+                "Additional members are billed at your plan's per-user rate: ${monthly_cost:.0}/month or ${yearly_cost:.0}/year, depending on your billing interval. {prorated_message}"
+            )
         } else {
             format!(
                 "Additional members are billed at your plan's per-user rate. {prorated_message}"

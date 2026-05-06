@@ -35,11 +35,11 @@ use super::{
     app_icon::AppIconSettings, app_installation_detection::UserAppInstallDetectionSettings,
     cloud_preferences::CloudPreferencesSettings, initializer::SettingsInitializer,
     language::LanguageSettings, native_preference::NativePreferenceSettings, AISettings,
-    AccessibilitySettings, AliasExpansionSettings, AppEditorSettings, BlockVisibilitySettings,
-    CodeSettings, DebugSettings, EmacsBindingsSettings, FontSettings, FontSettingsChangedEvent,
-    GPUSettings, InputBoxType, InputModeSettings, InputSettings, PaneSettings,
-    SameLinePromptBlockSettings, ScrollSettings, SelectionSettings, SshSettings, ThemeSettings,
-    VimBannerSettings, WarpDrivePrivacySettings,
+    AccessibilitySettings, AliasExpansionSettings, AppEditorSettings, AutoupdateSettings,
+    BlockVisibilitySettings, CodeSettings, DebugSettings, EmacsBindingsSettings, FontSettings,
+    FontSettingsChangedEvent, GPUSettings, InputBoxType, InputModeSettings, InputSettings,
+    PaneSettings, SameLinePromptBlockSettings, ScrollSettings, SelectionSettings, SshSettings,
+    ThemeSettings, VimBannerSettings, WarpDrivePrivacySettings,
 };
 
 pub struct UserDefaultsOnStartup {
@@ -80,6 +80,7 @@ pub fn register_all_settings(ctx: &mut AppContext) {
     ThemeSettings::register(ctx);
     AccessibilitySettings::register(ctx);
     NativePreferenceSettings::register(ctx);
+    AutoupdateSettings::register(ctx);
     CloudPreferencesSettings::register(ctx);
     WarpDrivePrivacySettings::register(ctx);
     UserAppInstallDetectionSettings::register(ctx);

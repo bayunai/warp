@@ -1,6 +1,6 @@
 use warpui::{EntityId, ModelContext, ModelHandle, SingletonEntity};
 
-use super::{CLIAgentEvent, CLIAgentSessionsModel};
+use super::{CLIAgentEvent, CLIAgentSession, CLIAgentSessionsModel};
 use crate::terminal::cli_agent_sessions::event::parse_event;
 use crate::terminal::cli_agent_sessions::event::{CLIAgentEventPayload, CLIAgentEventType};
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
@@ -37,6 +37,25 @@ pub fn agent_supports_rich_status(agent: &CLIAgent) -> bool {
     create_handler(agent).is_some_and(|h| h.supports_rich_status())
 }
 
+/// Returns whether this concrete session has enough event context to render
+/// fine-grained status in UI surfaces.
+pub fn session_supports_rich_status(session: &CLIAgentSession) -> bool {
+    if !agent_supports_rich_status(&session.agent) {
+        return false;
+    }
+
+    // DeepSeek has two listener paths:
+    // - legacy OSC 9 completion notifications, registered from command detection,
+    //   with no session id or lifecycle events;
+    // - structured OSC 777 hooks, which include the DeepSeek hook session id.
+    // Only the latter can drive rich status accurately.
+    if matches!(session.agent, CLIAgent::DeepSeek) && session.session_context.session_id.is_none() {
+        return false;
+    }
+
+    true
+}
+
 /// Returns `true` if the given CLI agent has a supported session handler.
 pub fn is_agent_supported(agent: &CLIAgent) -> bool {
     matches!(
@@ -47,6 +66,7 @@ pub fn is_agent_supported(agent: &CLIAgent) -> bool {
             | CLIAgent::Gemini
             | CLIAgent::Auggie
             | CLIAgent::Pi
+            | CLIAgent::DeepSeek
     )
 }
 
@@ -64,6 +84,7 @@ fn create_handler(agent: &CLIAgent) -> Option<Box<dyn CLIAgentSessionHandler>> {
         | CLIAgent::Auggie
         | CLIAgent::Pi => Some(Box::new(DefaultSessionListener)),
         CLIAgent::Codex => Some(Box::new(CodexSessionHandler)),
+        CLIAgent::DeepSeek => Some(Box::new(DeepSeekSessionHandler)),
         CLIAgent::Amp
         | CLIAgent::Droid
         | CLIAgent::Copilot
@@ -145,6 +166,71 @@ impl CLIAgentSessionHandler for CodexSessionHandler {
 
     fn supports_rich_status(&self) -> bool {
         false
+    }
+}
+
+/// DeepSeek-TUI handler: listens for structured OSC 777 events and legacy
+/// OSC 9 plain-text notifications.
+/// DeepSeek-TUI emits `\x1b]9;deepseek: turn complete\x07` (optionally with
+/// elapsed time and cost) when a turn finishes. Those legacy notifications are
+/// treated as `Stop` events. Rich status is only available when DeepSeek hooks
+/// emit structured OSC 777 events with a session id.
+struct DeepSeekSessionHandler;
+
+impl DeepSeekSessionHandler {
+    fn notification_title_from_body(body: &str) -> Option<String> {
+        let title = body
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .filter(|line| !line.starts_with("deepseek: turn complete"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if title.is_empty() {
+            None
+        } else {
+            Some(title)
+        }
+    }
+}
+
+impl CLIAgentSessionHandler for DeepSeekSessionHandler {
+    /// DeepSeek-TUI uses OSC 9 with no title (same channel as Codex).
+    fn try_parse(&self, title: Option<&str>, body: &str) -> Option<CLIAgentEvent> {
+        // Future-proof: try structured JSON first in case a plugin is added later.
+        if let Some(parsed) = parse_event(title, body) {
+            return Some(parsed);
+        }
+        // OSC 9 notifications have no title.
+        if title.is_some() {
+            return None;
+        }
+        let body = body.trim();
+        if body.is_empty() {
+            return None;
+        }
+        Some(CLIAgentEvent {
+            v: 1,
+            agent: CLIAgent::DeepSeek,
+            event: CLIAgentEventType::Stop,
+            session_id: None,
+            cwd: None,
+            project: None,
+            payload: CLIAgentEventPayload {
+                query: Self::notification_title_from_body(body),
+                response: Some(body.to_owned()),
+                ..Default::default()
+            },
+        })
+    }
+
+    fn handle_event(&mut self, event: CLIAgentEvent) -> Option<CLIAgentEvent> {
+        Some(event)
+    }
+
+    fn supports_rich_status(&self) -> bool {
+        true
     }
 }
 
@@ -329,5 +415,94 @@ mod tests {
             payload: CLIAgentEventPayload::default(),
         };
         assert!(handler.handle_event(event).is_some());
+    }
+
+    #[test]
+    fn deepseek_handler_supports_structured_rich_status() {
+        assert!(agent_supports_rich_status(&CLIAgent::DeepSeek));
+    }
+
+    #[test]
+    fn deepseek_osc9_completion_does_not_claim_prompt_text() {
+        let handler = DeepSeekSessionHandler;
+        let event = handler
+            .try_parse(None, "deepseek: turn complete")
+            .expect("DeepSeek OSC 9 body should parse");
+
+        assert_eq!(event.event, CLIAgentEventType::Stop);
+        assert_eq!(event.payload.query, None);
+        assert_eq!(
+            event.payload.response.as_deref(),
+            Some("deepseek: turn complete")
+        );
+    }
+
+    #[test]
+    fn deepseek_osc9_response_text_becomes_notification_title() {
+        let handler = DeepSeekSessionHandler;
+        let event = handler
+            .try_parse(
+                None,
+                "最新回复内容\ndeepseek: turn complete (1m 15s, $0.01)",
+            )
+            .expect("DeepSeek OSC 9 body should parse");
+
+        assert_eq!(event.event, CLIAgentEventType::Stop);
+        assert_eq!(event.payload.query.as_deref(), Some("最新回复内容"));
+        assert_eq!(
+            event.payload.response.as_deref(),
+            Some("最新回复内容\ndeepseek: turn complete (1m 15s, $0.01)")
+        );
+    }
+
+    #[test]
+    fn deepseek_osc9_plain_response_text_becomes_notification_title() {
+        let handler = DeepSeekSessionHandler;
+        let event = handler
+            .try_parse(None, "最新回复内容")
+            .expect("DeepSeek OSC 9 body should parse");
+
+        assert_eq!(event.event, CLIAgentEventType::Stop);
+        assert_eq!(event.payload.query.as_deref(), Some("最新回复内容"));
+        assert_eq!(event.payload.response.as_deref(), Some("最新回复内容"));
+    }
+
+    #[test]
+    fn deepseek_legacy_osc9_session_is_not_rich_status() {
+        let session = CLIAgentSession {
+            agent: CLIAgent::DeepSeek,
+            status: super::super::CLIAgentSessionStatus::InProgress,
+            session_context: super::super::CLIAgentSessionContext::default(),
+            input_state: super::super::CLIAgentInputState::Closed,
+            should_auto_toggle_input: false,
+            listener: None,
+            remote_host: None,
+            plugin_version: None,
+            draft_text: None,
+            custom_command_prefix: None,
+        };
+
+        assert!(!session_supports_rich_status(&session));
+    }
+
+    #[test]
+    fn deepseek_structured_session_is_rich_status() {
+        let session = CLIAgentSession {
+            agent: CLIAgent::DeepSeek,
+            status: super::super::CLIAgentSessionStatus::InProgress,
+            session_context: super::super::CLIAgentSessionContext {
+                session_id: Some("sess_1234".to_owned()),
+                ..Default::default()
+            },
+            input_state: super::super::CLIAgentInputState::Closed,
+            should_auto_toggle_input: false,
+            listener: None,
+            remote_host: None,
+            plugin_version: None,
+            draft_text: None,
+            custom_command_prefix: None,
+        };
+
+        assert!(session_supports_rich_status(&session));
     }
 }

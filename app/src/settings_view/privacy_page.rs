@@ -35,7 +35,7 @@ use crate::settings_view::privacy::AddRegexModalViewState;
 use crate::settings_view::render_body_item_label;
 use crate::settings_view::settings_page::CONTENT_FONT_SIZE;
 use crate::terminal::safe_mode_settings::{
-    get_effective_secret_display_mode, SecretDisplayMode, SecretDisplayModeSetting,
+    SecretDisplayMode, SecretDisplayModeSetting, get_effective_secret_display_mode,
 };
 use crate::ui_components::buttons::icon_button;
 use crate::view_components::{Dropdown, DropdownItem};
@@ -56,14 +56,13 @@ use crate::{
 };
 
 use super::{
-    flags,
+    SettingsAction, SettingsSection, ToggleSettingActionPair, flags,
     privacy::{AddRegexModal, AddRegexModalEvent},
     settings_page::{
-        render_body_item, render_sub_header, SettingsPageMeta, SettingsPageViewHandle, ToggleState,
-        HEADER_PADDING, TOGGLE_BUTTON_RIGHT_PADDING,
+        HEADER_PADDING, SettingsPageMeta, SettingsPageViewHandle, TOGGLE_BUTTON_RIGHT_PADDING,
+        ToggleState, render_body_item, render_sub_header,
     },
-    settings_page::{LocalOnlyIconState, MatchData, PageType, SettingsWidget, PAGE_PADDING},
-    SettingsAction, SettingsSection, ToggleSettingActionPair,
+    settings_page::{LocalOnlyIconState, MatchData, PAGE_PADDING, PageType, SettingsWidget},
 };
 
 use crate::modal::{Modal, ModalEvent, ModalViewState};
@@ -71,8 +70,7 @@ use warpui::fonts::Weight;
 
 const FONT_SIZE: f32 = 12.;
 
-const TELEMETRY_DOCS_URL: &str =
-    "https://docs.warp.dev/support-and-community/privacy-and-security/privacy#what-telemetry-data-does-warp-collect-and-why";
+const TELEMETRY_DOCS_URL: &str = "https://docs.warp.dev/support-and-community/privacy-and-security/privacy#what-telemetry-data-does-warp-collect-and-why";
 
 pub fn data_management_url(custom_token: Option<&str>) -> String {
     match custom_token {
@@ -250,9 +248,11 @@ impl PrivacyPageView {
         );
 
         ctx.update_model(&safe_mode_settings, move |safe_mode_settings, ctx| {
-            report_if_error!(safe_mode_settings
-                .safe_mode_enabled
-                .set_value(new_value, ctx));
+            report_if_error!(
+                safe_mode_settings
+                    .safe_mode_enabled
+                    .set_value(new_value, ctx)
+            );
         });
         ctx.notify();
     }
@@ -267,9 +267,11 @@ impl PrivacyPageView {
         };
 
         ctx.update_model(&safe_mode_settings, move |safe_mode_settings, ctx| {
-            report_if_error!(safe_mode_settings
-                .hide_secrets_in_block_list
-                .set_value(new_value, ctx));
+            report_if_error!(
+                safe_mode_settings
+                    .hide_secrets_in_block_list
+                    .set_value(new_value, ctx)
+            );
         });
         ctx.notify();
     }
