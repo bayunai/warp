@@ -37,7 +37,6 @@ use crate::{
         model_events::{ModelEvent, ModelEventDispatcher},
         TerminalModel,
     },
-    workspaces::user_workspaces::UserWorkspaces,
 };
 
 use super::{
@@ -659,14 +658,11 @@ impl BlocklistAIContextModel {
     pub fn pending_context(&self, app: &AppContext, is_user_query: bool) -> Vec<AIAgentContext> {
         let pwd = self.current_pwd();
         let is_pwd_indexed = if cfg!(feature = "agent_mode_evals") {
-            // In evals, we want to disable file outline based search. Full
-            // source code embedding based context is still available.
+            // In evals, we want to disable file outline based search.
             false
         } else {
-            UserWorkspaces::as_ref(app).is_codebase_context_enabled(app)
-                && pwd.as_ref().is_some_and(|pwd| {
-                    RepoOutlines::as_ref(app).is_directory_indexed(Path::new(&pwd))
-                })
+            pwd.as_ref()
+                .is_some_and(|pwd| RepoOutlines::as_ref(app).is_directory_indexed(Path::new(&pwd)))
         };
 
         let project_rules = if let Some(pwd) = pwd.clone().and_then(|path| {

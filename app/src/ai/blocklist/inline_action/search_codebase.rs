@@ -17,13 +17,13 @@ use warpui::{
 use super::search_results_common::{
     render_collapsible_search_results, CollapsibleSearchResultsState,
 };
-use crate::ai::blocklist::TextLocation;
 use crate::ai::blocklist::inline_action::{
     inline_action_header::{
         INLINE_ACTION_HEADER_VERTICAL_PADDING, INLINE_ACTION_HORIZONTAL_PADDING,
     },
     inline_action_icons::cancelled_icon,
 };
+use crate::ai::blocklist::TextLocation;
 use crate::ai::{
     agent::FileContext,
     blocklist::{

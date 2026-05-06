@@ -364,6 +364,7 @@ impl AIConversation {
             run_id,
             autoexecute_override,
             last_event_sequence,
+            compaction_state,
         ) = if let Some(data) = conversation_data {
             let server_conversation_token = data
                 .server_conversation_token
@@ -395,6 +396,14 @@ impl AIConversation {
                 AIConversationAutoexecuteMode::default()
             };
             let last_event_sequence = data.last_event_sequence;
+            let compaction_state = data
+                .compaction_state_json
+                .and_then(|json| {
+                    serde_json::from_str(&json)
+                        .map_err(|e| log::warn!("[byop-compaction] failed to deserialize compaction_state, resetting: {e}"))
+                        .ok()
+                })
+                .unwrap_or_default();
 
             (
                 server_conversation_token,
@@ -408,6 +417,7 @@ impl AIConversation {
                 run_id,
                 autoexecute_override,
                 last_event_sequence,
+                compaction_state,
             )
         } else {
             (
@@ -422,6 +432,7 @@ impl AIConversation {
                 None,
                 AIConversationAutoexecuteMode::default(),
                 None,
+                crate::ai::byop_compaction::state::CompactionState::default(),
             )
         };
 
@@ -465,7 +476,7 @@ impl AIConversation {
             parent_conversation_id,
             is_remote_child: false,
             last_event_sequence,
-            compaction_state: Default::default(),
+            compaction_state,
         })
     }
 
@@ -1370,6 +1381,8 @@ impl AIConversation {
                 response_stream_id: Some(stream_id.clone()),
             });
         }
+        // turn 启动即落盘:user query 提交时先写一次,stream 中途强退也能保留提问记录。
+        self.write_updated_conversation_state(ctx);
         Ok(())
     }
 
@@ -2000,6 +2013,7 @@ impl AIConversation {
             }
             Action::CommitTransaction(_) => {
                 self.commit_transaction();
+                self.write_updated_conversation_state(ctx);
             }
             Action::RollbackTransaction(_) => {
                 log::debug!("Rollback transaction.");
@@ -2400,6 +2414,7 @@ impl AIConversation {
                     conversation_id: self.id,
                     is_hidden: self.is_exchange_hidden(exchange_id),
                 });
+                self.write_updated_conversation_state(ctx);
             }
             Action::UpdateTaskServerData(UpdateTaskServerData {
                 task_id,
@@ -2459,6 +2474,7 @@ impl AIConversation {
                     conversation_id: self.id,
                     is_hidden: self.is_exchange_hidden(exchange_id),
                 });
+                self.write_updated_conversation_state(ctx);
             }
             Action::AppendToMessageContent(AppendToMessageContent {
                 task_id,
@@ -2485,8 +2501,7 @@ impl AIConversation {
                 // 高频 chunk 流(每 ~5-50ms 一帧)下,跳过 `self.todo_lists.last().cloned()`
                 // (整个 todo list 浅 clone)+ `self.code_review.as_ref().cloned()`
                 // 可显著降低单 chunk CPU 开销,缓解 view::render 帧时间被拖长。
-                let is_text_or_reasoning_append =
-                    is_pure_text_or_reasoning_mask(&mask);
+                let is_text_or_reasoning_append = is_pure_text_or_reasoning_mask(&mask);
                 let current_todo_list = if is_text_or_reasoning_append {
                     None
                 } else {
@@ -2522,6 +2537,7 @@ impl AIConversation {
                     conversation_id: self.id,
                     is_hidden: self.is_exchange_hidden(exchange_id),
                 });
+                // streaming chunk delta 不落盘,落盘只在 part / message 边界发生。
             }
             Action::ShowSuggestions(suggestions) => {
                 let exchange_id = self
@@ -2589,6 +2605,10 @@ impl AIConversation {
                 // intentionally keep the UI unchanged during a live session. The
                 // exchange's client representation (added_message_ids) remains
                 // unmodified, pointing to message IDs that now exist in a subtask.
+
+                // 任务结构变化必须落盘,否则重启时 task 树和 conversation_data
+                // 不一致会被 `is_restorable` 过滤丢弃整条会话。
+                self.write_updated_conversation_state(ctx);
             }
             Action::StartNewConversation(_) => {
                 // New conversations are handled at the BlocklistAIHistoryModel layer
@@ -2776,8 +2796,7 @@ impl AIConversation {
             return;
         }
 
-        // Check if session restoration is enabled before writing any state.
-        if !*GeneralSettings::as_ref(ctx).restore_session
+        if !*GeneralSettings::as_ref(ctx).persist_conversations
             || !AppExecutionMode::as_ref(ctx).can_save_session()
         {
             return;
@@ -2841,6 +2860,19 @@ impl AIConversation {
                 run_id: self.task_id.map(|id| id.to_string()),
                 autoexecute_override: Some(self.autoexecute_override.into()),
                 last_event_sequence: self.last_event_sequence,
+                compaction_state_json: if self.compaction_state.completed().is_empty() {
+                    None
+                } else {
+                    match serde_json::to_string(&self.compaction_state) {
+                        Ok(json) => Some(json),
+                        Err(e) => {
+                            log::error!(
+                                "[byop-compaction] failed to serialize compaction_state: {e}"
+                            );
+                            None
+                        }
+                    }
+                },
             },
         };
         ctx.spawn(

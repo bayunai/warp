@@ -120,8 +120,10 @@ fn should_autoexecute_returns_false_when_questions_are_allowed() {
     });
 }
 
+// openWarp: auto-approve(ctrl+shift+i)只对 shell/编辑工具自动通过,
+// ask_user_question 即使在 autoapprove 模式下也必须弹给用户。
 #[test]
-fn should_autoexecute_returns_true_when_autoapprove_is_enabled_and_profile_allows_override() {
+fn should_autoexecute_returns_false_when_autoapprove_is_enabled_with_default_profile() {
     App::test((), |mut app| async move {
         let terminal_view_id = EntityId::new();
         let (history, _) = initialize_ask_user_question_test(&mut app, terminal_view_id);
@@ -138,12 +140,12 @@ fn should_autoexecute_returns_true_when_autoapprove_is_enabled_and_profile_allow
             executor.should_autoexecute(input, ctx)
         });
 
-        assert!(result);
+        assert!(!result);
     });
 }
 
 #[test]
-fn execute_returns_sync_skipped_question_ids_when_autoapprove_is_enabled() {
+fn execute_returns_async_when_autoapprove_is_enabled_with_default_profile() {
     App::test((), |mut app| async move {
         let terminal_view_id = EntityId::new();
         let (history, _) = initialize_ask_user_question_test(&mut app, terminal_view_id);
@@ -162,12 +164,7 @@ fn execute_returns_sync_skipped_question_ids_when_autoapprove_is_enabled() {
             result
         });
 
-        assert!(matches!(
-            execution,
-            AnyActionExecution::Sync(AIAgentActionResultType::AskUserQuestion(
-                AskUserQuestionResult::SkippedByAutoApprove { question_ids }
-            )) if question_ids == vec!["q1".to_string()]
-        ));
+        assert!(matches!(execution, AnyActionExecution::Async { .. }));
     });
 }
 

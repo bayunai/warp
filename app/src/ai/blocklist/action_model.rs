@@ -284,9 +284,6 @@ impl BlocklistAIActionModel {
             } => {
                 me.handle_action_result(*conversation_id, result.clone(), *cancellation_reason, ctx)
             }
-            BlocklistAIActionExecutorEvent::InitProject(id) => {
-                ctx.emit(BlocklistAIActionEvent::InitProject(id.clone()))
-            }
             BlocklistAIActionExecutorEvent::OpenCodeReview(id) => {
                 ctx.emit(BlocklistAIActionEvent::ToggleCodeReview(id.clone()))
             }
@@ -1373,7 +1370,6 @@ pub enum BlocklistAIActionEvent {
         conversation_id: AIConversationId,
         cancellation_reason: Option<CancellationReason>,
     },
-    InitProject(AIAgentActionId),
     ToggleCodeReview(AIAgentActionId),
     InsertCodeReviewComments {
         action_id: AIAgentActionId,
@@ -1390,7 +1386,6 @@ impl BlocklistAIActionEvent {
             BlocklistAIActionEvent::ActionBlockedOnUserConfirmation(action_id) => action_id,
             BlocklistAIActionEvent::ExecutingAction(action_id) => action_id,
             BlocklistAIActionEvent::FinishedAction { action_id, .. } => action_id,
-            BlocklistAIActionEvent::InitProject(action_id) => action_id,
             BlocklistAIActionEvent::ToggleCodeReview(action_id) => action_id,
             BlocklistAIActionEvent::InsertCodeReviewComments { action_id, .. } => action_id,
         }

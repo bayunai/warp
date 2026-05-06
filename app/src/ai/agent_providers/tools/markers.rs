@@ -1,7 +1,6 @@
 //! UI 信号 marker 类工具:执行即"通知前端做某事",result 是固定 ack。
 //!
 //! - `open_code_review`: 打开 Code Review 面板
-//! - `init_project`: 触发项目初始化向导(创建 CLAUDE.md / .warp/rules.md 等)
 //! - `transfer_shell_command_control_to_user`: 把长运行命令的 PTY 控制权交给用户
 //!
 //! 这些工具的 protobuf 字段都很少(空 message 或一个字段),executor 大多是
@@ -50,33 +49,6 @@ pub static OPEN_CODE_REVIEW: OpenAiTool = OpenAiTool {
     parameters: empty_parameters,
     from_args: open_code_review_from_args,
     result_to_json: open_code_review_result_to_json,
-};
-
-// ---------------------------------------------------------------------------
-// init_project
-// ---------------------------------------------------------------------------
-
-fn init_project_from_args(_args: &str) -> Result<api::message::tool_call::Tool> {
-    Ok(api::message::tool_call::Tool::InitProject(
-        api::message::tool_call::InitProject {},
-    ))
-}
-
-fn init_project_result_to_json(result: &api::message::tool_call_result::Result) -> Option<Value> {
-    use api::message::tool_call_result::Result as R;
-    match result {
-        R::InitProject(_) => Some(json!({ "status": "ok" })),
-        _ => None,
-    }
-}
-
-pub static INIT_PROJECT: OpenAiTool = OpenAiTool {
-    name: "init_project",
-    description: "触发当前 workspace 的项目初始化向导(client UI 信号,无参数)。\
-                  当用户首次在新 repo 上启动 agent、或显式要求初始化项目时使用。",
-    parameters: empty_parameters,
-    from_args: init_project_from_args,
-    result_to_json: init_project_result_to_json,
 };
 
 // ---------------------------------------------------------------------------

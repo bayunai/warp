@@ -1,20 +1,11 @@
-use ai::index::{
-    full_source_code_embedding::{
-        manager::{CodebaseIndexManager, CodebaseIndexManagerEvent},
-        RetrievalID,
-    },
-    locations::CodeContextLocation,
-};
+use ai::index::locations::CodeContextLocation;
 use anyhow::anyhow;
 use futures_util::stream::AbortHandle;
-use instant::Instant;
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
     sync::Arc,
 };
-use warp_core::features::FeatureFlag;
-
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use crate::{
@@ -22,9 +13,8 @@ use crate::{
         agent::AIAgentActionId,
         outline::{OutlineStatus, RepoOutlines},
     },
-    report_error, send_telemetry_from_ctx,
+    report_error,
     server::server_api::AIApiError,
-    TelemetryEvent,
 };
 
 #[derive(Debug)]
@@ -57,37 +47,14 @@ pub enum GetRelevantFilesError {
     Missing,
 }
 
-/// This enum allows us to use both the existing structure for outline-based indexing
-/// and the new full source code indexing manager/model.
 enum RequestHandle {
-    /// Used with outline-based indexing.
     AbortHandle(AbortHandle),
-
-    /// Used with full source code indexing.
-    RetrievalID {
-        repo_path: PathBuf,
-        retrieval_id: RetrievalID,
-        start_time: Instant,
-    },
 }
 
 impl RequestHandle {
-    fn abort(&mut self, ctx: &mut AppContext) {
+    fn abort(&mut self, _ctx: &mut AppContext) {
         match self {
             RequestHandle::AbortHandle(abort_handle) => abort_handle.abort(),
-            RequestHandle::RetrievalID {
-                repo_path,
-                retrieval_id,
-                start_time: _,
-            } => {
-                CodebaseIndexManager::handle(ctx).update(ctx, |index_manager, ctx| {
-                    if let Err(err) =
-                        index_manager.abort_retrieval_request(repo_path, retrieval_id.clone(), ctx)
-                    {
-                        log::error!("Failed to abort file retrieval request: {err:?}");
-                    }
-                });
-            }
         }
     }
 }
@@ -102,87 +69,8 @@ pub struct GetRelevantFilesController {
 }
 
 impl GetRelevantFilesController {
-    pub fn new(ctx: &mut ModelContext<Self>) -> Self {
-        let codebase_manager = CodebaseIndexManager::handle(ctx);
-        ctx.subscribe_to_model(&codebase_manager, Self::handle_codebase_manager_event);
+    pub fn new(_ctx: &mut ModelContext<Self>) -> Self {
         Self::default()
-    }
-
-    fn pending_request_details_for_retrieval_id(
-        &self,
-        pending_retrieval_id: &RetrievalID,
-    ) -> Option<(&AIAgentActionId, &Instant)> {
-        // Full-source embedding completion events only carry the retrieval ID, so map them back to
-        // the agent action that initiated the request before emitting results/telemetry.
-        self.pending_requests
-            .iter()
-            .find_map(|(action_id, request_handle)| match request_handle {
-                RequestHandle::AbortHandle(_) => None,
-                RequestHandle::RetrievalID {
-                    retrieval_id,
-                    start_time,
-                    ..
-                } if retrieval_id == pending_retrieval_id => Some((action_id, start_time)),
-                RequestHandle::RetrievalID { .. } => None,
-            })
-    }
-
-    fn handle_codebase_manager_event(
-        &mut self,
-        codebase_manager_event: &CodebaseIndexManagerEvent,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        match codebase_manager_event {
-            CodebaseIndexManagerEvent::RetrievalRequestFailed {
-                retrieval_id,
-                error_message: error,
-            } => {
-                let Some((action_id, _search_start)) =
-                    self.pending_request_details_for_retrieval_id(retrieval_id)
-                else {
-                    return;
-                };
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::FullEmbedCodebaseContextSearchFailed {
-                        action_id: action_id.clone(),
-                        error: error.to_string(),
-                    },
-                    ctx
-                );
-
-                self.handle_relevant_file_paths_result(
-                    Err(anyhow!(error.to_owned())),
-                    action_id.clone(),
-                    ctx,
-                );
-            }
-            CodebaseIndexManagerEvent::RetrievalRequestCompleted {
-                retrieval_id,
-                fragments,
-                out_of_sync_delay,
-            } => {
-                let Some((action_id, search_start)) =
-                    self.pending_request_details_for_retrieval_id(retrieval_id)
-                else {
-                    return;
-                };
-                send_telemetry_from_ctx!(
-                    TelemetryEvent::FullEmbedCodebaseContextSearchSuccess {
-                        action_id: action_id.clone(),
-                        total_search_duration: search_start.elapsed(),
-                        out_of_sync_delay: *out_of_sync_delay,
-                    },
-                    ctx
-                );
-
-                self.handle_relevant_file_paths_result(
-                    Ok(fragments.clone()),
-                    action_id.clone(),
-                    ctx,
-                );
-            }
-            _ => (),
-        }
     }
 
     /// Start a new search query based on the repo outline.
@@ -196,35 +84,6 @@ impl GetRelevantFilesController {
     ) -> Result<(), GetRelevantFilesError> {
         const MINIMUM_FILE_COUNT_FOR_API_CALL: usize = 2;
         self.cancel_request_for_action(&action_id, ctx);
-
-        if FeatureFlag::FullSourceCodeEmbedding.is_enabled() {
-            let codebase_mgr = CodebaseIndexManager::handle(ctx);
-            if let Some(base_path) = codebase_mgr.as_ref(ctx).root_path_for_codebase(directory) {
-                match codebase_mgr.update(ctx, |index_manager, ctx| {
-                    index_manager.retrieve_relevant_files(query.clone(), base_path.as_path(), ctx)
-                }) {
-                    Ok(retrieval_request_id) => {
-                        log::info!("Using full source code embedding for search");
-                        let search_start = Instant::now();
-                        self.pending_requests.insert(
-                            action_id,
-                            RequestHandle::RetrievalID {
-                                repo_path: base_path.clone(),
-                                retrieval_id: retrieval_request_id,
-                                start_time: search_start,
-                            },
-                        );
-
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        log::info!(
-                            "Failed to initiate full source code search: {e}, falling back to outline-based search"
-                        );
-                    }
-                }
-            }
-        }
 
         match RepoOutlines::as_ref(ctx).get_outline(directory) {
             Some((OutlineStatus::Complete(outline), base_path)) => {
@@ -346,15 +205,9 @@ impl GetRelevantFilesController {
 
     /// Returns the path to the root directory for a codebase search where pwd is `directory`.
     pub fn root_directory_for_search(&self, directory: &Path, app: &AppContext) -> Option<PathBuf> {
-        let mut start = None;
-        if FeatureFlag::FullSourceCodeEmbedding.is_enabled() {
-            start = CodebaseIndexManager::as_ref(app).root_path_for_codebase(directory);
-        }
-        start.or_else(|| {
-            RepoOutlines::as_ref(app)
-                .get_outline(directory)
-                .map(|(_, root)| root)
-        })
+        RepoOutlines::as_ref(app)
+            .get_outline(directory)
+            .map(|(_, root)| root)
     }
 
     pub fn cancel_request_for_action(

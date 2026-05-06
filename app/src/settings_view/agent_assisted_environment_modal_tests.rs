@@ -3,7 +3,7 @@ use super::*;
 use crate::server::server_api::ServerApiProvider;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspace::ToastStack;
-use ai::index::full_source_code_embedding::manager::CodebaseIndexManager;
+
 use std::path::PathBuf;
 use warp_core::ui::appearance::Appearance;
 use warpui::elements::{ChildView, Empty};
@@ -15,12 +15,6 @@ fn init_modal_test_models(app: &mut App) {
     app.add_singleton_model(|_| ServerApiProvider::new_for_test());
     app.add_singleton_model(|_| Appearance::mock());
     app.add_singleton_model(|_| ToastStack);
-
-    // The modal queries CodebaseIndexManager for locally indexed repos.
-    // Register a test instance so `available_indexed_repos(...)` doesn't panic.
-    app.add_singleton_model(|ctx| {
-        CodebaseIndexManager::new_for_test(ServerApiProvider::as_ref(ctx).get(), ctx)
-    });
 }
 
 #[derive(Default)]

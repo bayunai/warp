@@ -94,7 +94,6 @@ pub const REGISTRY: &[&OpenAiTool] = &[
     &suggest::SUGGEST_PROMPT,
     // UI marker(无副作用,信号通知前端)
     &markers::OPEN_CODE_REVIEW,
-    &markers::INIT_PROJECT,
     &markers::TRANSFER_SHELL_CONTROL,
     // BYOP-only 网络工具:不映射到 protobuf executor variant,由 chat_stream
     // 在 parse_incoming_tool_call 之前按 name 拦截,直接调 web_runtime 跑 HTTP。
@@ -202,7 +201,6 @@ pub fn action_result_to_msg_result(
         ReqR::SuggestNewConversation(r) => MsgR::SuggestNewConversation(r),
         ReqR::SuggestPrompt(r) => MsgR::SuggestPrompt(r),
         ReqR::OpenCodeReview(r) => MsgR::OpenCodeReview(r),
-        ReqR::InitProject(r) => MsgR::InitProject(r),
         ReqR::TransferShellCommandControlToUser(r) => MsgR::TransferShellCommandControlToUser(r),
         _ => return None,
     };

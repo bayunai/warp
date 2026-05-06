@@ -431,7 +431,6 @@ impl BlocklistAIActionExecutor {
             AIAgentActionType::RequestFileEdits { .. } => self
                 .request_file_edits_executor
                 .update(ctx, |executor, ctx| executor.preprocess_action(input, ctx)),
-            AIAgentActionType::InitProject => futures::future::ready(()).boxed(),
             AIAgentActionType::OpenCodeReview => futures::future::ready(()).boxed(),
             AIAgentActionType::InsertCodeReviewComments { .. } => {
                 futures::future::ready(()).boxed()
@@ -546,10 +545,6 @@ impl BlocklistAIActionExecutor {
                 .shell_command_executor
                 .update(ctx, |executor, ctx| executor.execute(input, ctx))
                 .into(),
-            AIAgentActionType::InitProject => {
-                ctx.emit(BlocklistAIActionExecutorEvent::InitProject(action.id));
-                ActionExecution::<()>::Sync(AIAgentActionResultType::InitProject).into()
-            }
             AIAgentActionType::OpenCodeReview => {
                 ctx.emit(BlocklistAIActionExecutorEvent::OpenCodeReview(action.id));
                 ActionExecution::<()>::Sync(AIAgentActionResultType::OpenCodeReview).into()
@@ -805,7 +800,6 @@ impl BlocklistAIActionExecutor {
             AIAgentActionType::ReadMCPResource { .. } => self
                 .read_mcp_resource_executor
                 .update(ctx, |executor, ctx| executor.should_autoexecute(input, ctx)),
-            AIAgentActionType::InitProject => true,
             AIAgentActionType::OpenCodeReview => true,
             AIAgentActionType::InsertCodeReviewComments { .. } => true,
             AIAgentActionType::SuggestNewConversation { .. } => self
@@ -854,7 +848,6 @@ pub enum BlocklistAIActionExecutorEvent {
         cancellation_reason: Option<CancellationReason>,
     },
 
-    InitProject(AIAgentActionId),
     OpenCodeReview(AIAgentActionId),
     InsertCodeReviewComments {
         action_id: AIAgentActionId,

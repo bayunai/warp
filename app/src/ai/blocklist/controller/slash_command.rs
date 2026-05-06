@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use warp_core::features::FeatureFlag;
 use warpui::{AppContext, ModelContext, SingletonEntity};
@@ -6,8 +6,8 @@ use warpui::{AppContext, ModelContext, SingletonEntity};
 use crate::{
     ai::{
         agent::{
-            conversation::AIConversationId, AIAgentContext, AIAgentInput, CloneRepositoryURL,
-            EntrypointType, RequestMetadata,
+            conversation::AIConversationId, AIAgentAttachment, AIAgentContext, AIAgentInput,
+            CloneRepositoryURL, EntrypointType, RequestMetadata, UserQueryMode,
         },
         blocklist::agent_view::AgentViewEntryOrigin,
     },
@@ -28,7 +28,9 @@ pub enum SlashCommandRequest {
     CloneRepository {
         url: String,
     },
-    InitProjectRules,
+    InitProjectRules {
+        arguments: Option<String>,
+    },
     CreateEnvironment {
         repos: Vec<String>,
         use_current_dir: bool,
@@ -55,9 +57,16 @@ impl SlashCommandRequest {
     /// Parses user input into a SlashCommandRequest for slash commands that are handled
     /// via the AI query flow (as opposed to action-based slash commands handled in input.rs).
     pub fn from_query(query: &str) -> Option<SlashCommandRequest> {
-        // Check if this is an exact /init query and route it to InitProjectRules instead
-        if query == "/init" {
-            return Some(Self::InitProjectRules);
+        if query == commands::INIT_NAME {
+            return Some(Self::InitProjectRules { arguments: None });
+        }
+        if let Some(arguments) = query
+            .strip_prefix(commands::INIT_NAME)
+            .and_then(|query| query.strip_prefix(' '))
+        {
+            return Some(Self::InitProjectRules {
+                arguments: Some(arguments.to_string()),
+            });
         }
 
         // Check if query starts with /compact and route to summarize conversation
@@ -207,9 +216,16 @@ impl SlashCommandRequest {
                     context,
                 }]
             }
-            SlashCommandRequest::InitProjectRules => vec![AIAgentInput::InitProjectRules {
+            SlashCommandRequest::InitProjectRules { arguments } => vec![AIAgentInput::UserQuery {
+                query: crate::ai::agent_providers::prompt_renderer::render_init_project_command(
+                    arguments.as_deref(),
+                ),
                 context,
-                display_query: Some("/init".to_string()),
+                static_query_type: None,
+                referenced_attachments: HashMap::<String, AIAgentAttachment>::new(),
+                user_query_mode: UserQueryMode::Normal,
+                running_command: None,
+                intended_agent: None,
             }],
             SlashCommandRequest::CreateEnvironment {
                 mut repos,
@@ -266,7 +282,7 @@ impl SlashCommandRequest {
     fn entrypoint(&self) -> EntrypointType {
         match self {
             SlashCommandRequest::CloneRepository { .. } => EntrypointType::CloneRepository,
-            SlashCommandRequest::InitProjectRules => EntrypointType::InitProjectRules,
+            SlashCommandRequest::InitProjectRules { .. } => EntrypointType::InitProjectRules,
             SlashCommandRequest::CreateNewProject { .. }
             | SlashCommandRequest::CreateEnvironment { .. }
             | SlashCommandRequest::Summarize { .. }

@@ -1,13 +1,11 @@
 #[cfg(feature = "local_fs")]
 use super::features::external_editor::ExternalEditorView;
 use super::{
-    flags,
     settings_page::{
         build_sub_header, render_body_item, render_separator, Category, MatchData, PageType,
         SettingsPageMeta, SettingsPageViewHandle, SettingsWidget, HEADER_PADDING,
-        TOGGLE_BUTTON_RIGHT_PADDING,
     },
-    LocalOnlyIconState, SettingsAction, SettingsSection, ToggleSettingActionPair, ToggleState,
+    LocalOnlyIconState, SettingsAction, SettingsSection, ToggleState,
 };
 use crate::{
     ai::persisted_workspace::{
@@ -16,59 +14,43 @@ use crate::{
     appearance::Appearance,
     code::lsp_telemetry::{LspControlActionType, LspEnablementSource, LspTelemetryEvent},
     send_telemetry_from_ctx,
-    settings::{AISettings, CodeSettings},
+    settings::CodeSettings,
     terminal::general_settings::GeneralSettings,
     ui_components::{
         avatar::{Avatar, AvatarContent, StatusElementTypes},
         buttons::icon_button,
         icons::Icon,
     },
-    view_components::{
-        action_button::{ActionButton, SecondaryTheme},
-        DismissibleToast,
-    },
     workspace::tab_settings::TabSettings,
-    workspace::ToastStack,
-    workspaces::{
-        update_manager::TeamUpdateManager, user_workspaces::UserWorkspaces,
-        workspace::AdminEnablementSetting,
-    },
+    workspaces::update_manager::TeamUpdateManager,
     TelemetryEvent,
 };
-use ai::index::full_source_code_embedding::manager::{
-    CodebaseIndexFinishedStatus, CodebaseIndexManager, CodebaseIndexManagerEvent,
-    CodebaseIndexStatus, CodebaseIndexingError,
-};
-use ai::index::full_source_code_embedding::SyncProgress;
+
 use ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
-use ai::workspace::WorkspaceMetadata;
+
 use lsp::supported_servers::LSPServerType;
 use lsp::{LspManagerModel, LspManagerModelEvent, LspServerModel, LspState};
 use pathfinder_color::ColorU;
-use std::borrow::Cow;
+use settings::Setting as _;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use warp_core::{
-    features::FeatureFlag,
-    report_if_error,
-    settings::ToggleableSetting as _,
-    ui::theme::{AnsiColorIdentifier, Fill as ThemeFill},
+    features::FeatureFlag, report_if_error, settings::ToggleableSetting as _,
+    ui::theme::AnsiColorIdentifier,
 };
 use warp_util::path::user_friendly_path;
 use warpui::{
     elements::{
-        ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Element, Empty,
-        Expanded, Fill, Flex, MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement,
-        Radius, Shrinkable,
+        ChildView, Container, CornerRadius, CrossAxisAlignment, Element, Empty, Expanded, Fill,
+        Flex, MainAxisAlignment, MainAxisSize, MouseStateHandle, ParentElement, Radius, Shrinkable,
     },
     fonts::Weight,
-    id,
     keymap::ContextPredicate,
-    platform::{Cursor, FilePickerConfiguration},
+    platform::Cursor,
     ui_components::{
         button::ButtonVariant,
         components::{Coords, UiComponent, UiComponentStyles},
-        switch::{SwitchStateHandle, TooltipConfig},
+        switch::SwitchStateHandle,
     },
     Action, AppContext, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
@@ -77,7 +59,6 @@ use warpui::{
 const MAIN_SECTION_MARGIN: f32 = 12.;
 const SUB_SECTION_MARGIN: f32 = 8.;
 
-const STATUS_ICON_SIZE: f32 = 16.;
 const LSP_STATUS_INDICATOR_SIZE: f32 = 8.;
 
 /// Identifies which subpage of the Code settings the user is viewing.
@@ -111,14 +92,12 @@ struct LspServerRowMouseStates {
     restart: MouseStateHandle,
     #[cfg_attr(target_family = "wasm", allow(dead_code))]
     view_logs: MouseStateHandle,
-    toggle: SwitchStateHandle,
     install: MouseStateHandle,
+    uninstall: MouseStateHandle,
 }
 
 #[derive(Clone)]
 struct InitializedFoldersMouseStates {
-    codebase_manual_resync: Vec<MouseStateHandle>,
-    codebase_delete: Vec<MouseStateHandle>,
     lsp_rows: Vec<LspServerRowMouseStates>,
     open_project_rules: Vec<MouseStateHandle>,
 }
@@ -126,8 +105,6 @@ struct InitializedFoldersMouseStates {
 pub struct CodeSettingsPageView {
     page: PageType<Self>,
     active_subpage: Option<CodeSubpage>,
-    codebase_manual_resync_mouse_states: Vec<MouseStateHandle>,
-    codebase_delete_mouse_states: Vec<MouseStateHandle>,
     /// Mouse states for LSP server row buttons.
     /// This is kept separate from the codebase mouse states because each workspace/folder
     /// can have 0 to multiple LSP servers, so the count doesn't match 1:1 with workspaces.
@@ -144,34 +121,43 @@ pub struct CodeSettingsPageView {
 }
 
 impl CodeSettingsPageView {
-    pub fn new(ctx: &mut ViewContext<CodeSettingsPageView>) -> Self {
-        let index_manager = CodebaseIndexManager::handle(ctx);
-        let codebase_count = index_manager
-            .as_ref(ctx)
-            .get_codebase_index_statuses(ctx)
-            .count();
-
-        ctx.subscribe_to_model(&index_manager, |me, index, event, ctx| {
-            if let CodebaseIndexManagerEvent::SyncStateUpdated = event {
-                let codebase_count = index.as_ref(ctx).get_codebase_index_statuses(ctx).count();
-
-                // Only update mouse states if the number of codebases changed
-                if me.codebase_manual_resync_mouse_states.len() != codebase_count {
-                    // Resize the vector to match the new codebase count, but preserve the existing mouse states
-                    me.codebase_manual_resync_mouse_states
-                        .resize_with(codebase_count, Default::default);
-                    me.codebase_delete_mouse_states
-                        .resize_with(codebase_count, Default::default);
+    fn set_global_lsp_server_enabled(
+        server_type: LSPServerType,
+        enabled: bool,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
+            let mut enabled_servers = settings.enabled_lsp_servers.value().clone();
+            if enabled {
+                if !enabled_servers.contains(&server_type) {
+                    enabled_servers.push(server_type);
                 }
+            } else {
+                enabled_servers.retain(|s| *s != server_type);
+            }
+            report_if_error!(settings.enabled_lsp_servers.set_value(enabled_servers, ctx));
+        });
+    }
 
-                me.resize_workspace_mouse_states(ctx);
-
-                ctx.notify();
+    #[cfg(feature = "local_fs")]
+    fn spawn_global_lsp_for_known_workspaces(ctx: &mut ViewContext<Self>) {
+        let workspace_paths: Vec<PathBuf> = PersistedWorkspace::as_ref(ctx)
+            .workspaces()
+            .map(|workspace| workspace.path)
+            .collect();
+        PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
+            for file_path in workspace_paths {
+                workspace.execute_lsp_task(
+                    crate::ai::persisted_workspace::LspTask::Spawn { file_path },
+                    ctx,
+                );
             }
         });
+    }
 
-        // Calculate total LSP server count across all workspaces (enabled + disabled + suggested)
-        let lsp_server_count = PersistedWorkspace::as_ref(ctx).total_lsp_server_count(true);
+    pub fn new(ctx: &mut ViewContext<CodeSettingsPageView>) -> Self {
+        // LSP enablement is global in openWarp: render one row per supported server type.
+        let lsp_server_count = LSPServerType::all().count();
 
         // Subscribe to LSP manager events for real-time status updates
         ctx.subscribe_to_model(
@@ -181,7 +167,7 @@ impl CodeSettingsPageView {
                 | LspManagerModelEvent::ServerStopped(_)
                 | LspManagerModelEvent::ServerRemoved { .. } => {
                     // Recalculate LSP server count and resize mouse states if needed
-                    let new_count = PersistedWorkspace::as_ref(ctx).total_lsp_server_count(true);
+                    let new_count = LSPServerType::all().count();
                     if me.lsp_row_mouse_states.len() != new_count {
                         me.lsp_row_mouse_states
                             .resize_with(new_count, Default::default);
@@ -218,7 +204,7 @@ impl CodeSettingsPageView {
                     me.suggested_server_statuses
                         .insert((workspace_path.clone(), server_type), status);
                 }
-                let new_count = PersistedWorkspace::as_ref(ctx).total_lsp_server_count(true);
+                let new_count = LSPServerType::all().count();
                 if me.lsp_row_mouse_states.len() != new_count {
                     me.lsp_row_mouse_states
                         .resize_with(new_count, Default::default);
@@ -253,19 +239,7 @@ impl CodeSettingsPageView {
             }
         });
 
-        let manual_add_directory_button = ctx.add_typed_action_view(|_| {
-            ActionButton::new(crate::t!("settings-code-index-new-folder"), SecondaryTheme)
-                .with_icon(Icon::FindAll)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(CodeSettingsPageAction::ManualAddDirectory);
-                })
-        });
-
-        let code_page_widget = CodePageWidget {
-            switch_state: Default::default(),
-            auto_index_switch_state: Default::default(),
-            manual_add_directory_button,
-        };
+        let code_page_widget = CodePageWidget;
 
         let workspace_count = PersistedWorkspace::as_ref(ctx).workspaces().count();
 
@@ -323,10 +297,7 @@ impl CodeSettingsPageView {
         Self {
             page,
             active_subpage: None,
-            codebase_manual_resync_mouse_states: (0..codebase_count)
-                .map(|_| Default::default())
-                .collect(),
-            codebase_delete_mouse_states: (0..codebase_count).map(|_| Default::default()).collect(),
+
             lsp_row_mouse_states: (0..lsp_server_count).map(|_| Default::default()).collect(),
             open_project_rules_mouse_states: (0..workspace_count)
                 .map(|_| Default::default())
@@ -348,13 +319,6 @@ impl CodeSettingsPageView {
             // Rebuild the page with the relevant widgets for the selected subpage,
             // or the full categorized page when subpage is None.
             if let Some(subpage) = subpage {
-                let manual_add_directory_button = ctx.add_typed_action_view(|_| {
-                    ActionButton::new(crate::t!("settings-code-index-new-folder"), SecondaryTheme)
-                        .with_icon(Icon::FindAll)
-                        .on_click(|ctx| {
-                            ctx.dispatch_typed_action(CodeSettingsPageAction::ManualAddDirectory);
-                        })
-                });
                 let mut widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
                     vec![Box::new(CodeSubpageHeaderWidget {
                         title: subpage.title(),
@@ -362,11 +326,7 @@ impl CodeSettingsPageView {
                 match subpage {
                     CodeSubpage::Indexing => {
                         widgets.push(Box::new(CodebaseIndexingCategorizedWidget {
-                            inner: CodePageWidget {
-                                switch_state: Default::default(),
-                                auto_index_switch_state: Default::default(),
-                                manual_add_directory_button,
-                            },
+                            inner: CodePageWidget,
                         }));
                     }
                     CodeSubpage::EditorAndCodeReview => {
@@ -395,20 +355,9 @@ impl CodeSettingsPageView {
 
     /// Builds the full categorized page with all Code widgets.
     /// Used for the default/legacy view and when resetting to all-widgets mode for search.
-    fn build_full_page(ctx: &mut ViewContext<Self>) -> PageType<Self> {
+    fn build_full_page(_ctx: &mut ViewContext<Self>) -> PageType<Self> {
         if FeatureFlag::OpenWarpNewSettingsModes.is_enabled() {
-            let manual_add_directory_button = ctx.add_typed_action_view(|_| {
-                ActionButton::new(crate::t!("settings-code-index-new-folder"), SecondaryTheme)
-                    .with_icon(Icon::FindAll)
-                    .on_click(|ctx| {
-                        ctx.dispatch_typed_action(CodeSettingsPageAction::ManualAddDirectory);
-                    })
-            });
-            let code_page_widget = CodePageWidget {
-                switch_state: Default::default(),
-                auto_index_switch_state: Default::default(),
-                manual_add_directory_button,
-            };
+            let code_page_widget = CodePageWidget;
             let codebase_indexing_widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
                 vec![Box::new(CodebaseIndexingCategorizedWidget {
                     inner: code_page_widget,
@@ -443,19 +392,7 @@ impl CodeSettingsPageView {
             ];
             PageType::new_categorized(categories, None)
         } else {
-            let manual_add_directory_button = ctx.add_typed_action_view(|_| {
-                ActionButton::new(crate::t!("settings-code-index-new-folder"), SecondaryTheme)
-                    .with_icon(Icon::FindAll)
-                    .on_click(|ctx| {
-                        ctx.dispatch_typed_action(CodeSettingsPageAction::ManualAddDirectory);
-                    })
-            });
-            let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
-                vec![Box::new(CodePageWidget {
-                    switch_state: Default::default(),
-                    auto_index_switch_state: Default::default(),
-                    manual_add_directory_button,
-                })];
+            let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![Box::new(CodePageWidget)];
             PageType::new_uncategorized(widgets, None)
         }
     }
@@ -467,35 +404,6 @@ impl CodeSettingsPageView {
             self.open_project_rules_mouse_states
                 .resize_with(workspace_count, Default::default);
         }
-    }
-
-    fn open_directory_picker(&mut self, ctx: &mut ViewContext<Self>) {
-        let file_picker_config = FilePickerConfiguration::new().folders_only();
-        let window_id = ctx.window_id();
-
-        ctx.open_file_picker(
-            move |result, ctx| match result {
-                Ok(paths) => {
-                    if let Some(directory_path) = paths.first() {
-                        let path = PathBuf::from(directory_path);
-
-                        CodebaseIndexManager::handle(ctx).update(ctx, |manager, ctx| {
-                            manager.index_directory(path, ctx);
-                        });
-                    }
-                }
-                Err(err) => {
-                    ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                        toast_stack.add_ephemeral_toast(
-                            DismissibleToast::error(format!("{err}")),
-                            window_id,
-                            ctx,
-                        );
-                    });
-                }
-            },
-            file_picker_config,
-        );
     }
 }
 
@@ -523,17 +431,10 @@ pub enum CodeSettingsPageEvent {
 // Define the code page actions.
 #[derive(Debug, Clone)]
 pub enum CodeSettingsPageAction {
-    ToggleCodebaseContext,
-    ToggleAutoIndexing,
-    ManualResync(PathBuf),
-    DeleteIndex(PathBuf),
-    ManualAddDirectory,
     SignupAnonymousUser,
-    /// Toggle an LSP server on/off for a workspace.
-    ToggleLspServer {
-        workspace_path: PathBuf,
+    /// Uninstall a managed LSP server and disable it globally.
+    UninstallLspServer {
         server_type: LSPServerType,
-        currently_enabled: bool,
     },
     RestartLspServer {
         server: ModelHandle<LspServerModel>,
@@ -566,113 +467,54 @@ impl TypedActionView for CodeSettingsPageView {
 
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         match action {
-            CodeSettingsPageAction::ToggleCodebaseContext => {
-                // If the organization has an explicit setting (on or off), ignore user toggles.
-                let setting = UserWorkspaces::as_ref(ctx).team_allows_codebase_context();
-                match setting {
-                    AdminEnablementSetting::Enable | AdminEnablementSetting::Disable => {
-                        return;
-                    }
-                    AdminEnablementSetting::RespectUserSetting => {
-                        // Allow user to toggle
-                    }
-                }
-
-                CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    match settings.codebase_context_enabled.toggle_and_save_value(ctx) {
-                        Ok(new_value) => {
-                            send_telemetry_from_ctx!(
-                                TelemetryEvent::ToggleCodebaseContext {
-                                    is_codebase_context_enabled: new_value
-                                },
-                                ctx
-                            );
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to set value for Codebase Context: {e:?}");
-                        }
-                    }
-                });
-
-                ctx.notify();
-            }
-            CodeSettingsPageAction::ToggleAutoIndexing => {
-                CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    match settings.auto_indexing_enabled.toggle_and_save_value(ctx) {
-                        Ok(new_value) => {
-                            send_telemetry_from_ctx!(
-                                TelemetryEvent::ToggleAutoIndexing {
-                                    is_autoindexing_enabled: new_value
-                                },
-                                ctx
-                            );
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to set value for auto indexing: {e:?}");
-                        }
-                    }
-                });
-
-                ctx.notify();
-            }
-            CodeSettingsPageAction::ManualResync(repo_path) => {
-                CodebaseIndexManager::handle(ctx).update(ctx, |manager, ctx| {
-                    manager.try_manual_resync_codebase(repo_path, ctx);
-                });
-            }
-            CodeSettingsPageAction::DeleteIndex(repo_path) => {
-                CodebaseIndexManager::handle(ctx).update(ctx, |manager, ctx| {
-                    manager.drop_index(repo_path.clone(), ctx);
-                });
-            }
-            CodeSettingsPageAction::ManualAddDirectory => {
-                self.open_directory_picker(ctx);
-            }
             CodeSettingsPageAction::SignupAnonymousUser => {
                 ctx.emit(CodeSettingsPageEvent::SignupAnonymousUser);
             }
-            CodeSettingsPageAction::ToggleLspServer {
-                workspace_path,
-                server_type,
-                currently_enabled,
-            } => {
-                if *currently_enabled {
-                    // Toggling OFF: stop and disable
-                    send_telemetry_from_ctx!(
-                        LspTelemetryEvent::ServerRemoved {
-                            server_type: server_type.binary_name().to_string(),
-                            source: LspEnablementSource::Settings,
+            CodeSettingsPageAction::UninstallLspServer { server_type } => {
+                Self::set_global_lsp_server_enabled(*server_type, false, ctx);
+                send_telemetry_from_ctx!(
+                    LspTelemetryEvent::ServerRemoved {
+                        server_type: server_type.binary_name().to_string(),
+                        source: LspEnablementSource::Settings,
+                    },
+                    ctx
+                );
+                let roots: Vec<_> = LspManagerModel::as_ref(ctx)
+                    .workspace_roots()
+                    .cloned()
+                    .collect();
+                LspManagerModel::handle(ctx).update(ctx, |manager, ctx| {
+                    for root in roots {
+                        manager.remove_server(&root, *server_type, ctx);
+                    }
+                });
+
+                #[cfg(feature = "local_fs")]
+                {
+                    let server_type = *server_type;
+                    let install_dir = server_type.managed_install_dir();
+                    ctx.spawn(
+                        async move {
+                            if install_dir.exists() {
+                                std::fs::remove_dir_all(&install_dir)?;
+                            }
+                            Ok::<_, std::io::Error>(())
                         },
-                        ctx
-                    );
-                    LspManagerModel::handle(ctx).update(ctx, |manager, ctx| {
-                        manager.remove_server(workspace_path, *server_type, ctx);
-                    });
-                    PersistedWorkspace::handle(ctx).update(ctx, |workspace, _| {
-                        workspace.disable_lsp_server_for_path(workspace_path, *server_type);
-                    });
-                } else {
-                    // Toggling ON: enable and spawn
-                    send_telemetry_from_ctx!(
-                        LspTelemetryEvent::ServerEnabled {
-                            server_type: server_type.binary_name().to_string(),
-                            source: LspEnablementSource::Settings,
-                            needed_install: false,
+                        move |_me, result, ctx| {
+                            if let Err(err) = result {
+                                log::info!(
+                                    "Failed to remove managed LSP installation for {}: {err}",
+                                    server_type.binary_name()
+                                );
+                            }
+                            PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
+                                workspace.mark_lsp_server_uninstalled(server_type, ctx);
+                            });
+                            ctx.notify();
                         },
-                        ctx
                     );
-                    let workspace_path = workspace_path.clone();
-                    PersistedWorkspace::handle(ctx).update(ctx, |workspace, _ctx| {
-                        workspace.enable_lsp_server_for_path(&workspace_path, *server_type);
-                        #[cfg(feature = "local_fs")]
-                        workspace.execute_lsp_task(
-                            crate::ai::persisted_workspace::LspTask::Spawn {
-                                file_path: workspace_path,
-                            },
-                            _ctx,
-                        );
-                    });
                 }
+
                 ctx.notify();
             }
             CodeSettingsPageAction::RestartLspServer { server } => {
@@ -696,6 +538,22 @@ impl TypedActionView for CodeSettingsPageView {
                     },
                     ctx
                 );
+                #[cfg(not(target_family = "wasm"))]
+                {
+                    let log_directory = if log_path.extension().is_some() {
+                        log_path.parent()
+                    } else {
+                        Some(log_path.as_path())
+                    };
+                    if let Some(log_directory) = log_directory {
+                        if let Err(err) = std::fs::create_dir_all(log_directory) {
+                            log::info!(
+                                "Failed to create LSP log directory {}: {err}",
+                                log_directory.display()
+                            );
+                        }
+                    }
+                }
                 ctx.emit(CodeSettingsPageEvent::OpenLspLogs {
                     log_path: log_path.clone(),
                 });
@@ -754,6 +612,7 @@ impl TypedActionView for CodeSettingsPageView {
                 workspace_path,
                 server_type,
             } => {
+                Self::set_global_lsp_server_enabled(*server_type, true, ctx);
                 send_telemetry_from_ctx!(
                     LspTelemetryEvent::ServerEnabled {
                         server_type: server_type.binary_name().to_string(),
@@ -782,9 +641,10 @@ impl TypedActionView for CodeSettingsPageView {
                 ctx.notify();
             }
             CodeSettingsPageAction::EnableSuggestedLspServer {
-                workspace_path,
+                workspace_path: _,
                 server_type,
             } => {
+                Self::set_global_lsp_server_enabled(*server_type, true, ctx);
                 send_telemetry_from_ctx!(
                     LspTelemetryEvent::ServerEnabled {
                         server_type: server_type.binary_name().to_string(),
@@ -793,18 +653,10 @@ impl TypedActionView for CodeSettingsPageView {
                     },
                     ctx
                 );
-                let workspace_path = workspace_path.clone();
-                let server_type = *server_type;
-                PersistedWorkspace::handle(ctx).update(ctx, |workspace, _ctx| {
-                    workspace.enable_lsp_server_for_path(&workspace_path, server_type);
-                    #[cfg(feature = "local_fs")]
-                    workspace.execute_lsp_task(
-                        crate::ai::persisted_workspace::LspTask::Spawn {
-                            file_path: workspace_path,
-                        },
-                        _ctx,
-                    );
-                });
+                #[cfg(feature = "local_fs")]
+                Self::spawn_global_lsp_for_known_workspaces(ctx);
+                #[cfg(not(feature = "local_fs"))]
+                let _ = workspace_path;
                 ctx.notify();
             }
         }
@@ -812,42 +664,13 @@ impl TypedActionView for CodeSettingsPageView {
 }
 
 pub fn init_actions_from_parent_view<T: Action + Clone>(
-    app: &mut AppContext,
-    context: &ContextPredicate,
-    builder: fn(SettingsAction) -> T,
+    _app: &mut AppContext,
+    _context: &ContextPredicate,
+    _builder: fn(SettingsAction) -> T,
 ) {
-    if FeatureFlag::FullSourceCodeEmbedding.is_enabled() {
-        ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-            vec![ToggleSettingActionPair::new(
-                &crate::t!("toggle-suffix-codebase-index"),
-                builder(SettingsAction::Code(
-                    CodeSettingsPageAction::ToggleCodebaseContext,
-                )),
-                &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
-                flags::IS_CODEBASE_INDEXING_ENABLED,
-            )],
-            app,
-        );
-
-        ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-            vec![ToggleSettingActionPair::new(
-                &crate::t!("toggle-suffix-auto-indexing"),
-                builder(SettingsAction::Code(
-                    CodeSettingsPageAction::ToggleAutoIndexing,
-                )),
-                &(context.clone() & id!(flags::IS_CODEBASE_INDEXING_ENABLED)),
-                flags::IS_AUTOINDEXING_ENABLED,
-            )],
-            app,
-        );
-    }
 }
 
-struct CodePageWidget {
-    switch_state: SwitchStateHandle,
-    auto_index_switch_state: SwitchStateHandle,
-    manual_add_directory_button: ViewHandle<ActionButton>,
-}
+struct CodePageWidget;
 
 impl SettingsWidget for CodePageWidget {
     type View = CodeSettingsPageView;
@@ -864,40 +687,9 @@ impl SettingsWidget for CodePageWidget {
     ) -> Box<dyn Element> {
         let mut content = Flex::column();
 
-        let global_ai_enabled = AISettings::as_ref(app).is_any_ai_enabled(app);
-
-        // Main "Code" header
         content.add_child(self.render_code_header(appearance));
-
-        // Initialization Settings section
-        content.add_child(render_separator(appearance));
-        content.add_child(self.render_initialization_settings_header(appearance));
-        content.add_child(self.render_codebase_indexing_toggle_row(
-            global_ai_enabled,
-            appearance,
-            app,
-        ));
-        content.add_child(self.render_settings_subtext(
-            global_ai_enabled,
-            crate::t!("settings-code-codebase-index-description"),
-            appearance,
-        ));
-        content.add_child(self.render_settings_subtext(
-            global_ai_enabled,
-            crate::t!("settings-code-warp-indexing-ignore-description"),
-            appearance,
-        ));
-
-        let codebase_context_enabled = UserWorkspaces::as_ref(app).is_codebase_context_enabled(app);
-        if global_ai_enabled && codebase_context_enabled {
-            content.add_children(self.render_autoindexing_rows(appearance, app));
-        }
-
-        // Initialized / indexed folders section
         content.add_child(render_separator(appearance));
         let mouse_states = InitializedFoldersMouseStates {
-            codebase_manual_resync: view.codebase_manual_resync_mouse_states.clone(),
-            codebase_delete: view.codebase_delete_mouse_states.clone(),
             lsp_rows: view.lsp_row_mouse_states.clone(),
             open_project_rules: view.open_project_rules_mouse_states.clone(),
         };
@@ -916,110 +708,6 @@ impl SettingsWidget for CodePageWidget {
 }
 
 impl CodePageWidget {
-    fn render_autoindexing_rows(
-        &self,
-        appearance: &Appearance,
-        app: &AppContext,
-    ) -> Vec<Box<dyn Element>> {
-        let auto_indexing_enabled = *CodeSettings::as_ref(app).auto_indexing_enabled;
-        let codebase_indexing_enabled =
-            UserWorkspaces::as_ref(app).is_codebase_context_enabled(app);
-
-        let mut rows = vec![
-            self.render_autoindex_row(auto_indexing_enabled, appearance),
-            // Use subtext styling for description (gray color per Figma)
-            self.render_settings_subtext(
-                codebase_indexing_enabled,
-                crate::t!("settings-code-auto-index-description"),
-                appearance,
-            ),
-        ];
-
-        if codebase_indexing_enabled && !CodebaseIndexManager::as_ref(app).can_create_new_indices()
-        {
-            rows.push(self.render_settings_subtext(
-                false,
-                crate::t!("settings-code-codebase-index-limit-reached"),
-                appearance,
-            ));
-        }
-
-        rows.push(
-            Container::new(Empty::new().finish())
-                .with_margin_bottom(16.0)
-                .finish(),
-        );
-        rows
-    }
-
-    fn render_autoindex_row(
-        &self,
-        auto_indexing_enabled: bool,
-        appearance: &Appearance,
-    ) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        let theme = appearance.theme();
-
-        Container::new(
-            Flex::row()
-                .with_main_axis_size(MainAxisSize::Max)
-                .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
-                .with_child(
-                    ui_builder
-                        .span(crate::t!("settings-code-auto-index-feature-name"))
-                        .with_style(UiComponentStyles {
-                            font_size: Some(16.0),
-                            font_weight: Some(Weight::Semibold),
-                            font_color: Some(theme.active_ui_text_color().into()),
-                            ..Default::default()
-                        })
-                        .build()
-                        .finish(),
-                )
-                .with_child(
-                    Container::new(
-                        ui_builder
-                            .switch(self.auto_index_switch_state.clone())
-                            .check(auto_indexing_enabled)
-                            .build()
-                            .on_click(move |ctx, _, _| {
-                                ctx.dispatch_typed_action(
-                                    CodeSettingsPageAction::ToggleAutoIndexing,
-                                );
-                            })
-                            .finish(),
-                    )
-                    .with_padding_right(TOGGLE_BUTTON_RIGHT_PADDING)
-                    .finish(),
-                )
-                .finish(),
-        )
-        .with_padding_bottom(6.)
-        .finish()
-    }
-
-    /// Renders a settings subtext description (gray color per Figma).
-    fn render_settings_subtext(
-        &self,
-        _active: bool,
-        description: String,
-        appearance: &Appearance,
-    ) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        let theme = appearance.theme();
-
-        // Per Figma: subtext uses disabled_ui_text_color (#9b9b9b)
-        ui_builder
-            .paragraph(description)
-            .with_style(UiComponentStyles {
-                font_color: Some(theme.disabled_ui_text_color().into()),
-                ..Default::default()
-            })
-            .build()
-            .with_margin_bottom(8.0)
-            .finish()
-    }
-
     /// Renders the main "Code" header.
     fn render_code_header(&self, appearance: &Appearance) -> Box<dyn Element> {
         let ui_builder = appearance.ui_builder();
@@ -1041,107 +729,11 @@ impl CodePageWidget {
         .finish()
     }
 
-    /// Renders the "Initialization Settings" section header.
-    fn render_initialization_settings_header(&self, appearance: &Appearance) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        let theme = appearance.theme();
-
-        Container::new(
-            ui_builder
-                .span(crate::t!("settings-code-initialization-settings-header"))
-                .with_style(UiComponentStyles {
-                    font_size: Some(18.0),
-                    font_weight: Some(Weight::Semibold),
-                    font_color: Some(theme.active_ui_text_color().into()),
-                    ..Default::default()
-                })
-                .build()
-                .finish(),
-        )
-        .with_margin_top(8.)
-        .with_margin_bottom(12.)
-        .finish()
-    }
-
-    /// Renders the "Codebase indexing" toggle row (legacy layout).
-    fn render_codebase_indexing_toggle_row(
-        &self,
-        global_ai_enabled: bool,
-        appearance: &Appearance,
-        app: &AppContext,
-    ) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        let theme = appearance.theme();
-        let admin_setting = UserWorkspaces::as_ref(app).team_allows_codebase_context();
-
-        let label = ui_builder
-            .span(crate::t!("settings-code-codebase-indexing-label"))
-            .with_style(UiComponentStyles {
-                font_size: Some(16.0),
-                font_weight: Some(Weight::Semibold),
-                font_color: Some(theme.active_ui_text_color().into()),
-                ..Default::default()
-            })
-            .build()
-            .finish();
-
-        let switch = ui_builder
-            .switch(self.switch_state.clone())
-            .check(UserWorkspaces::as_ref(app).is_codebase_context_enabled(app));
-
-        let disabled_tooltip_text = match admin_setting {
-            AdminEnablementSetting::Enable => {
-                Some(crate::t!("settings-code-indexing-workspace-enabled-admin"))
-            }
-            AdminEnablementSetting::Disable => {
-                Some(crate::t!("settings-code-indexing-disabled-admin"))
-            }
-            AdminEnablementSetting::RespectUserSetting if !global_ai_enabled => {
-                Some(crate::t!("settings-code-indexing-disabled-global-ai"))
-            }
-            AdminEnablementSetting::RespectUserSetting => None,
-        };
-
-        let toggle_element = if let Some(tooltip_text) = disabled_tooltip_text {
-            switch
-                .with_tooltip(TooltipConfig {
-                    text: tooltip_text,
-                    styles: ui_builder.default_tool_tip_styles(),
-                })
-                .disable()
-                .build()
-                .finish()
-        } else {
-            switch
-                .build()
-                .on_click(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(CodeSettingsPageAction::ToggleCodebaseContext);
-                })
-                .finish()
-        };
-
-        let toggle = Container::new(toggle_element)
-            .with_padding_right(TOGGLE_BUTTON_RIGHT_PADDING)
-            .finish();
-
-        Container::new(
-            Flex::row()
-                .with_main_axis_size(MainAxisSize::Max)
-                .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
-                .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .with_child(label)
-                .with_child(toggle)
-                .finish(),
-        )
-        .with_padding_bottom(6.)
-        .finish()
-    }
-
     /// Renders the "Initialized / indexed folders" section.
     fn render_initialized_folders(
         &self,
         mouse_states: InitializedFoldersMouseStates,
-        suggested_server_statuses: &HashMap<(PathBuf, LSPServerType), LspRepoStatus>,
+        _suggested_server_statuses: &HashMap<(PathBuf, LSPServerType), LspRepoStatus>,
         appearance: &Appearance,
         app: &AppContext,
     ) -> Box<dyn Element> {
@@ -1149,34 +741,23 @@ impl CodePageWidget {
         let theme = appearance.theme();
 
         let InitializedFoldersMouseStates {
-            codebase_manual_resync: codebase_manual_resync_mouse_states,
-            codebase_delete: codebase_delete_mouse_states,
             lsp_rows: lsp_row_mouse_states,
-            open_project_rules: open_project_rules_mouse_states,
+            open_project_rules: _open_project_rules_mouse_states,
         } = mouse_states;
 
         let mut content = Flex::column();
 
-        // Section header with "Index folder" button
         content.add_child(
             Container::new(
-                Flex::row()
-                    .with_main_axis_size(MainAxisSize::Max)
-                    .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
-                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                    .with_child(
-                        ui_builder
-                            .span(crate::t!("settings-code-initialized-folders-header"))
-                            .with_style(UiComponentStyles {
-                                font_size: Some(16.0),
-                                font_weight: Some(Weight::Semibold),
-                                font_color: Some(theme.active_ui_text_color().into()),
-                                ..Default::default()
-                            })
-                            .build()
-                            .finish(),
-                    )
-                    .with_child(ChildView::new(&self.manual_add_directory_button).finish())
+                ui_builder
+                    .span(crate::t!("settings-code-initialized-folders-header"))
+                    .with_style(UiComponentStyles {
+                        font_size: Some(16.0),
+                        font_weight: Some(Weight::Semibold),
+                        font_color: Some(theme.active_ui_text_color().into()),
+                        ..Default::default()
+                    })
+                    .build()
                     .finish(),
             )
             .with_margin_top(8.)
@@ -1184,107 +765,51 @@ impl CodePageWidget {
             .finish(),
         );
 
-        // Get workspaces from PersistedWorkspace
-        let workspaces: Vec<WorkspaceMetadata> =
-            PersistedWorkspace::as_ref(app).workspaces().collect();
-
-        if workspaces.is_empty() {
-            content.add_child(
-                Container::new(
-                    appearance
-                        .ui_builder()
-                        .paragraph(crate::t!("settings-code-no-folders-initialized"))
-                        .build()
-                        .finish(),
-                )
-                .with_margin_bottom(MAIN_SECTION_MARGIN)
-                .finish(),
-            );
-            return content.finish();
-        }
-
-        let codebase_manager = CodebaseIndexManager::as_ref(app);
         let lsp_manager = LspManagerModel::as_ref(app);
-        let persisted_workspace = PersistedWorkspace::as_ref(app);
+        let enabled_servers = CodeSettings::as_ref(app)
+            .enabled_lsp_servers
+            .value()
+            .clone();
 
-        let mut lsp_mouse_index = 0;
+        for (idx, server_type) in LSPServerType::all().enumerate() {
+            let mouse_states = lsp_row_mouse_states.get(idx).cloned().unwrap_or_default();
 
-        for (workspace_idx, workspace) in workspaces.iter().enumerate() {
-            let workspace_path = &workspace.path;
-
-            // Get codebase index status if it exists
-            let index_status =
-                codebase_manager.get_codebase_index_status_for_path(workspace_path, app);
-
-            // Get all LSP servers (enabled + disabled + suggested) for this workspace
-            let all_servers: Vec<(LSPServerType, EnablementState)> = persisted_workspace
-                .all_lsp_servers(workspace_path, true)
-                .map(|iter| iter.collect())
-                .unwrap_or_default();
-
-            // Get mouse states for this workspace
-            let resync_mouse = codebase_manual_resync_mouse_states
-                .get(workspace_idx)
-                .cloned()
-                .unwrap_or_default();
-            let delete_mouse = codebase_delete_mouse_states
-                .get(workspace_idx)
-                .cloned()
-                .unwrap_or_default();
-
-            // Skip workspaces that have neither an index nor any LSP servers
-            if index_status.is_none() && all_servers.is_empty() {
-                continue;
+            if enabled_servers.contains(&server_type) {
+                let server_model = lsp_manager.workspace_roots().find_map(|root| {
+                    lsp_manager.servers_for_workspace(root).and_then(|servers| {
+                        servers
+                            .iter()
+                            .find(|server| server.as_ref(app).server_type() == server_type)
+                    })
+                });
+                content.add_child(self.render_lsp_server_row(
+                    server_type,
+                    server_model,
+                    mouse_states,
+                    appearance,
+                    app,
+                ));
+            } else {
+                content.add_child(self.render_suggested_lsp_server_row(
+                    &PathBuf::new(),
+                    server_type,
+                    None,
+                    mouse_states,
+                    appearance,
+                ));
             }
-
-            // Get LSP server mouse states
-            let lsp_mouse_states: Vec<LspServerRowMouseStates> = all_servers
-                .iter()
-                .map(|_| {
-                    let state = lsp_row_mouse_states
-                        .get(lsp_mouse_index)
-                        .cloned()
-                        .unwrap_or_default();
-
-                    lsp_mouse_index += 1;
-
-                    state
-                })
-                .collect();
-
-            let open_rules_mouse = open_project_rules_mouse_states
-                .get(workspace_idx)
-                .cloned()
-                .unwrap_or_default();
-
-            content.add_child(self.render_workspace_row(
-                workspace_path,
-                index_status.as_ref(),
-                &all_servers,
-                lsp_manager,
-                resync_mouse,
-                delete_mouse,
-                lsp_mouse_states,
-                open_rules_mouse,
-                suggested_server_statuses,
-                appearance,
-                app,
-            ));
         }
 
         content.finish()
     }
 
-    /// Renders a single workspace row with its indexing status and LSP servers.
+    /// Renders a single workspace row with its LSP servers.
     #[allow(clippy::too_many_arguments)]
     fn render_workspace_row(
         &self,
         workspace_path: &Path,
-        index_status: Option<&CodebaseIndexStatus>,
         all_servers: &[(LSPServerType, EnablementState)],
         lsp_manager: &LspManagerModel,
-        resync_mouse: MouseStateHandle,
-        delete_mouse: MouseStateHandle,
         lsp_mouse_states: Vec<LspServerRowMouseStates>,
         open_rules_mouse: MouseStateHandle,
         suggested_server_statuses: &HashMap<(PathBuf, LSPServerType), LspRepoStatus>,
@@ -1376,15 +901,6 @@ impl CodePageWidget {
 
         workspace_content.add_child(header_row.finish());
 
-        // Indexing section (always rendered per design)
-        workspace_content.add_child(self.render_indexing_subsection(
-            workspace_path,
-            index_status,
-            resync_mouse,
-            delete_mouse,
-            appearance,
-        ));
-
         // LSP Servers section (if any servers known)
         if !all_servers.is_empty() {
             workspace_content.add_child(self.render_lsp_servers_subsection(
@@ -1404,244 +920,6 @@ impl CodePageWidget {
             .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)))
             .with_margin_bottom(MAIN_SECTION_MARGIN)
             .finish()
-    }
-
-    /// Renders the indexing subsection within a workspace row.
-    fn render_indexing_subsection(
-        &self,
-        workspace_path: &Path,
-        index_status: Option<&CodebaseIndexStatus>,
-        resync_mouse: MouseStateHandle,
-        delete_mouse: MouseStateHandle,
-        appearance: &Appearance,
-    ) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        let theme = appearance.theme();
-
-        let mut column = Flex::column().with_spacing(SUB_SECTION_MARGIN);
-
-        // "INDEXING" label on its own row
-        column.add_child(
-            ui_builder
-                .span(crate::t!("settings-code-indexing-section-label"))
-                .with_style(UiComponentStyles {
-                    font_size: Some(11.0),
-                    font_weight: Some(Weight::Semibold),
-                    font_color: Some(theme.disabled_ui_text_color().into()),
-                    ..Default::default()
-                })
-                .build()
-                .finish(),
-        );
-
-        if let Some(index_status) = index_status {
-            // Status row: status label on left, action buttons on right
-            let (status_label, action_buttons) = self.render_index_status_parts(
-                index_status,
-                workspace_path,
-                resync_mouse,
-                delete_mouse,
-                appearance,
-            );
-
-            column.add_child(
-                Flex::row()
-                    .with_main_axis_size(MainAxisSize::Max)
-                    .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
-                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                    .with_child(status_label)
-                    .with_child(action_buttons)
-                    .finish(),
-            );
-        } else {
-            // No index exists for this workspace
-            let status_color = theme.disabled_ui_text_color().into_solid();
-            column.add_child(
-                Flex::row()
-                    .with_main_axis_size(MainAxisSize::Min)
-                    .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                    .with_child(
-                        Container::new(
-                            ConstrainedBox::new(
-                                Icon::SlashCircle
-                                    .to_warpui_icon(ThemeFill::Solid(status_color))
-                                    .finish(),
-                            )
-                            .with_width(STATUS_ICON_SIZE)
-                            .with_height(STATUS_ICON_SIZE)
-                            .finish(),
-                        )
-                        .with_margin_right(4.)
-                        .finish(),
-                    )
-                    .with_child(
-                        ui_builder
-                            .label(crate::t!("settings-code-no-index-created"))
-                            .with_style(UiComponentStyles {
-                                font_color: Some(status_color),
-                                font_size: Some(12.),
-                                ..Default::default()
-                            })
-                            .build()
-                            .finish(),
-                    )
-                    .finish(),
-            );
-        }
-
-        column.finish()
-    }
-
-    /// Returns (status_label, action_buttons) as separate elements for the indexing row.
-    fn render_index_status_parts(
-        &self,
-        index_state: &CodebaseIndexStatus,
-        codebase_path: &Path,
-        manual_resync_mouse_state: MouseStateHandle,
-        delete_mouse_state: MouseStateHandle,
-        appearance: &Appearance,
-    ) -> (Box<dyn Element>, Box<dyn Element>) {
-        let theme = appearance.theme();
-        let ui_builder = appearance.ui_builder();
-
-        // Build status label (icon + text)
-        let mut label_row = Flex::row()
-            .with_main_axis_size(MainAxisSize::Min)
-            .with_cross_axis_alignment(CrossAxisAlignment::Center);
-        let mut should_render_retry = false;
-
-        let (status_text, status_color) = if index_state.has_pending() {
-            let progress_text = match index_state.sync_progress() {
-                Some(SyncProgress::Discovering { total_nodes }) => {
-                    let total = *total_nodes as i64;
-                    Cow::from(crate::t!("settings-code-discovered-chunks", total = total))
-                }
-                Some(SyncProgress::Syncing {
-                    completed_nodes,
-                    total_nodes,
-                }) => {
-                    let completed = *completed_nodes as i64;
-                    let total = *total_nodes as i64;
-                    Cow::from(crate::t!(
-                        "settings-code-syncing-progress",
-                        completed = completed,
-                        total = total
-                    ))
-                }
-                None => Cow::from(crate::t!("settings-code-syncing")),
-            };
-            (progress_text, theme.disabled_ui_text_color().into_solid())
-        } else if let Some(completed_successfully) = index_state.last_sync_successful() {
-            should_render_retry = true;
-            let (text, color, status_icon) = if completed_successfully {
-                (
-                    crate::t!("settings-code-status-synced"),
-                    theme.ansi_fg_green(),
-                    Icon::Check,
-                )
-            } else if let Some(CodebaseIndexFinishedStatus::Failed(
-                CodebaseIndexingError::ExceededMaxFileLimit
-                | CodebaseIndexingError::MaxDepthExceeded,
-            )) = index_state.last_sync_result()
-            {
-                (
-                    crate::t!("settings-code-status-too-large"),
-                    theme.ui_warning_color(),
-                    Icon::AlertTriangle,
-                )
-            } else if index_state.has_synced_version() {
-                (
-                    crate::t!("settings-code-status-stale"),
-                    theme.nonactive_ui_detail().into_solid(),
-                    Icon::ClockRefresh,
-                )
-            } else {
-                (
-                    crate::t!("settings-code-status-failed"),
-                    theme.ui_error_color(),
-                    Icon::AlertTriangle,
-                )
-            };
-
-            label_row.add_child(
-                Container::new(
-                    ConstrainedBox::new(
-                        status_icon.to_warpui_icon(ThemeFill::Solid(color)).finish(),
-                    )
-                    .with_width(STATUS_ICON_SIZE)
-                    .with_height(STATUS_ICON_SIZE)
-                    .finish(),
-                )
-                .with_margin_right(4.)
-                .finish(),
-            );
-            (Cow::from(text), color)
-        } else {
-            log::warn!("No index state for codebase");
-            (
-                Cow::from(crate::t!("settings-code-no-index-built")),
-                theme.nonactive_ui_text_color().into_solid(),
-            )
-        };
-
-        label_row.add_child(
-            ui_builder
-                .label(status_text)
-                .with_style(UiComponentStyles {
-                    font_color: Some(status_color),
-                    ..Default::default()
-                })
-                .build()
-                .finish(),
-        );
-
-        // Build action buttons
-        let mut buttons_row = Flex::row()
-            .with_main_axis_size(MainAxisSize::Min)
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_spacing(4.);
-
-        if should_render_retry {
-            let codebase_path = codebase_path.to_path_buf();
-            let is_active = false;
-            buttons_row.add_child(
-                icon_button(
-                    appearance,
-                    Icon::Refresh,
-                    is_active,
-                    manual_resync_mouse_state,
-                )
-                .with_active_styles(UiComponentStyles {
-                    background: Some(theme.surface_1().into()),
-                    ..Default::default()
-                })
-                .build()
-                .on_click(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(CodeSettingsPageAction::ManualResync(
-                        codebase_path.clone(),
-                    ));
-                })
-                .finish(),
-            );
-        }
-
-        let delete_codebase_path = codebase_path.to_path_buf();
-        buttons_row.add_child(
-            icon_button(appearance, Icon::Trash, false, delete_mouse_state)
-                .with_active_styles(UiComponentStyles {
-                    background: Some(theme.surface_1().into()),
-                    ..Default::default()
-                })
-                .build()
-                .on_click(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(CodeSettingsPageAction::DeleteIndex(
-                        delete_codebase_path.clone(),
-                    ));
-                })
-                .finish(),
-        );
-
-        (label_row.finish(), buttons_row.finish())
     }
 
     /// Renders the LSP servers subsection within a workspace row.
@@ -1694,8 +972,6 @@ impl CodePageWidget {
                     appearance,
                 ));
             } else {
-                let is_enabled = *enablement_state == EnablementState::Yes;
-
                 // Find the corresponding server model (only exists if enabled and running)
                 let server_model = server_models.and_then(|servers| {
                     servers
@@ -1704,10 +980,8 @@ impl CodePageWidget {
                 });
 
                 content.add_child(self.render_lsp_server_row(
-                    workspace_path,
                     *server_type,
                     server_model,
-                    is_enabled,
                     mouse_states,
                     appearance,
                     app,
@@ -1848,14 +1122,11 @@ impl CodePageWidget {
             .finish()
     }
 
-    /// Renders a single LSP server row with language initial icon, status, and toggle.
-    #[allow(clippy::too_many_arguments)]
+    /// Renders a single LSP server row with language initial icon, status, and actions.
     fn render_lsp_server_row(
         &self,
-        workspace_path: &Path,
         server_type: LSPServerType,
         server_model: Option<&warpui::ModelHandle<LspServerModel>>,
-        is_enabled: bool,
         mouse_states: LspServerRowMouseStates,
         appearance: &Appearance,
         app: &AppContext,
@@ -1950,7 +1221,7 @@ impl CodePageWidget {
         left_content.add_child(name_status_column.finish());
         row.add_child(left_content.finish());
 
-        // Right side: restart/logs buttons (if failed) + toggle switch (always)
+        // Right side: restart/logs/uninstall actions.
         let mut right_content = Flex::row()
             .with_spacing(8.)
             .with_cross_axis_alignment(CrossAxisAlignment::Center);
@@ -1982,54 +1253,60 @@ impl CodePageWidget {
             }
         }
 
-        // Show "View logs" when the server has been started (Available, Starting/Busy, or Failed)
         #[cfg(not(target_family = "wasm"))]
         {
-            let has_logs = server_model.is_some_and(|model| {
-                matches!(
-                    model.as_ref(app).state(),
-                    LspState::Available { .. } | LspState::Starting | LspState::Failed { .. }
-                )
-            });
-            if has_logs {
-                let log_path = crate::code::lsp_logs::log_file_path(server_type, workspace_path);
-                let view_logs_button = ui_builder
-                    .button(ButtonVariant::Accent, mouse_states.view_logs)
-                    .with_style(UiComponentStyles {
-                        font_size: Some(12.),
-                        ..Default::default()
-                    })
-                    .with_text_label(crate::t!("settings-code-lsp-view-logs"))
-                    .build()
-                    .with_cursor(Cursor::PointingHand)
-                    .on_click(move |ctx, _, _| {
-                        ctx.dispatch_typed_action(CodeSettingsPageAction::OpenLspLogs {
-                            log_path: log_path.clone(),
-                        });
-                    })
-                    .finish();
-
-                right_content.add_child(view_logs_button);
-            }
-        }
-
-        // Toggle switch (always shown)
-        let workspace_path_clone = workspace_path.to_path_buf();
-        let server_type_clone = server_type;
-        right_content.add_child(
-            ui_builder
-                .switch(mouse_states.toggle)
-                .check(is_enabled)
+            let log_path = server_model
+                .map(|model| {
+                    crate::code::lsp_logs::log_file_path(
+                        server_type,
+                        model.as_ref(app).initial_workspace(),
+                    )
+                })
+                .unwrap_or_else(|| crate::code::lsp_logs::log_directory_path(server_type));
+            let view_logs_button = ui_builder
+                .button(ButtonVariant::Secondary, mouse_states.view_logs)
+                .with_style(UiComponentStyles {
+                    font_size: Some(12.),
+                    ..Default::default()
+                })
+                .with_hovered_styles(UiComponentStyles {
+                    background: Some(theme.surface_3().into()),
+                    ..Default::default()
+                })
+                .with_text_label(crate::t!("settings-code-lsp-view-logs"))
                 .build()
+                .with_cursor(Cursor::PointingHand)
                 .on_click(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(CodeSettingsPageAction::ToggleLspServer {
-                        workspace_path: workspace_path_clone.clone(),
-                        server_type: server_type_clone,
-                        currently_enabled: is_enabled,
+                    ctx.dispatch_typed_action(CodeSettingsPageAction::OpenLspLogs {
+                        log_path: log_path.clone(),
                     });
                 })
-                .finish(),
-        );
+                .finish();
+
+            right_content.add_child(view_logs_button);
+        }
+
+        let uninstall_button = ui_builder
+            .button(ButtonVariant::Secondary, mouse_states.uninstall)
+            .with_style(UiComponentStyles {
+                font_size: Some(12.),
+                ..Default::default()
+            })
+            .with_hovered_styles(UiComponentStyles {
+                background: Some(theme.surface_3().into()),
+                ..Default::default()
+            })
+            .with_text_label(crate::i18n::t_or("settings-code-lsp-uninstall", "卸载"))
+            .build()
+            .with_cursor(Cursor::PointingHand)
+            .on_click(move |ctx, _, _| {
+                ctx.dispatch_typed_action(CodeSettingsPageAction::UninstallLspServer {
+                    server_type,
+                });
+            })
+            .finish();
+
+        right_content.add_child(uninstall_button);
 
         row.add_child(right_content.finish());
 
@@ -2115,7 +1392,7 @@ impl SettingsWidget for CodebaseIndexingCategorizedWidget {
     type View = CodeSettingsPageView;
 
     fn search_terms(&self) -> &str {
-        "codebase index indexing repository code context embedding auto-index lsp language server"
+        "repository code path lsp language server project rules"
     }
 
     fn render(
@@ -2124,99 +1401,8 @@ impl SettingsWidget for CodebaseIndexingCategorizedWidget {
         appearance: &Appearance,
         app: &AppContext,
     ) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        let global_ai_enabled = AISettings::as_ref(app).is_any_ai_enabled(app);
-        let codebase_context_enabled = UserWorkspaces::as_ref(app).is_codebase_context_enabled(app);
-
         let mut content = Flex::column();
-
-        // Codebase indexing toggle using render_body_item for consistent styling
-        let admin_setting = UserWorkspaces::as_ref(app).team_allows_codebase_context();
-        let switch = ui_builder
-            .switch(self.inner.switch_state.clone())
-            .check(codebase_context_enabled);
-
-        let disabled_tooltip_text = match admin_setting {
-            AdminEnablementSetting::Enable => {
-                Some(crate::t!("settings-code-indexing-workspace-enabled-admin"))
-            }
-            AdminEnablementSetting::Disable => {
-                Some(crate::t!("settings-code-indexing-disabled-admin"))
-            }
-            AdminEnablementSetting::RespectUserSetting if !global_ai_enabled => {
-                Some(crate::t!("settings-code-indexing-disabled-global-ai"))
-            }
-            AdminEnablementSetting::RespectUserSetting => None,
-        };
-
-        let toggle_element = if let Some(tooltip_text) = disabled_tooltip_text {
-            switch
-                .with_tooltip(TooltipConfig {
-                    text: tooltip_text,
-                    styles: ui_builder.default_tool_tip_styles(),
-                })
-                .disable()
-                .build()
-                .finish()
-        } else {
-            switch
-                .build()
-                .on_click(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(CodeSettingsPageAction::ToggleCodebaseContext);
-                })
-                .finish()
-        };
-
-        content.add_child(render_body_item::<CodeSettingsPageAction>(
-            crate::t!("settings-code-codebase-indexing-label").into(),
-            None,
-            LocalOnlyIconState::Hidden,
-            ToggleState::Enabled,
-            appearance,
-            toggle_element,
-            Some(crate::t!("settings-code-codebase-index-description").into()),
-        ));
-
-        // Auto-indexing toggle (only shown when codebase indexing is enabled)
-        if global_ai_enabled && codebase_context_enabled {
-            let auto_indexing_enabled = *CodeSettings::as_ref(app).auto_indexing_enabled;
-
-            content.add_child(render_body_item::<CodeSettingsPageAction>(
-                crate::t!("settings-code-auto-index-feature-name").into(),
-                None,
-                LocalOnlyIconState::Hidden,
-                ToggleState::Enabled,
-                appearance,
-                ui_builder
-                    .switch(self.inner.auto_index_switch_state.clone())
-                    .check(auto_indexing_enabled)
-                    .build()
-                    .on_click(move |ctx, _, _| {
-                        ctx.dispatch_typed_action(CodeSettingsPageAction::ToggleAutoIndexing);
-                    })
-                    .finish(),
-                Some(crate::t!("settings-code-auto-index-description").into()),
-            ));
-
-            if !CodebaseIndexManager::as_ref(app).can_create_new_indices() {
-                content.add_child(
-                    ui_builder
-                        .paragraph(crate::t!("settings-code-codebase-index-limit-reached"))
-                        .with_style(UiComponentStyles {
-                            font_color: Some(appearance.theme().disabled_ui_text_color().into()),
-                            ..Default::default()
-                        })
-                        .build()
-                        .with_margin_bottom(8.0)
-                        .finish(),
-                );
-            }
-        }
-
-        // Initialized / indexed folders section
         let mouse_states = InitializedFoldersMouseStates {
-            codebase_manual_resync: view.codebase_manual_resync_mouse_states.clone(),
-            codebase_delete: view.codebase_delete_mouse_states.clone(),
             lsp_rows: view.lsp_row_mouse_states.clone(),
             open_project_rules: view.open_project_rules_mouse_states.clone(),
         };
@@ -2305,8 +1491,7 @@ impl SettingsPageMeta for CodeSettingsPageView {
     }
 
     fn should_render(&self, _ctx: &AppContext) -> bool {
-        FeatureFlag::FullSourceCodeEmbedding.is_enabled()
-            || FeatureFlag::OpenWarpNewSettingsModes.is_enabled()
+        FeatureFlag::OpenWarpNewSettingsModes.is_enabled()
     }
 
     fn on_page_selected(&mut self, _: bool, ctx: &mut ViewContext<Self>) {

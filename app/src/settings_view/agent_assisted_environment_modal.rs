@@ -5,9 +5,7 @@ use std::{
 };
 
 use pathfinder_color::ColorU;
-use warp_core::{
-    features::FeatureFlag, paths::home_relative_path, ui::theme::color::internal_colors,
-};
+use warp_core::{paths::home_relative_path, ui::theme::color::internal_colors};
 use warpui::{
     elements::{
         Align, Border, ChildView, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox,
@@ -40,14 +38,7 @@ use crate::{
 use git2::Repository as GitRepository;
 
 #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
-use ai::index::full_source_code_embedding::manager::CodebaseIndexManager;
-
-#[cfg(all(
-    feature = "local_fs",
-    not(target_family = "wasm"),
-    not(any(test, feature = "integration_tests"))
-))]
-use ai::index::full_source_code_embedding::manager::CodebaseIndexManagerEvent;
+use crate::ai::persisted_workspace::PersistedWorkspace;
 
 const DIALOG_WIDTH: f32 = 600.;
 const AVAILABLE_LIST_MAX_HEIGHT: f32 = 260.;
@@ -146,36 +137,6 @@ impl AgentAssistedEnvironmentModal {
             cancel_button,
             create_button,
         };
-
-        #[cfg(all(
-            feature = "local_fs",
-            not(target_family = "wasm"),
-            not(any(test, feature = "integration_tests"))
-        ))]
-        {
-            let index_manager = CodebaseIndexManager::handle(ctx);
-            ctx.subscribe_to_model(&index_manager, |me, _, event, ctx| {
-                if !me.visible {
-                    return;
-                }
-
-                match event {
-                    CodebaseIndexManagerEvent::SyncStateUpdated
-                    | CodebaseIndexManagerEvent::NewIndexCreated
-                    | CodebaseIndexManagerEvent::RemoveExpiredIndexMetadata { .. }
-                    | CodebaseIndexManagerEvent::IndexMetadataUpdated { .. } => {
-                        me.refresh_available_repos(ctx);
-                        if me.available_repos.is_empty() {
-                            me.maybe_start_available_repos_loading(ctx);
-                        } else {
-                            me.stop_available_repos_loading();
-                        }
-                        ctx.notify();
-                    }
-                    _ => {}
-                }
-            });
-        }
 
         me.update_create_button_disabled_state(ctx);
         me
@@ -630,11 +591,7 @@ impl AgentAssistedEnvironmentModal {
     }
 
     fn render_dialog(&self, appearance: &Appearance, app: &AppContext) -> Box<dyn Element> {
-        let description = if FeatureFlag::FullSourceCodeEmbedding.is_enabled() {
-            crate::t!("settings-env-modal-dialog-description-indexed")
-        } else {
-            crate::t!("settings-env-modal-dialog-description-default")
-        };
+        let description = crate::t!("settings-env-modal-dialog-description-default");
 
         let close_button = icon_button(
             appearance,
@@ -758,20 +715,16 @@ impl View for AgentAssistedEnvironmentModal {
 fn available_indexed_repos(app: &AppContext) -> Vec<RepoEntry> {
     #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
     {
-        let mut repos: Vec<RepoEntry> = CodebaseIndexManager::as_ref(app)
-            .get_codebase_index_statuses(app)
-            .filter_map(|(root, status)| {
-                status.has_synced_version().then(|| {
-                    let name = root
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .map(ToOwned::to_owned)
-                        .unwrap_or_else(|| root.to_string_lossy().into_owned());
-                    RepoEntry {
-                        name,
-                        path: root.clone(),
-                    }
-                })
+        let mut repos: Vec<RepoEntry> = PersistedWorkspace::as_ref(app)
+            .workspaces()
+            .map(|workspace| {
+                let root = workspace.path;
+                let name = root
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| root.to_string_lossy().into_owned());
+                RepoEntry { name, path: root }
             })
             .collect();
 

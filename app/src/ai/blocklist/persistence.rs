@@ -197,7 +197,6 @@ pub(crate) enum PersistedAIAgentActionType {
     },
     SuggestPrompt,
     OpenCodeReview,
-    InitProject,
     AskUserQuestion {
         questions: Vec<AskUserQuestionItem>,
     },
@@ -281,7 +280,6 @@ impl From<&AIAgentActionType> for PersistedAIAgentActionType {
             AIAgentActionType::SuggestPrompt { .. } => Self::SuggestPrompt,
             AIAgentActionType::OpenCodeReview => Self::OpenCodeReview,
             AIAgentActionType::InsertCodeReviewComments { .. } => Self::NotPersisted,
-            AIAgentActionType::InitProject => Self::InitProject,
             AIAgentActionType::ReadDocuments(_)
             | AIAgentActionType::EditDocuments(_)
             | AIAgentActionType::CreateDocuments(_)
@@ -387,7 +385,6 @@ impl TryFrom<PersistedAIAgentActionType> for AIAgentActionType {
                 Err(anyhow!("Restoration for suggested prompts is unsupported."))
             }
             PersistedAIAgentActionType::OpenCodeReview => Ok(Self::OpenCodeReview),
-            PersistedAIAgentActionType::InitProject => Ok(Self::InitProject),
             PersistedAIAgentActionType::AskUserQuestion { questions } => {
                 Ok(Self::AskUserQuestion { questions })
             }

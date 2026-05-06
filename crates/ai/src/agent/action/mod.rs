@@ -110,7 +110,6 @@ pub enum AIAgentActionType {
 
     SuggestPrompt(SuggestPromptRequest),
 
-    InitProject,
     OpenCodeReview,
 
     ReadDocuments(ReadDocumentsRequest),
@@ -202,7 +201,6 @@ impl AIAgentActionType {
                 AIAgentActionResultType::SuggestPrompt(SuggestPromptResult::Cancelled)
             }
             Self::OpenCodeReview => AIAgentActionResultType::OpenCodeReview,
-            Self::InitProject => AIAgentActionResultType::InitProject,
             Self::ReadDocuments(_) => {
                 AIAgentActionResultType::ReadDocuments(ReadDocumentsResult::Cancelled)
             }
@@ -247,7 +245,6 @@ impl AIAgentActionType {
             Self::CallMCPTool { .. } => "Calling MCP tool",
             Self::SuggestNewConversation { .. } => "Suggesting new conversation",
             Self::SuggestPrompt { .. } => "Suggesting prompts",
-            Self::InitProject => "Initializing project",
             Self::OpenCodeReview => "Opening code review",
             Self::ReadDocuments(_) => "Reading documents",
             Self::EditDocuments(_) => "Editing documents",
@@ -280,7 +277,6 @@ impl AIAgentActionType {
             Self::CallMCPTool { .. } => "Call mcp tool".to_string(),
             Self::SuggestNewConversation { .. } => "Suggest new conversation".to_string(),
             Self::SuggestPrompt { .. } => "Suggest prompt".to_string(),
-            Self::InitProject => "Init project".to_string(),
             Self::OpenCodeReview => "Open code review".to_string(),
             Self::ReadDocuments(_) => "Read documents".to_string(),
             Self::EditDocuments(_) => "Edit documents".to_string(),
@@ -379,9 +375,6 @@ impl Display for AIAgentActionType {
             }
             AIAgentActionType::SuggestPrompt(request) => {
                 write!(f, "SuggestPrompt: {request:?}")
-            }
-            AIAgentActionType::InitProject => {
-                write!(f, "InitProject")
             }
             AIAgentActionType::OpenCodeReview => {
                 write!(f, "OpenCodeReview")

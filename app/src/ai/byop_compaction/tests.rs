@@ -3,11 +3,14 @@
 //! Phase 3 (state + message_view) 落地后再补 e2e 集成测试。
 
 use super::algorithm::{prune_decisions, select, turns, MessageRef, Role, ToolOutputRef};
+use super::commit::commit_summarization;
 use super::config::CompactionConfig;
 use super::consts::*;
 use super::overflow::{is_overflow, usable, ModelLimit, TokenCounts};
 use super::prompt::{build_continue_message, build_prompt, SUMMARY_TEMPLATE};
 use super::token::estimate;
+use crate::ai::agent::conversation::{AIConversation, AIConversationId};
+use warp_multi_agent_api as api;
 
 // -- token ---------------------------------------------------------------
 
@@ -543,4 +546,78 @@ fn prune_stops_at_already_compacted() {
     let r = prune_decisions(&msgs);
     assert_eq!(r.len(), 1);
     assert_eq!(r[0], (2, 102));
+}
+
+// -- commit --------------------------------------------------------------
+
+fn ts(seconds: i64) -> prost_types::Timestamp {
+    prost_types::Timestamp { seconds, nanos: 0 }
+}
+
+fn user_query(id: &str, task_id: &str, request_id: &str, seconds: i64) -> api::Message {
+    api::Message {
+        id: id.to_string(),
+        task_id: task_id.to_string(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::UserQuery(api::message::UserQuery {
+            query: format!("query-{id}"),
+            context: None,
+            mode: None,
+            referenced_attachments: Default::default(),
+            intended_agent: Default::default(),
+        })),
+        request_id: request_id.to_string(),
+        timestamp: Some(ts(seconds)),
+    }
+}
+
+fn agent_output(id: &str, task_id: &str, request_id: &str, seconds: i64) -> api::Message {
+    api::Message {
+        id: id.to_string(),
+        task_id: task_id.to_string(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::AgentOutput(
+            api::message::AgentOutput {
+                text: format!("output-{id}"),
+            },
+        )),
+        request_id: request_id.to_string(),
+        timestamp: Some(ts(seconds)),
+    }
+}
+
+fn conversation_with_messages(messages: Vec<api::Message>) -> AIConversation {
+    let task = api::Task {
+        id: "root".to_string(),
+        messages,
+        dependencies: None,
+        description: String::new(),
+        summary: String::new(),
+        server_data: String::new(),
+    };
+    AIConversation::new_restored(AIConversationId::new(), vec![task], None).unwrap()
+}
+
+#[test]
+fn commit_summarization_records_head_message_ids() {
+    let mut conversation = conversation_with_messages(vec![
+        user_query("u1", "root", "r1", 1),
+        agent_output("a1", "root", "r1", 2),
+        user_query("u2", "root", "r2", 3),
+        agent_output("a2", "root", "r2", 4),
+        user_query("u3", "root", "r3", 5),
+        agent_output("a3", "root", "r3", 6),
+    ]);
+    let mut cfg = CompactionConfig::default();
+    cfg.tail_turns = 1;
+    cfg.preserve_recent_tokens = Some(1_000);
+
+    assert!(commit_summarization(&mut conversation, false, &cfg));
+    let completed = conversation.compaction_state.completed().last().unwrap();
+    assert_eq!(completed.user_msg_id, "u3");
+    assert_eq!(completed.assistant_msg_id, "a3");
+    assert_eq!(completed.tail_start_id.as_deref(), Some("u3"));
+    assert_eq!(completed.head_message_ids, ["u1", "a1", "u2", "a2"]);
 }

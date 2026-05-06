@@ -19,9 +19,7 @@ use crate::{
         ids::ServerId,
         server_api::{team::TeamClient, workspace::WorkspaceClient},
     },
-    settings::{
-        AISettings, AISettingsChangedEvent, CodeSettings, CodeSettingsChangedEvent, PrivacySettings,
-    },
+    settings::{AISettings, AISettingsChangedEvent, PrivacySettings},
     workspaces::workspace::{
         AiAutonomySettings, AiOverages, SandboxedAgentSettings, UsageBasedPricingSettings,
     },
@@ -170,16 +168,6 @@ impl UserWorkspaces {
         ctx.subscribe_to_model(&ServerExperiments::handle(ctx), |me, event, ctx| {
             let ServerExperimentsEvent::ExperimentsUpdated = event;
             me.update_session_sharing_enablement(ctx);
-        });
-
-        ctx.subscribe_to_model(&CodeSettings::handle(ctx), |_, code_settings_event, ctx| {
-            match code_settings_event {
-                CodeSettingsChangedEvent::CodebaseContextEnabled { .. }
-                | CodeSettingsChangedEvent::AutoIndexingEnabled { .. } => {
-                    ctx.emit(UserWorkspacesEvent::CodebaseContextEnablementChanged);
-                }
-                _ => {}
-            }
         });
 
         ctx.subscribe_to_model(&AISettings::handle(ctx), |_, ai_settings_event, ctx| {
@@ -1453,24 +1441,8 @@ impl UserWorkspaces {
             .unwrap_or(true)
     }
 
-    /// Returns the codebase context settings, taking into account the organization,
-    /// global AI settings, and codebase-specific settings.
-    /// Prefer this function to determine whether to show indexing-related functionality.
     pub fn is_codebase_context_enabled(&self, app: &AppContext) -> bool {
-        // If the organization has an explicit setting, respect it and make user toggle irrelevant.
-        // - Enable: forced ON by org, regardless of user preference.
-        // - Disable: forced OFF by org.
-        // - RespectUserSetting: respect the user setting.
-        let org_setting = self.team_allows_codebase_context();
-        let ai_globally_enabled = AISettings::as_ref(app).is_any_ai_enabled(app);
-
-        match org_setting {
-            AdminEnablementSetting::Enable => ai_globally_enabled,
-            AdminEnablementSetting::Disable => false,
-            AdminEnablementSetting::RespectUserSetting => {
-                ai_globally_enabled && *CodeSettings::as_ref(app).codebase_context_enabled.value()
-            }
-        }
+        AISettings::as_ref(app).is_any_ai_enabled(app)
     }
 
     /// Returns the team-level agent attribution setting.

@@ -43,7 +43,6 @@ use crate::{
     },
     pane_group::{pane::view, BackingView, PaneConfiguration, PaneEvent},
     server::telemetry::TelemetryEvent,
-    ui_components::buttons::icon_button,
     ui_components::icons::Icon,
     view_components::action_button::{ActionButton, PrimaryTheme},
 };
@@ -59,12 +58,11 @@ use warpui::elements::{ChildAnchor, PositionedElementAnchor, PositionedElementOf
 use warpui::keymap::EditableBinding;
 use warpui::keymap::FixedBinding;
 use warpui::text_layout::ClipConfig;
-use warpui::ui_components::button::ButtonTooltipPosition;
 use warpui::ui_components::components::UiComponent;
 use warpui::{
     elements::{
-        ChildView, ConstrainedBox, Container, Flex, Hoverable, MouseStateHandle, OffsetPositioning,
-        ParentElement, SavePosition, Stack,
+        ChildView, ConstrainedBox, Container, Empty, Flex, Hoverable, MouseStateHandle,
+        OffsetPositioning, ParentElement, SavePosition, Stack,
     },
     AppContext, Element, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
@@ -606,65 +604,14 @@ impl AIDocumentView {
         app: &AppContext,
     ) -> Box<dyn Element> {
         match save_status {
-            AIDocumentSaveStatus::NotSaved => {
-                let appearance = Appearance::as_ref(app);
-                let ui_builder = appearance.ui_builder().clone();
-                let tooltip = ui_builder
-                    .tool_tip(crate::t!("ai-document-save-and-sync-tooltip"))
-                    .build()
-                    .finish();
-                let sync_button_mouse_state = self.sync_button_mouse_state.clone();
-                icon_button(
-                    appearance,
-                    Icon::RefreshCw04,
-                    false,
-                    sync_button_mouse_state,
-                )
-                .with_tooltip(move || tooltip)
-                .with_tooltip_position(ButtonTooltipPosition::BelowRight)
-                .build()
-                .on_click(|ctx, _, _| {
-                    ctx.dispatch_typed_action(
-                        PaneHeaderAction::<AIDocumentAction, AIDocumentAction>::CustomAction(
-                            AIDocumentAction::CreateWarpDriveNotebook,
-                        ),
-                    )
-                })
-                .finish()
-            }
-            AIDocumentSaveStatus::Saving => {
-                let appearance = Appearance::as_ref(app);
-                let theme = appearance.theme();
-                let color = theme.nonactive_ui_detail().into_solid();
-                Container::new(
-                    ConstrainedBox::new(
-                        Container::new(
-                            ConstrainedBox::new(
-                                Icon::RefreshCw04
-                                    .to_warpui_icon(ThemeFill::Solid(color))
-                                    .finish(),
-                            )
-                            .with_width(16.)
-                            .with_height(16.)
-                            .finish(),
-                        )
-                        .with_uniform_padding(4.)
-                        .finish(),
-                    )
-                    .with_width(24.)
-                    .with_height(24.)
-                    .finish(),
-                )
-                .finish()
-            }
+            // openWarp 不使用云端同步，Plan 已自动保存到本地 SQLite，
+            // 文档存在时始终为 Saved；此处显示"已本地保存"静态图标。
             AIDocumentSaveStatus::Saved => {
                 let appearance = Appearance::as_ref(app);
                 let theme = appearance.theme();
                 let color = theme.nonactive_ui_detail().into_solid();
                 let ui_builder = appearance.ui_builder().clone();
-                let tooltip_text =
-                    "This plan is synced to your Warp Drive and will auto save any edits you make."
-                        .to_string();
+                let tooltip_text = "计划已自动保存到本地。".to_string();
                 let synced_status_mouse_state = self.synced_status_mouse_state.clone();
                 Container::new(
                     ConstrainedBox::new(
@@ -709,6 +656,8 @@ impl AIDocumentView {
                 )
                 .finish()
             }
+            // openWarp 中这两个状态不会正常出现，隐藏按钮。
+            AIDocumentSaveStatus::NotSaved | AIDocumentSaveStatus::Saving => Empty::new().finish(),
         }
     }
 

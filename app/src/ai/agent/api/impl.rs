@@ -157,7 +157,6 @@ fn get_supported_tools(params: &RequestParams) -> Vec<api::ToolType> {
         api::ToolType::FileGlobV2,
         api::ToolType::ReadMcpResource,
         api::ToolType::CallMcpTool,
-        api::ToolType::InitProject,
         api::ToolType::OpenCodeReview,
         api::ToolType::RunShellCommand,
         api::ToolType::SuggestNewConversation,

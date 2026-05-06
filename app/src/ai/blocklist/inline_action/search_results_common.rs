@@ -244,8 +244,7 @@ fn render_loading_header_inner(
             // Spinner 颜色对齐原 yellow_running_icon:Yellow ANSI。
             // 颜色直接复用 sub_text_color 在 surface_2 上的视觉(浅黄/橙)避免对比过强。
             use warp_core::ui::theme::AnsiColorIdentifier;
-            let color = AnsiColorIdentifier::Yellow
-                .to_ansi_color(&theme.terminal_colors().normal);
+            let color = AnsiColorIdentifier::Yellow.to_ansi_color(&theme.terminal_colors().normal);
             Box::new(BrailleSpinner::new(
                 appearance.ui_font_family(),
                 appearance.monospace_font_size(),

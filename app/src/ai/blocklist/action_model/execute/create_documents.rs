@@ -136,6 +136,15 @@ impl CreateDocumentsExecutor {
             model.clear_streaming_documents_for_action(&conversation_id, action_id, ctx);
         });
 
+        // Register each created document in CloudModel so it appears in the Drive sidebar
+        // Plans folder. create_object writes a local ClientId entry immediately, making it
+        // visible without requiring a successful cloud sync round-trip.
+        for context in &created_documents {
+            model.update(ctx, |model, ctx| {
+                model.sync_to_warp_drive(context.document_id, ctx);
+            });
+        }
+
         ActionExecution::Sync(CreateDocumentsResult::Success { created_documents }.into())
     }
 

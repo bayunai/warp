@@ -75,7 +75,7 @@ use crate::{
     },
     quit_warning::UnsavedStateSummary,
     terminal::input::MenuPositioning,
-    terminal::view::{CliAgentRouting, InitProjectModel, TerminalAction, TerminalView},
+    terminal::view::{CliAgentRouting, TerminalAction, TerminalView},
     util::bindings::{custom_tag_to_keystroke, CustomAction},
     view_components::{
         action_button::{
@@ -327,7 +327,6 @@ const WSL_TEXT: &str = "Diffs don't currently work in WSL.";
 #[allow(dead_code)]
 enum InitButtons {
     OpenRepository,
-    InitProject,
     None,
 }
 
@@ -389,7 +388,6 @@ pub enum CodeReviewAction {
     OpenCommentComposerFromHeader,
     ShowFindBar,
     FocusView,
-    InitProjectForCurrentDirectory,
     OpenRepository,
     OpenCommitDialog,
     ToggleGitOperationsMenu,
@@ -750,7 +748,6 @@ pub struct CodeReviewView {
 
     active_comment_model: Option<ModelHandle<ReviewCommentBatch>>,
 
-    init_project_button: ViewHandle<ActionButton>,
     #[cfg(not(target_family = "wasm"))]
     open_repository_button: ViewHandle<ActionButton>,
 
@@ -1381,16 +1378,6 @@ impl CodeReviewView {
         let ui_state_handles = UiStateHandles::default();
         let header = CodeReviewHeader::new();
 
-        let init_project_button = ctx.add_typed_action_view(|_ctx| {
-            ActionButton::new(crate::t!("code-review-initialize-codebase"), NakedTheme)
-                .with_size(ButtonSize::Small)
-                .with_tooltip(crate::t!("code-review-initialize-codebase-tooltip"))
-                .with_tooltip_alignment(TooltipAlignment::Center)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(CodeReviewAction::InitProjectForCurrentDirectory)
-                })
-        });
-
         #[cfg(not(target_family = "wasm"))]
         let open_repository_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new(crate::t!("code-review-open-repository"), NakedTheme)
@@ -1445,7 +1432,6 @@ impl CodeReviewView {
             pending_precise_scroll: None,
             pending_jump_to_comment: None,
             active_comment_model: None,
-            init_project_button,
             #[cfg(not(target_family = "wasm"))]
             open_repository_button,
             is_open: false,
@@ -4246,9 +4232,6 @@ impl CodeReviewView {
             InitButtons::OpenRepository => {
                 buttons_row.add_child(ChildView::new(&self.open_repository_button).finish());
             }
-            InitButtons::InitProject => {
-                buttons_row.add_child(ChildView::new(&self.init_project_button).finish());
-            }
             InitButtons::None => {}
         }
 
@@ -4487,27 +4470,7 @@ impl CodeReviewView {
                 .finish(),
             );
 
-        let should_show_init = self
-            .repo_path()
-            .map(|path| {
-                let has_steps = InitProjectModel::should_have_available_steps(path, app);
-                let is_terminal_in_correct_dir = self
-                    .terminal_view(app)
-                    .and_then(|view| {
-                        view.read(app, |t, _| t.pwd().map(|pwd| pwd == path.to_string_lossy()))
-                    })
-                    .unwrap_or(false);
-                has_steps && is_terminal_in_correct_dir
-            })
-            .unwrap_or(false);
-
-        if should_show_init {
-            zero_state_column.add_child(
-                Container::new(ChildView::new(&self.init_project_button).finish())
-                    .with_margin_top(16.)
-                    .finish(),
-            );
-        } else if let Some(repo_path) = self.repo_path() {
+        if let Some(repo_path) = self.repo_path() {
             // Check for initialized rules
             if let Some(rules) = ProjectContextModel::as_ref(app).find_applicable_rules(repo_path) {
                 if let Some(first_rule) = rules.active_rules.first() {
@@ -7670,13 +7633,7 @@ impl TypedActionView for CodeReviewView {
                     });
                 }
             }
-            CodeReviewAction::InitProjectForCurrentDirectory => {
-                if let Some(terminal_view) = self.terminal_view(ctx) {
-                    terminal_view.update(ctx, |terminal, ctx| {
-                        terminal.handle_action(&TerminalAction::InitProject, ctx);
-                    });
-                }
-            }
+
             CodeReviewAction::OpenCommitDialog => {
                 self.open_git_dialog(GitDialogKind::Commit, ctx);
             }

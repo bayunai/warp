@@ -132,8 +132,7 @@ pub fn render_inline_tool_card(spec: ToolCardSpec, app: &AppContext) -> Box<dyn 
     let icon_element: Box<dyn Element> = match &spec.state {
         ToolCardState::Running { spinner_handle, .. } => {
             use warp_core::ui::theme::AnsiColorIdentifier;
-            let color = AnsiColorIdentifier::Yellow
-                .to_ansi_color(&theme.terminal_colors().normal);
+            let color = AnsiColorIdentifier::Yellow.to_ansi_color(&theme.terminal_colors().normal);
             Box::new(crate::ui_components::spinner::BrailleSpinner::new(
                 appearance.ui_font_family(),
                 appearance.monospace_font_size(),
@@ -298,8 +297,7 @@ fn build_title_text(
 
             // detail 行:有就 column 拼接;没有就只一行。
             if let Some(detail_text) = detail {
-                let mut col =
-                    Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Start);
+                let mut col = Flex::column().with_cross_axis_alignment(CrossAxisAlignment::Start);
                 col.add_child(text_widget.finish());
                 let detail_color = theme.ui_error_color();
                 col.add_child(

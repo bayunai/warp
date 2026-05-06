@@ -602,7 +602,7 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
                 create_standard_action(AIAgentActionType::OpenCodeReview)
             }
             api::message::tool_call::Tool::InitProject(_) => {
-                create_standard_action(AIAgentActionType::InitProject)
+                Ok(MaybeAIAgentAction::NoClientRepresentation)
             }
             api::message::tool_call::Tool::ReadDocuments(read_documents) => {
                 create_standard_action(read_documents.into())

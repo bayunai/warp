@@ -35,7 +35,9 @@ pub struct CustomBinaryConfig {
 ///
 /// This is also used in underlying sqlite type persistence. We should be careful
 /// not to rename an existing variant, as it will break persistence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, schemars::JsonSchema,
+)]
 pub enum LSPServerType {
     RustAnalyzer,
     GoPls,
@@ -43,6 +45,8 @@ pub enum LSPServerType {
     TypeScriptLanguageServer,
     Clangd,
 }
+
+settings_value::impl_snake_case!(LSPServerType);
 
 /// Provides server-specific configuration for each LSP server type.
 impl LSPServerType {
@@ -133,6 +137,17 @@ impl LSPServerType {
             LSPServerType::TypeScriptLanguageServer => "typescript-language-server",
             LSPServerType::Clangd => "clangd",
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn managed_install_dir(&self) -> PathBuf {
+        warp_core::paths::data_dir().join(match self {
+            LSPServerType::RustAnalyzer => "rust-analyzer",
+            LSPServerType::GoPls => "gopls",
+            LSPServerType::Pyright => "pyright",
+            LSPServerType::TypeScriptLanguageServer => "typescript-language-server",
+            LSPServerType::Clangd => "clangd",
+        })
     }
 
     /// Arguments for running via system PATH.

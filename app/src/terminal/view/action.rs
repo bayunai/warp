@@ -354,7 +354,6 @@ pub enum TerminalAction {
     SelectAgenticSuggestion(i32),
     HideTelemetryBannerPermanently,
     ShowInitializationBlock,
-    GenerateCodebaseIndex,
     /// This is for debugging, dev only for now
     LoadAgentModeConversation,
     ShowWarpifySettings,
@@ -362,7 +361,6 @@ pub enum TerminalAction {
     DeleteAttachment {
         index: usize,
     },
-    WriteCodebaseIndex,
     ToggleAutoexecuteMode,
     ToggleQueueNextPrompt,
     CodebaseIndexSpeedbumpBanner(CodebaseIndexSpeedbumpBannerAction),
@@ -376,9 +374,7 @@ pub enum TerminalAction {
     ToggleCodeReviewPane {
         entrypoint: CodeReviewPaneEntrypoint,
     },
-    InitProject,
     SummarizeConversation,
-    IndexProjectSpeedbump,
     AddProjectAtCurrentDirectory,
     OpenProjectRulesPane,
     OpenViewMCPPane,
@@ -640,11 +636,9 @@ impl fmt::Debug for TerminalAction {
             SelectAgenticSuggestion(index) => write!(f, "SelectAgenticSuggestion({index:?})"),
             HideTelemetryBannerPermanently => write!(f, "HideTelemetryBannerPermanently"),
             ShowInitializationBlock => write!(f, "ShowInitializationBlock"),
-            GenerateCodebaseIndex => write!(f, "GenerateIndexForRepo"),
             LoadAgentModeConversation => write!(f, "LoadAgentModeConversation"),
             ShowWarpifySettings => write!(f, "ShowWarpifySettings"),
             DeleteAttachment { index } => write!(f, "DeleteAttachment({index:?})"),
-            WriteCodebaseIndex => write!(f, "PersistCodebaseIndex"),
             ToggleAutoexecuteMode => write!(f, "ToggleAutoexecuteMode"),
             ToggleQueueNextPrompt => write!(f, "ToggleQueueNextPrompt"),
             CodebaseIndexSpeedbumpBanner(action) => {
@@ -664,8 +658,6 @@ impl fmt::Debug for TerminalAction {
             ToggleTodoPopup => write!(f, "ToggleTodoPopup"),
             CloseTodoPopup => write!(f, "CloseTodoPopup"),
             ToggleCodeReviewPane { .. } => write!(f, "ToggleCodeReviewPane"),
-            InitProject => write!(f, "InitProject"),
-            IndexProjectSpeedbump => write!(f, "IndexProject"),
             AddProjectAtCurrentDirectory => write!(f, "AddProjectAtCurrentDirectory"),
             OpenProjectRulesPane => write!(f, "OpenProjectRulesPane"),
             OpenViewMCPPane => write!(f, "OpenViewMCPPane"),

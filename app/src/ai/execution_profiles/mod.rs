@@ -182,7 +182,8 @@ impl ComputerUsePermission {
 pub enum AskUserQuestionPermission {
     /// Never pause; skip questions and continue with best judgment.
     Never,
-    /// Pause and wait for the user, unless auto-approve mode is enabled.
+    /// 在 openWarp 中等同于 `AlwaysAsk`:auto-approve 模式不再静默跳过用户问题,
+    /// 只对 shell/编辑等执行类工具自动通过。变体名保留以兼容已序列化的 profile。
     #[default]
     AskExceptInAutoApprove,
     /// Always pause and wait for the user to answer before continuing, even in auto-approve mode.
@@ -198,7 +199,7 @@ impl AskUserQuestionPermission {
         match self {
             AskUserQuestionPermission::AskExceptInAutoApprove
             | AskUserQuestionPermission::Unknown => {
-                "The Agent may ask a question and pause for your response, but will continue automatically when auto-approve is on."
+                "The Agent may ask a question and will pause for your response, even when auto-approve is on (auto-approve only applies to shell/edit tools)."
             }
             AskUserQuestionPermission::Never => {
                 "The Agent will not ask questions and will continue with its best judgment."
@@ -290,7 +291,7 @@ impl Default for AIExecutionProfile {
             active_ai_model: None,
             next_command_model: None,
             context_window_limit: None,
-            autosync_plans_to_warp_drive: true,
+            autosync_plans_to_warp_drive: false,
             web_search_enabled: true,
         }
     }

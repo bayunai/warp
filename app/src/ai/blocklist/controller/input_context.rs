@@ -1,6 +1,5 @@
 use std::{collections::HashMap, path::Path, sync::Arc};
 
-use ai::index::full_source_code_embedding::manager::CodebaseIndexManager;
 use chrono::Local;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -66,29 +65,6 @@ pub(super) fn input_context_for_request(
 
     if let Some(env) = active_session.ai_execution_environment(app) {
         context.push(AIAgentContext::ExecutionEnvironment(env));
-    }
-
-    if FeatureFlag::FullSourceCodeEmbedding.is_enabled()
-        && FeatureFlag::CrossRepoContext.is_enabled()
-    {
-        for (codebase_path, status) in
-            CodebaseIndexManager::as_ref(app).get_codebase_index_statuses(app)
-        {
-            // TODO(daniel): We should figure out a mechanism for handling stale codebases.
-            if status.has_synced_version() {
-                // For now, we pass the name of the directory as the name of the
-                // codebase.
-                let codebase_name = codebase_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy())
-                    .unwrap_or_default();
-
-                context.push(AIAgentContext::Codebase {
-                    name: codebase_name.into(),
-                    path: codebase_path.to_string_lossy().into(),
-                })
-            }
-        }
     }
 
     if FeatureFlag::ListSkills.is_enabled() {

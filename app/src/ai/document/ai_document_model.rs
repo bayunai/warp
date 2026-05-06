@@ -62,12 +62,12 @@ struct AIDocumentSaveRequest {
 
 /// The status of saving an AI Document to Warp Drive
 pub enum AIDocumentSaveStatus {
-    /// Not being synced with Warp Drive at all
-    NotSaved,
-    /// Is being saved to Warp Drive, but has not finished yet
-    Saving,
-    /// Has been saved to Warp Drive
+    /// 已保存到本地 SQLite
     Saved,
+    /// 云端同步中（保留兼容，openWarp 不使用）
+    Saving,
+    /// 未保存（仅用于无文档时的兜底）
+    NotSaved,
 }
 
 impl AIDocumentSaveStatus {
@@ -240,32 +240,28 @@ impl AIDocumentModel {
             return false;
         };
 
-        let Some(plan_folder_id) = self.get_or_create_plan_folder(owner, ctx).into_server() else {
-            // Plan folder is still being created (has ClientId only).
-            // If we save using the ClientId as the parent folder, the document
-            // will end up in a broken state once the folder is saved.
-            // Queue the document for creation until the folder gets a ServerId.
-            self.pending_document_queue
-                .push(PendingDocument { id, title, content });
-
-            if let Some(document) = self.documents.get_mut(&id) {
-                let client_id = ClientId::new();
-                document.sync_id = Some(SyncId::ClientId(client_id));
-            }
-            return true;
-        };
-
-        self.create_notebook_in_plan_folder(id, &title, &content, owner, plan_folder_id, ctx);
+        // Create the notebook immediately under the Plans folder regardless of whether
+        // the folder has a ClientId or ServerId. In openWarp there is no cloud to
+        // upgrade the folder to a ServerId, so waiting in pending_document_queue would
+        // mean the document never appears in the Drive sidebar.
+        let plan_folder_sync_id = self.get_or_create_plan_folder(owner, ctx);
+        self.create_notebook_with_folder_sync_id(
+            id,
+            &title,
+            &content,
+            owner,
+            plan_folder_sync_id,
+            ctx,
+        );
         ctx.emit(AIDocumentModelEvent::DocumentSaveStatusUpdated(id));
         true
     }
 
     pub fn get_document_save_status(&self, id: &AIDocumentId) -> AIDocumentSaveStatus {
-        let sync_id = self.documents.get(id).and_then(|doc| doc.sync_id);
-        if sync_id.and_then(|id| id.into_server()).is_some() {
+        // openWarp 不使用云端同步；Plan 内容已自动写入本地 SQLite，
+        // 文档存在即视为已保存。
+        if self.documents.contains_key(id) {
             AIDocumentSaveStatus::Saved
-        } else if sync_id.and_then(|id| id.into_client()).is_some() {
-            AIDocumentSaveStatus::Saving
         } else {
             AIDocumentSaveStatus::NotSaved
         }
@@ -1133,6 +1129,27 @@ impl AIDocumentModel {
         plan_folder_id: ServerId,
         ctx: &mut ModelContext<Self>,
     ) {
+        self.create_notebook_with_folder_sync_id(
+            id,
+            title,
+            content,
+            owner,
+            SyncId::ServerId(plan_folder_id),
+            ctx,
+        );
+    }
+
+    /// Create a notebook under the Plans folder using any SyncId (ClientId or ServerId).
+    /// This allows local-only Drive entries to appear in the sidebar without cloud.
+    fn create_notebook_with_folder_sync_id(
+        &mut self,
+        id: AIDocumentId,
+        title: &str,
+        content: &str,
+        owner: Owner,
+        folder_sync_id: SyncId,
+        ctx: &mut ModelContext<Self>,
+    ) {
         let client_id = ClientId::new();
         let server_conversation_id = self.get_server_conversation_id(&id, ctx);
         if let Some(document) = self.documents.get_mut(&id) {
@@ -1153,7 +1170,7 @@ impl AIDocumentModel {
             update_manager.create_notebook(
                 client_id,
                 owner,
-                Some(SyncId::ServerId(plan_folder_id)),
+                Some(folder_sync_id),
                 notebook_model,
                 CloudObjectEventEntrypoint::Unknown,
                 true,

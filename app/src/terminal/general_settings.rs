@@ -33,6 +33,15 @@ define_settings_group!(GeneralSettings, settings: [
         toml_path: "general.restore_session",
         description: "Whether to restore the previous session when Warp starts up.",
     },
+    persist_conversations: PersistConversations {
+        type: bool,
+        default: true,
+        supported_platforms: SupportedPlatforms::DESKTOP,
+        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
+        private: false,
+        toml_path: "general.persist_conversations",
+        description: "Whether to persist agent conversations to the local database so they appear in /conversations history. Independent of session restore.",
+    },
     link_tooltip: LinkTooltip {
         type: bool,
         default: true,

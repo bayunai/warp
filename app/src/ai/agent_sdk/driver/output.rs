@@ -355,7 +355,6 @@ pub mod text {
                     AIAgentActionType::SuggestPrompt { .. } => (),
                     AIAgentActionType::OpenCodeReview => (),
                     AIAgentActionType::InsertCodeReviewComments { .. } => (),
-                    AIAgentActionType::InitProject => (),
                     // Document operations - not yet implemented for SDK
                     AIAgentActionType::ReadDocuments(_)
                     | AIAgentActionType::EditDocuments(_)
@@ -987,7 +986,6 @@ pub mod json {
                     // Internal or non-CLI tool calls: skip them
                     AIAgentActionType::SuggestNewConversation { .. }
                     | AIAgentActionType::SuggestPrompt { .. }
-                    | AIAgentActionType::InitProject
                     | AIAgentActionType::OpenCodeReview
                     | AIAgentActionType::InsertCodeReviewComments { .. }
                     | AIAgentActionType::ReadDocuments(_)

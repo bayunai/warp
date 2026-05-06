@@ -42,7 +42,6 @@ use crate::{
     },
     settings::{AISettings, AISettingsChangedEvent, InputSettings, InputSettingsChangedEvent},
     terminal::model::session::active_session::{ActiveSession, ActiveSessionEvent},
-    workspaces::user_workspaces::{UserWorkspaces, UserWorkspacesEvent},
 };
 
 pub struct DataSourceArgs {
@@ -106,11 +105,7 @@ impl SlashCommandDataSource {
                 me.recompute_active_commands(ctx);
             }
         });
-        ctx.subscribe_to_model(&UserWorkspaces::handle(ctx), |me, event, ctx| {
-            if matches!(event, UserWorkspacesEvent::CodebaseContextEnablementChanged) {
-                me.recompute_active_commands(ctx);
-            }
-        });
+
         ctx.subscribe_to_model(
             &CLIAgentSessionsModel::handle(ctx),
             move |me, event, ctx| {
@@ -191,10 +186,6 @@ impl SlashCommandDataSource {
         };
         if has_active_conversation {
             session_context |= Availability::ACTIVE_CONVERSATION;
-        }
-
-        if UserWorkspaces::as_ref(ctx).is_codebase_context_enabled(ctx) {
-            session_context |= Availability::CODEBASE_CONTEXT;
         }
 
         if AISettings::as_ref(ctx).is_any_ai_enabled(ctx) {

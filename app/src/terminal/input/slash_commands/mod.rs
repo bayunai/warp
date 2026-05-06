@@ -592,12 +592,6 @@ impl Input {
                     return true;
                 }
             }
-            index if command.name == commands::INDEX.name => {
-                ctx.dispatch_typed_action(&TerminalAction::IndexProjectSpeedbump);
-            }
-            init if command.name == commands::INIT.name => {
-                ctx.dispatch_typed_action(&TerminalAction::InitProject);
-            }
             changelog if command.name == commands::CHANGELOG.name => {
                 if !FeatureFlag::Changelog.is_enabled() {
                     return false;
@@ -838,7 +832,8 @@ impl Input {
                 });
             }
             command_that_just_sends_ai_request_with_prefix
-                if command.name == commands::PLAN.name
+                if command.name == commands::INIT.name
+                    || command.name == commands::PLAN.name
                     || command.name == commands::ORCHESTRATE.name =>
             {
                 // These slash commands just send AI requests with the slash command text as a

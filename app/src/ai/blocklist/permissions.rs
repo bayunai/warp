@@ -1152,13 +1152,15 @@ impl BlocklistAIPermissions {
         terminal_view_id: Option<EntityId>,
         ctx: &AppContext,
     ) -> bool {
+        // openWarp 改:auto-approve(ctrl+shift+i)只对 shell/编辑等执行类工具自动通过,
+        // ask_user_question 永远要求弹给用户,避免模型问问题被静默吞掉。
+        // 仅显式选 `Never` 才跳过。
+        let _ = conversation_id;
         match self.get_ask_user_question_setting(ctx, terminal_view_id) {
             AskUserQuestionPermission::Never => false,
             AskUserQuestionPermission::AskExceptInAutoApprove
-            | AskUserQuestionPermission::Unknown => !BlocklistAIHistoryModel::as_ref(ctx)
-                .conversation(conversation_id)
-                .is_some_and(|convo| convo.autoexecute_any_action()),
-            AskUserQuestionPermission::AlwaysAsk => true,
+            | AskUserQuestionPermission::Unknown
+            | AskUserQuestionPermission::AlwaysAsk => true,
         }
     }
 }

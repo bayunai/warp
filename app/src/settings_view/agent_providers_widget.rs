@@ -82,15 +82,6 @@ pub(super) fn clear_expanded_models_for_provider(provider_id: &str) {
     });
 }
 
-/// hint 字符串里 ✓ / ✗ 渲染。
-fn yn(b: bool) -> &'static str {
-    if b {
-        "✓"
-    } else {
-        "✗"
-    }
-}
-
 /// 一条模型条目(name + id + context + output)的可编辑 view handle。
 struct ModelRow {
     name_editor: ViewHandle<EditorView>,
@@ -110,6 +101,12 @@ struct ModelRow {
     tool_call_chip_state: MouseStateHandle,
 }
 
+struct HeaderRow {
+    key_editor: ViewHandle<EditorView>,
+    val_editor: ViewHandle<EditorView>,
+    remove_button_state: MouseStateHandle,
+}
+
 /// 一条 provider 行的所有可编辑 view handle。
 struct ProviderRow {
     name_editor: ViewHandle<EditorView>,
@@ -119,6 +116,8 @@ struct ProviderRow {
     sync_models_dev_button_state: MouseStateHandle,
     remove_button_state: MouseStateHandle,
     add_model_button_state: MouseStateHandle,
+    header_rows: Vec<HeaderRow>,
+    add_header_button_state: MouseStateHandle,
     /// 5 个 ApiType chip 各自的鼠标状态。HashMap 由 chip 显示名映射。
     api_type_chip_states: RefCell<HashMap<AgentProviderApiType, MouseStateHandle>>,
     model_rows: Vec<ModelRow>,
@@ -334,6 +333,80 @@ impl AgentProvidersWidget {
         }
     }
 
+    fn build_header_row(
+        provider_id: &str,
+        header_index: usize,
+        key: &str,
+        value: &str,
+        ctx: &mut ViewContext<AISettingsPageView>,
+    ) -> HeaderRow {
+        let initial_key = key.to_owned();
+        let key_editor = ctx.add_typed_action_view(move |ctx| {
+            let appearance = Appearance::handle(ctx).as_ref(ctx);
+            let options = single_line_editor_options(&appearance, false);
+            let mut editor = EditorView::single_line(options, ctx);
+            editor.set_placeholder_text("x-portkey-provider", ctx);
+            if !initial_key.is_empty() {
+                editor.set_buffer_text(&initial_key, ctx);
+            }
+            editor
+        });
+
+        let initial_value = value.to_owned();
+        let val_editor = ctx.add_typed_action_view(move |ctx| {
+            let appearance = Appearance::handle(ctx).as_ref(ctx);
+            let options = single_line_editor_options(&appearance, false);
+            let mut editor = EditorView::single_line(options, ctx);
+            editor.set_placeholder_text("openai", ctx);
+            if !initial_value.is_empty() {
+                editor.set_buffer_text(&initial_value, ctx);
+            }
+            editor
+        });
+
+        let provider_id_for_key = provider_id.to_owned();
+        let val_editor_for_key = val_editor.clone();
+        ctx.subscribe_to_view(&key_editor, move |_, editor, event, ctx| {
+            if matches!(event, EditorEvent::Blurred | EditorEvent::Enter) {
+                let key = editor.as_ref(ctx).buffer_text(ctx);
+                let value = val_editor_for_key.as_ref(ctx).buffer_text(ctx);
+                ctx.dispatch_typed_action_deferred(
+                    AISettingsPageAction::UpdateAgentProviderHeader {
+                        provider_id: provider_id_for_key.clone(),
+                        header_index,
+                        key,
+                        value,
+                    },
+                );
+                collapse_selection_if_blurred(&editor, event, ctx);
+            }
+        });
+
+        let provider_id_for_value = provider_id.to_owned();
+        let key_editor_for_value = key_editor.clone();
+        ctx.subscribe_to_view(&val_editor, move |_, editor, event, ctx| {
+            if matches!(event, EditorEvent::Blurred | EditorEvent::Enter) {
+                let key = key_editor_for_value.as_ref(ctx).buffer_text(ctx);
+                let value = editor.as_ref(ctx).buffer_text(ctx);
+                ctx.dispatch_typed_action_deferred(
+                    AISettingsPageAction::UpdateAgentProviderHeader {
+                        provider_id: provider_id_for_value.clone(),
+                        header_index,
+                        key,
+                        value,
+                    },
+                );
+                collapse_selection_if_blurred(&editor, event, ctx);
+            }
+        });
+
+        HeaderRow {
+            key_editor,
+            val_editor,
+            remove_button_state: MouseStateHandle::default(),
+        }
+    }
+
     /// 为一条 provider 构造它的所有 view handle 与按钮 mouse state。
     fn build_row(
         provider: &AgentProvider,
@@ -435,6 +508,14 @@ impl AgentProvidersWidget {
             .map(|(idx, m)| Self::build_model_row(&provider_id, idx, m, ctx))
             .collect();
 
+        let header_rows: Vec<HeaderRow> = provider
+            .extra_headers
+            .iter()
+            .enumerate()
+            .map(|(idx, (k, v))| Self::build_header_row(&provider_id, idx, k, v, ctx))
+            .collect();
+        let add_header_button_state = MouseStateHandle::default();
+
         ProviderRow {
             name_editor,
             base_url_editor,
@@ -443,6 +524,8 @@ impl AgentProvidersWidget {
             sync_models_dev_button_state: MouseStateHandle::default(),
             remove_button_state: MouseStateHandle::default(),
             add_model_button_state: MouseStateHandle::default(),
+            header_rows,
+            add_header_button_state,
             api_type_chip_states: RefCell::new(HashMap::new()),
             model_rows,
         }
@@ -612,14 +695,6 @@ impl AgentProvidersWidget {
     ) -> Box<dyn Element> {
         let theme = appearance.theme();
         let label_color = theme.active_ui_text_color();
-        let dim_color = theme.disabled_ui_text_color();
-
-        // 推断结果(忽略用户覆盖),用于 hint 文字 "Auto: catalog says ✓✓✗"。
-        let inferred = crate::ai::agent_providers::attachment_caps::inferred_for_model(
-            &provider.id,
-            provider.api_type,
-            &model.id,
-        );
 
         // ---- Modalities 区 ----
         let modalities_label = Container::new(
@@ -683,27 +758,6 @@ impl AgentProvidersWidget {
                 ModelCapabilityKind::Audio,
             ))
             .finish();
-
-        // 把 Auto 推断结果摊给用户看,免得用户摸不着 catalog 默认是什么。
-        let inferred_hint = format!(
-            "Auto = catalog/fallback says: Image {}, PDF {}, Audio {}. \
-             Click chip to cycle: Auto → On → Off → Auto.",
-            yn(inferred.images),
-            yn(inferred.pdf),
-            yn(inferred.audio),
-        );
-        let modalities_hint = Container::new(
-            Text::new(
-                inferred_hint,
-                appearance.ui_font_family(),
-                appearance.ui_font_size(),
-            )
-            .with_color(dim_color.into())
-            .soft_wrap(true)
-            .finish(),
-        )
-        .with_margin_top(2.)
-        .finish();
 
         // ---- Capabilities 区(reasoning / tool_call) ----
         let capabilities_label = Container::new(
@@ -782,7 +836,6 @@ impl AgentProvidersWidget {
                 .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
                 .with_child(modalities_label)
                 .with_child(modalities_row)
-                .with_child(modalities_hint)
                 .with_child(capabilities_label)
                 .with_child(capabilities_row)
                 .with_child(remove_row)
@@ -852,6 +905,72 @@ impl AgentProvidersWidget {
             label_color,
             appearance,
         );
+
+        let headers_label = Container::new(
+            Text::new(
+                "Extra Headers".to_string(),
+                appearance.ui_font_family(),
+                appearance.ui_font_size(),
+            )
+            .with_color(label_color.into())
+            .finish(),
+        )
+        .with_margin_top(FIELD_LABEL_MARGIN_TOP)
+        .with_margin_bottom(FIELD_LABEL_MARGIN_BOTTOM)
+        .finish();
+        let mut headers_column = Flex::column()
+            .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
+            .with_child(headers_label);
+
+        for (idx, h_row) in row.header_rows.iter().enumerate() {
+            let remove_header_button = Self::render_card_button(
+                "×",
+                h_row.remove_button_state.clone(),
+                AISettingsPageAction::RemoveAgentProviderHeader {
+                    provider_id: provider.id.clone(),
+                    header_index: idx,
+                },
+                appearance,
+            );
+            let header_row = Flex::row()
+                .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                .with_child(
+                    Expanded::new(
+                        1.,
+                        Container::new(ChildView::new(&h_row.key_editor).finish())
+                            .with_margin_right(MODEL_ROW_GAP)
+                            .finish(),
+                    )
+                    .finish(),
+                )
+                .with_child(
+                    Expanded::new(
+                        1.,
+                        Container::new(ChildView::new(&h_row.val_editor).finish())
+                            .with_margin_right(MODEL_ROW_GAP)
+                            .finish(),
+                    )
+                    .finish(),
+                )
+                .with_child(remove_header_button)
+                .finish();
+            headers_column.add_child(
+                Container::new(header_row)
+                    .with_margin_bottom(MODEL_ROW_GAP)
+                    .finish(),
+            );
+        }
+
+        let add_header_button = Self::render_card_button(
+            "+ Add Header",
+            row.add_header_button_state.clone(),
+            AISettingsPageAction::AddAgentProviderHeader {
+                provider_id: provider.id.clone(),
+            },
+            appearance,
+        );
+        headers_column.add_child(add_header_button);
+
         // ---- 模型列表区 ----
         let models_label = Container::new(
             Text::new(
@@ -1017,6 +1136,11 @@ impl AgentProvidersWidget {
                 .with_child(api_type_field)
                 .with_child(base_url_field)
                 .with_child(api_key_field)
+                .with_child(
+                    Container::new(headers_column.finish())
+                        .with_margin_top(8.)
+                        .finish(),
+                )
                 .with_child(
                     Container::new(models_column.finish())
                         .with_margin_top(8.)

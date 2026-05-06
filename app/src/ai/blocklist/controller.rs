@@ -2910,10 +2910,13 @@ impl BlocklistAIController {
             Some(warp_multi_agent_api::response_event::stream_finished::Reason::Done(_)) | None => {
                 // OpenWarp BYOP 本地会话压缩 - 写回 summary
                 if let Some(overflow) = summarize_overflow {
+                    let compaction_cfg = crate::ai::byop_compaction::CompactionConfig::from_settings(ctx);
                     history_model.update(ctx, |history_model, _ctx| {
                         if let Some(convo) = history_model.conversation_mut(&conversation_id) {
                             crate::ai::byop_compaction::commit::commit_summarization(
-                                convo, overflow,
+                                convo,
+                                overflow,
+                                &compaction_cfg,
                             );
                         }
                     });

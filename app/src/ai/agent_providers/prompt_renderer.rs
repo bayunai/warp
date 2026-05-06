@@ -58,6 +58,16 @@ fn build_env() -> Environment<'static> {
         include_str!("prompts/partials/footer.j2"),
     )
     .expect("footer partial parses");
+    env.add_template(
+        "partials/plan_mode.j2",
+        include_str!("prompts/partials/plan_mode.j2"),
+    )
+    .expect("plan_mode partial parses");
+    env.add_template(
+        "commands/init_project.j2",
+        include_str!("prompts/commands/init_project.j2"),
+    )
+    .expect("init_project command template parses");
 
     // 按 model id 子串匹配分发 system prompt(对齐 opencode
     // `packages/opencode/src/session/system.ts::provider`)。OpenRouter 路径形如
@@ -185,6 +195,11 @@ struct ProjectRuleCtx {
 }
 
 #[derive(Debug, Default, Serialize)]
+struct InitProjectCommandContext {
+    arguments: String,
+}
+
+#[derive(Debug, Default, Serialize)]
 struct PromptContext {
     cwd: Option<String>,
     shell: Option<ShellCtx>,
@@ -194,6 +209,14 @@ struct PromptContext {
     project_rules: Vec<ProjectRuleCtx>,
     current_time: String,
     model_id: String,
+    /// 本轮真正喂给上游模型的 tool name 列表(由 `chat_stream::available_tool_names`
+    /// 计算,含 gating 后的内置 tools 和当前 MCP tools)。
+    /// 模板按此动态渲染白名单,不再硬编码。
+    available_tools: Vec<String>,
+    /// 本轮是否处于 `/plan` 触发的 Plan Mode(只读研究模式)。
+    /// 由 `chat_stream::is_plan_mode_turn` 计算,模板按此 include
+    /// `partials/plan_mode.j2` 注入只读约束 + 计划产出引导。
+    plan_mode: bool,
 }
 
 fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptContext {
@@ -281,14 +304,51 @@ fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptConte
 // 公共 API
 // ---------------------------------------------------------------------------
 
+pub fn render_init_project_command(arguments: Option<&str>) -> String {
+    let arguments = arguments
+        .map(str::trim)
+        .filter(|arguments| !arguments.is_empty())
+        .unwrap_or("(none)")
+        .to_owned();
+    let ctx = InitProjectCommandContext { arguments };
+    let env = env();
+    let template_name = "commands/init_project.j2";
+    let tmpl = match env.get_template(template_name) {
+        Ok(t) => t,
+        Err(e) => {
+            log::error!("[byop prompt] failed to get template {template_name}: {e}");
+            return fallback_init_project_command(&ctx.arguments);
+        }
+    };
+    match tmpl.render(Value::from_serialize(&ctx)) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("[byop prompt] render {template_name} failed: {e}");
+            fallback_init_project_command(&ctx.arguments)
+        }
+    }
+}
+
 /// 渲染最终发给上游模型的 system message 字符串。
 ///
 /// `ctx` 一般来自 `params.input` 中最近一条 `AIAgentInput::UserQuery.context`。
 /// 拿不到 context(空数组)也 OK — 模板会用 default 占位渲染。
-pub fn render_system(model: &LLMId, ctx: &[AIAgentContext]) -> String {
+///
+/// `available_tools` 由 `chat_stream::available_tool_names` 计算,本轮实际暴露给
+/// 上游 LLM 的工具名列表(内置 + MCP,已应用 gating)。模板按此动态渲染白名单,
+/// 不要再硬编码"unavailable tools"黑名单 —— 模型看不到的工具自然不会调,
+/// 反过来用文本黑名单会让模型连真实可用的工具也不敢调。
+pub fn render_system(
+    model: &LLMId,
+    ctx: &[AIAgentContext],
+    available_tools: &[String],
+    plan_mode: bool,
+) -> String {
     let model_id = model_id_from_llm_id(model);
     let template_name = pick_template(&model_id);
-    let prompt_ctx = collect_prompt_context(&model_id, ctx);
+    let mut prompt_ctx = collect_prompt_context(&model_id, ctx);
+    prompt_ctx.available_tools = available_tools.to_vec();
+    prompt_ctx.plan_mode = plan_mode;
 
     let env = env();
     let tmpl = match env.get_template(template_name) {
@@ -307,6 +367,12 @@ pub fn render_system(model: &LLMId, ctx: &[AIAgentContext]) -> String {
     }
 }
 
+fn fallback_init_project_command(arguments: &str) -> String {
+    format!(
+        "Create or update `AGENTS.md` for this repository.\n\nUser-provided focus or constraints (honor these):\n{arguments}"
+    )
+}
+
 /// 渲染兜底 system(只在模板加载/渲染失败时用,不应在正常路径触发)。
 fn fallback_system(model_id: &str) -> String {
     format!(
@@ -322,6 +388,14 @@ mod tests {
     use super::*;
     use crate::ai::agent::AIAgentContext;
     use crate::ai_assistant::execution_context::{WarpAiExecutionContext, WarpAiOsContext};
+
+    #[test]
+    fn render_init_project_command_uses_command_template_arguments() {
+        let out = render_init_project_command(Some("focus on test commands"));
+        assert!(out.contains("Create or update `AGENTS.md`"), "{out}");
+        assert!(out.contains("focus on test commands"), "{out}");
+        assert!(out.contains("## Writing rules"), "{out}");
+    }
 
     #[test]
     fn pick_template_dispatches_by_model_family() {
@@ -398,7 +472,7 @@ mod tests {
                 shell_version: Some("5.1".into()),
             }),
         ];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[], false);
         assert!(
             out.contains("Working directory: /home/user/project"),
             "{out}"
@@ -422,7 +496,12 @@ mod tests {
             "deepseek-chat",
             "weird-model",
         ] {
-            let out = render_system(&LLMId::from(format!("byop:p:{id}").as_str()), &[]);
+            let out = render_system(
+                &LLMId::from(format!("byop:p:{id}").as_str()),
+                &[],
+                &[],
+                false,
+            );
             assert!(
                 out.contains("OpenWarp"),
                 "id={id} should mention OpenWarp, got: {out}"
@@ -432,7 +511,7 @@ mod tests {
 
     #[test]
     fn render_omits_skills_block_when_empty() {
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[]);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
         // 没 skills 时 skills 区块不应出现
         assert!(
             !out.contains("Skills provide specialized instructions"),
@@ -443,7 +522,75 @@ mod tests {
     #[test]
     fn fallback_does_not_panic() {
         // render_system 永远不会 panic,失败也走 fallback_system
-        let out = render_system(&LLMId::from("byop:p:any"), &[]);
+        let out = render_system(&LLMId::from("byop:p:any"), &[], &[], false);
         assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn render_lists_available_tools_dynamically() {
+        // 传入的 tool 名字必须出现在 system prompt 里(动态白名单)
+        let tools: Vec<String> = vec![
+            "run_shell_command".into(),
+            "webfetch".into(),
+            "websearch".into(),
+            "mcp__github__create_issue".into(),
+        ];
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &tools, false);
+        for name in &tools {
+            assert!(
+                out.contains(name),
+                "expected `{name}` in prompt, got: {out}"
+            );
+        }
+        // 不应再出现旧黑名单措辞
+        assert!(
+            !out.contains("Do not call unavailable tools"),
+            "黑名单段已删除: {out}"
+        );
+    }
+
+    #[test]
+    fn render_omits_tool_list_when_empty() {
+        // tool_names 为空(理论上不会发生,兜底:不渲染白名单段)
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
+        assert!(!out.contains("Available Tools"), "{out}");
+    }
+
+    #[test]
+    fn plan_mode_off_omits_plan_block() {
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
+        assert!(
+            !out.contains("Plan Mode (Read-Only)"),
+            "plan_mode=false 不应包含 Plan Mode 段: {out}"
+        );
+    }
+
+    #[test]
+    fn plan_mode_on_injects_plan_block_for_all_families() {
+        for id in [
+            "claude-sonnet-4-5",
+            "gpt-4o",
+            "gpt-5-codex",
+            "gemini-2.5-pro",
+            "kimi-k2",
+            "trinity-v1",
+            "deepseek-chat",
+            "weird-model",
+        ] {
+            let out = render_system(
+                &LLMId::from(format!("byop:p:{id}").as_str()),
+                &[],
+                &[],
+                true,
+            );
+            assert!(
+                out.contains("Plan Mode (Read-Only)"),
+                "id={id} plan_mode=true 应包含 Plan Mode 段: {out}"
+            );
+            assert!(
+                out.contains("Stop and wait"),
+                "id={id} plan_mode=true 应包含 Stop and wait 引导: {out}"
+            );
+        }
     }
 }

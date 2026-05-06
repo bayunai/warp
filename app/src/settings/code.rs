@@ -1,3 +1,4 @@
+use lsp::supported_servers::LSPServerType;
 use settings::{
     macros::define_settings_group, RespectUserSyncSetting, SupportedPlatforms, SyncToCloud,
 };
@@ -12,25 +13,17 @@ define_settings_group!(CodeSettings, settings: [
         toml_path: "code.editor.use_warp_as_default_editor",
         description: "Whether Warp is used as the default code editor.",
     }
-    codebase_context_enabled: CodebaseContextEnabled {
-        type: bool,
-        default: true,
+
+    // openWarp 全局 LSP 启用集合。装好且在此集合中的 server,在任何项目检测到对应语言时自动启动。
+    // 不再按 workspace 维持 enablement(替代 PersistedWorkspace.workspaces[*].language_servers)。
+    enabled_lsp_servers: EnabledLspServers {
+        type: Vec<LSPServerType>,
+        default: vec![],
         supported_platforms: SupportedPlatforms::DESKTOP,
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
         private: false,
-        storage_key: "AgentModeCodebaseContext",
-        toml_path: "code.indexing.agent_mode_codebase_context",
-        description: "Whether codebase context is provided to the AI agent.",
-    },
-    auto_indexing_enabled: AutoIndexingEnabled {
-        type: bool,
-        default: false,
-        supported_platforms: SupportedPlatforms::DESKTOP,
-        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
-        private: false,
-        storage_key: "AgentModeCodebaseContextAutoIndexing",
-        toml_path: "code.indexing.agent_mode_codebase_context_auto_indexing",
-        description: "Whether automatic codebase indexing is enabled.",
+        toml_path: "code.lsp.enabled_servers",
+        description: "Globally enabled LSP servers. Auto-started in any workspace whose language matches.",
     },
     // Whether or not the user has manually dismissed the code toolbelt new feature popup.
     dismissed_code_toolbelt_new_feature_popup: DismissedCodeToolbeltNewFeaturePopup {

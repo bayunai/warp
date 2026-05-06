@@ -13,6 +13,11 @@ pub fn relative_log_path(server_type: LSPServerType, workspace_path: &Path) -> P
     PathBuf::from(server_type_name).join(format!("{workspace_hash}.log"))
 }
 
+/// Returns the path to the log directory for an LSP server type.
+pub fn log_directory_path(server_type: LSPServerType) -> PathBuf {
+    resolve_log_path("lsp", PathBuf::from(server_type.binary_name()))
+}
+
 /// Returns the path to the log file for an LSP server.
 ///
 /// Format: `{secure_state_dir}/lsp/{server_type}/{workspace_hash}.log`

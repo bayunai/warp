@@ -320,7 +320,7 @@ impl TypedActionView for WelcomeView {
 fn save_and_open_project(path: String, window_id: WindowId, ctx: &mut AppContext) {
     ProjectManagementModel::handle(ctx).update(ctx, |projects, ctx| {
         let path_buf = PathBuf::from(&path);
-        projects.upsert_project(path_buf.clone(), ctx);
+        projects.upsert_project(path_buf, ctx);
         update_workspace(window_id, ctx, move |workspace, ctx| {
             workspace.add_tab_with_pane_layout(
                 PanesLayout::SingleTerminal(Box::new(
@@ -332,13 +332,6 @@ fn save_and_open_project(path: String, window_id: WindowId, ctx: &mut AppContext
                 None,
                 ctx,
             );
-            workspace.active_tab_pane_group().update(ctx, |tab, ctx| {
-                if let Some(active_terminal) = tab.active_session_view(ctx) {
-                    active_terminal.update(ctx, |terminal, _ctx| {
-                        terminal.maybe_set_pending_repo_init_path(path_buf);
-                    });
-                }
-            });
         });
     });
 }

@@ -1,203 +1,312 @@
-mod changed_files;
-mod chunker;
-mod codebase_index;
-mod fragment_metadata;
-pub mod manager;
-mod merkle_tree;
-mod priority_queue;
-mod snapshot;
-pub mod store_client;
-mod sync_client;
+//! openWarp: codebase indexing 整模块已弃用,这是过渡期 stub。
+//! 公共 API surface 保留为 no-op,所有调用方仍能编译。
+//! Phase 4 后续 commit 会逐个删除 caller,最后整模块删干净。
 
-use std::{ops::Range, path::PathBuf, time::Duration};
-pub use sync_client::SyncTask;
+use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
-pub use codebase_index::{CodebaseIndex, RetrievalID, SyncProgress};
-pub use merkle_tree::{ContentHash, NodeHash};
-
-use fragment_metadata::FragmentMetadata;
-use string_offset::ByteOffset;
 use thiserror::Error;
-use warp_graphql::queries::rerank_fragments::FragmentLocationInput;
+use warpui::{AppContext, Entity, ModelContext, ModelHandle, SingletonEntity};
 
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error("File I/O error {0:#}")]
-    Io(#[from] std::io::Error),
-    #[error("Not a git repository")]
-    NotAGitRepository,
-    #[error("Build tree error {0:#}")]
-    BuildTreeError(#[from] crate::index::BuildTreeError),
-    #[error("Unsupported platform")]
-    UnsupportedPlatform,
-    #[error("Invalid hash: {0:#}")]
-    InvalidHash(base16ct::Error),
-    #[error("Empty node content")]
-    EmptyNodeContent,
-    #[error("Failed to get metadata")]
-    FailedToGetMetadata(PathBuf),
-    #[error("File size exceeds maximum limit")]
-    FileSizeExceeded,
-    #[error(transparent)]
-    InconsistentState(#[from] InconsistentStateError),
-    #[error("Failed to generate embeddings for some hashes")]
-    FailedToGenerateEmbeddings(Vec<FragmentMetadata>),
-    #[error("Failed to sync some intermediate nodes")]
-    FailedToSyncIntermediateNodes(Vec<NodeHash>),
-    #[error("Diff merkle tree {0:#}")]
-    DiffMerkleTreeError(#[from] crate::index::full_source_code_embedding::DiffMerkleTreeError),
-    #[error("File system changed since merkle tree construction")]
-    FileSystemStateChanged,
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
-    #[error("Failed to parse snapshot")]
-    SnapshotParsingFailed,
-}
+use crate::index::locations::CodeContextLocation;
+use crate::workspace::{WorkspaceMetadata, WorkspaceMetadataEvent};
 
-// Based off of BuildTreeError in entry.rs
-#[derive(Debug, Error)]
-pub enum DiffMerkleTreeError {
-    #[error("Merkle tree node and file mismatch")]
-    CurrentNodeMismatch(PathBuf),
-    #[error("File is ignored")]
-    Ignored,
-    #[error("Symlink is not supported")]
-    Symlink,
-    #[error("Fragment node in diffing process")]
-    Fragment(PathBuf),
-    #[error("Max depth exceeded")]
-    MaxDepthExceeded,
-    #[error("Exceeded max file limit")]
-    ExceededMaxFileLimit,
-}
+// =============================================================================
+// 顶层占位类型
+// =============================================================================
 
-#[derive(Error, Debug)]
-pub enum InconsistentStateError {
-    #[error("Missing fragment metadata for {fragment_hash}")]
-    MissingFragmentMetadata { fragment_hash: ContentHash },
-    #[error("Can't find node index in merkle node")]
-    NodeIndexNotFound,
-}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct SyncTask;
 
-#[allow(non_camel_case_types)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum EmbeddingConfig {
-    OpenAiTextSmall3_256,
-    VoyageCode3_512,
-    Voyage3_5_Lite_512,
-    #[default]
-    Voyage3_5_512,
-}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct ContentHash;
 
-#[derive(Debug, Clone)]
-pub struct RepoMetadata {
-    pub path: Option<String>,
-}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct NodeHash;
 
-impl From<RepoMetadata> for warp_graphql::full_source_code_embedding::RepoMetadata {
-    fn from(val: RepoMetadata) -> Self {
-        Self { path: val.path }
-    }
-}
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub struct RetrievalID;
 
-impl From<EmbeddingConfig> for warp_graphql::full_source_code_embedding::EmbeddingConfig {
-    fn from(val: EmbeddingConfig) -> Self {
-        match val {
-            EmbeddingConfig::OpenAiTextSmall3_256 => {
-                warp_graphql::full_source_code_embedding::EmbeddingConfig::OpenaiTextSmall3256
-            }
-            EmbeddingConfig::VoyageCode3_512 => {
-                warp_graphql::full_source_code_embedding::EmbeddingConfig::VoyageCode3512
-            }
-            EmbeddingConfig::Voyage3_5_512 => {
-                warp_graphql::full_source_code_embedding::EmbeddingConfig::Voyage35512
-            }
-            EmbeddingConfig::Voyage3_5_Lite_512 => {
-                warp_graphql::full_source_code_embedding::EmbeddingConfig::Voyage35Lite512
-            }
-        }
-    }
-}
+#[derive(Debug, Clone, Default)]
+pub struct Fragment;
 
-impl TryFrom<warp_graphql::full_source_code_embedding::EmbeddingConfig> for EmbeddingConfig {
-    type Error = Error;
+#[derive(Debug, Clone, Default)]
+pub struct FragmentLocation;
 
-    fn try_from(
-        value: warp_graphql::full_source_code_embedding::EmbeddingConfig,
-    ) -> Result<Self, Self::Error> {
-        match value {
-            warp_graphql::full_source_code_embedding::EmbeddingConfig::OpenaiTextSmall3256 => {
-                Ok(Self::OpenAiTextSmall3_256)
-            }
-            warp_graphql::full_source_code_embedding::EmbeddingConfig::Voyage35Lite512 => {
-                Ok(Self::Voyage3_5_Lite_512)
-            }
-            warp_graphql::full_source_code_embedding::EmbeddingConfig::VoyageCode3512 => {
-                Ok(Self::VoyageCode3_512)
-            }
-            warp_graphql::full_source_code_embedding::EmbeddingConfig::Voyage35512 => {
-                Ok(Self::Voyage3_5_512)
-            }
-        }
-    }
-}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EmbeddingConfig;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Default)]
+pub struct RepoMetadata;
+
+#[derive(Debug, Clone, Copy, Default)]
 pub struct CodebaseContextConfig {
     pub embedding_config: EmbeddingConfig,
     pub embedding_cadence: Duration,
 }
 
-#[derive(Clone)]
-pub struct FragmentLocation {
-    absolute_path: PathBuf,
-    byte_range: Range<ByteOffset>,
+#[derive(Debug, Clone, Default)]
+pub struct CodebaseIndex;
+
+#[derive(Debug, Clone)]
+pub enum SyncProgress {
+    Discovering {
+        total_nodes: usize,
+    },
+    Syncing {
+        completed_nodes: usize,
+        total_nodes: usize,
+    },
 }
 
-#[derive(Clone)]
-pub struct Fragment {
-    content: String,
-    content_hash: ContentHash,
-    location: FragmentLocation,
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("openWarp stub: codebase indexing disabled")]
+    Disabled,
 }
 
-impl From<Fragment> for warp_graphql::full_source_code_embedding::Fragment {
-    fn from(val: Fragment) -> Self {
-        Self {
-            content: val.content,
-            content_hash: val.content_hash.into(),
+#[derive(Error, Debug)]
+pub enum DiffMerkleTreeError {
+    #[error("openWarp stub: codebase indexing disabled")]
+    Disabled,
+}
+
+#[derive(Error, Debug)]
+pub enum InconsistentStateError {
+    #[error("openWarp stub: codebase indexing disabled")]
+    Disabled,
+}
+
+// =============================================================================
+// store_client sub-module
+// =============================================================================
+
+pub mod store_client {
+    use super::{ContentHash, NodeHash};
+
+    #[derive(Debug, Clone, Default)]
+    pub struct IntermediateNode;
+
+    #[async_trait::async_trait]
+    pub trait StoreClient: Send + Sync {
+        async fn ping(&self) -> bool {
+            false
         }
     }
-}
 
-impl From<Fragment> for warp_graphql::queries::rerank_fragments::RerankFragmentInput {
-    fn from(val: Fragment) -> Self {
-        Self {
-            content: val.content,
-            content_hash: val.content_hash.into(),
-            location: FragmentLocationInput {
-                byte_start: val.location.byte_range.start.as_usize() as i32,
-                byte_end: val.location.byte_range.end.as_usize() as i32,
-                file_path: val.location.absolute_path.to_string_lossy().to_string(),
-            },
+    /// Empty no-op store client used by the stub.
+    pub struct NoopStoreClient;
+
+    #[async_trait::async_trait]
+    impl StoreClient for NoopStoreClient {
+        async fn ping(&self) -> bool {
+            false
         }
     }
+
+    #[allow(dead_code)]
+    fn _hash_marker() -> (NodeHash, ContentHash) {
+        (NodeHash, ContentHash)
+    }
 }
 
-impl TryFrom<warp_graphql::queries::rerank_fragments::RerankFragment> for Fragment {
-    type Error = Error;
+// =============================================================================
+// manager sub-module
+// =============================================================================
 
-    fn try_from(
-        val: warp_graphql::queries::rerank_fragments::RerankFragment,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            content: val.content,
-            content_hash: val.content_hash.try_into()?,
-            location: FragmentLocation {
-                absolute_path: PathBuf::from(val.location.file_path),
-                byte_range: ByteOffset::from(val.location.byte_start as usize)
-                    ..ByteOffset::from(val.location.byte_end as usize),
-            },
-        })
+pub mod manager {
+    use super::*;
+
+    #[derive(Debug, Clone)]
+    pub enum CodebaseIndexFinishedStatus {
+        Failed(CodebaseIndexingError),
+        Succeeded,
     }
+
+    #[derive(Debug, Clone, Error)]
+    pub enum CodebaseIndexingError {
+        #[error("Exceeded max file limit")]
+        ExceededMaxFileLimit,
+        #[error("Max depth exceeded")]
+        MaxDepthExceeded,
+        #[error("openWarp stub: indexing disabled")]
+        Disabled,
+    }
+
+    #[derive(Debug, Clone, Error)]
+    pub enum RetrieveFileError {
+        #[error("openWarp stub: indexing disabled")]
+        Disabled,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum CodebaseIndexManagerEvent {
+        IndexMetadataUpdated {
+            root_path: PathBuf,
+            event: WorkspaceMetadataEvent,
+        },
+        NewIndexCreated,
+        RemoveExpiredIndexMetadata {
+            expired_metadata: Vec<WorkspaceMetadata>,
+        },
+        RetrievalRequestCompleted {
+            retrieval_id: RetrievalID,
+            fragments: Arc<HashSet<CodeContextLocation>>,
+            out_of_sync_delay: Duration,
+        },
+        RetrievalRequestFailed {
+            retrieval_id: RetrievalID,
+            error_message: String,
+        },
+        SyncStateUpdated,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub struct CodebaseIndexStatus;
+
+    impl CodebaseIndexStatus {
+        pub fn has_pending(&self) -> bool {
+            false
+        }
+        pub fn has_synced_version(&self) -> bool {
+            false
+        }
+        pub fn last_sync_successful(&self) -> Option<bool> {
+            None
+        }
+        pub fn last_sync_result(&self) -> Option<&CodebaseIndexFinishedStatus> {
+            None
+        }
+        pub fn sync_progress(&self) -> Option<&SyncProgress> {
+            None
+        }
+    }
+
+    pub enum BuildSource<'a> {
+        Path(&'a Path),
+        _Phantom(PhantomData<&'a ()>),
+    }
+
+    /// stub: 始终为空,所有方法 no-op。
+    #[derive(Default)]
+    pub struct CodebaseIndexManager;
+
+    impl CodebaseIndexManager {
+        pub fn new(
+            _indices_to_restore: Vec<WorkspaceMetadata>,
+            _max_indices_allowed: usize,
+            _max_files_per_repo: usize,
+            _embedding_generation_batch_size: usize,
+            _store_client: Arc<dyn store_client::StoreClient>,
+            _ctx: &mut ModelContext<Self>,
+        ) -> Self {
+            Self
+        }
+
+        pub fn new_for_test(
+            _store_client: Arc<dyn store_client::StoreClient>,
+            _ctx: &mut ModelContext<Self>,
+        ) -> Self {
+            Self
+        }
+
+        pub fn clean_up_deleted_indices(&mut self, _ctx: &mut ModelContext<Self>) {}
+        pub fn drop_index(&mut self, _root_path: PathBuf, _ctx: &mut ModelContext<Self>) {}
+        pub fn handle_active_session_changed(&mut self, _active_directory: &Path) {}
+        pub fn handle_session_bootstrapped(&mut self, _working_directory: &Path) {}
+        pub fn has_in_progress_scan(&self) -> bool {
+            false
+        }
+        pub fn update_max_limits(
+            &mut self,
+            _max_indices_allowed: usize,
+            _max_files_per_repo: usize,
+            _embedding_generation_batch_size: usize,
+        ) {
+        }
+        pub fn can_create_new_indices(&self) -> bool {
+            false
+        }
+        pub fn get_codebase_index_statuses<'a>(
+            &'a self,
+            _ctx: &'a AppContext,
+        ) -> Vec<(PathBuf, CodebaseIndexStatus)> {
+            Vec::new()
+        }
+        pub fn get_codebase_index_status_for_path<'a>(
+            &'a self,
+            _path: &Path,
+            _ctx: &'a AppContext,
+        ) -> Option<CodebaseIndexStatus> {
+            None
+        }
+        pub fn get_codebase_paths(&self) -> impl Iterator<Item = &PathBuf> {
+            std::iter::empty()
+        }
+        pub fn num_active_indices(&self) -> usize {
+            0
+        }
+        pub fn index_directory(&mut self, _directory: PathBuf, _ctx: &mut ModelContext<Self>) {}
+        pub fn build_and_sync_codebase_index(
+            &mut self,
+            _root_path: PathBuf,
+            _ctx: &mut ModelContext<Self>,
+        ) {
+        }
+        pub fn reset_codebase_indexing(&mut self, _ctx: &mut ModelContext<Self>) {}
+        pub fn root_path_for_codebase(&self, _path: &Path) -> Option<PathBuf> {
+            None
+        }
+        pub fn try_manual_resync_codebase(&self, _repo_path: &Path, _ctx: &mut ModelContext<Self>) {
+        }
+        pub fn retrieve_relevant_files(
+            &mut self,
+            _query: String,
+            _root_path: &Path,
+            _ctx: &mut ModelContext<Self>,
+        ) -> Result<RetrievalID, Error> {
+            Err(Error::Disabled)
+        }
+        pub fn abort_retrieval_request(
+            &mut self,
+            _root_path: &Path,
+            _retrieval_id: RetrievalID,
+            _ctx: &mut ModelContext<Self>,
+        ) -> Result<(), Error> {
+            Ok(())
+        }
+        pub fn write_snapshot(&mut self, _working_directory: &Path, _ctx: &mut ModelContext<Self>) {
+        }
+        pub fn trigger_incremental_sync_for_path(
+            &mut self,
+            _path: &Path,
+            _ctx: &mut ModelContext<Self>,
+        ) {
+        }
+        pub fn schedule_next_scan(&mut self, _ctx: &mut ModelContext<Self>) {}
+    }
+
+    impl Entity for CodebaseIndexManager {
+        type Event = CodebaseIndexManagerEvent;
+    }
+
+    impl SingletonEntity for CodebaseIndexManager {}
+
+    // 便利:让 ModelHandle<CodebaseIndexManager> 可被 update/as_ref 调用
+    #[allow(dead_code)]
+    fn _model_handle_marker() -> Option<ModelHandle<CodebaseIndexManager>> {
+        None
+    }
+
+    // 让某些已使用 HashMap<PathBuf, CodebaseIndexStatus> 的代码继续可用
+    #[allow(dead_code)]
+    fn _statuses_marker(_m: HashMap<PathBuf, CodebaseIndexStatus>) {}
+}
+
+#[allow(dead_code)]
+fn _retrieval_marker() -> Option<RetrievalID> {
+    None
 }

@@ -44,6 +44,9 @@ pub struct MessageMarker {
 pub struct CompletedCompaction {
     pub user_msg_id: String,
     pub assistant_msg_id: String,
+    /// 本次摘要覆盖的 head 区 message ids,投影普通请求时全部隐藏。
+    #[serde(default)]
+    pub head_message_ids: Vec<String>,
     /// tail 起点 message id,用于 split 验证 / debug。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tail_start_id: Option<String>,
@@ -79,7 +82,7 @@ impl Default for CompactionState {
 }
 
 impl CompactionState {
-    pub const VERSION: u32 = 1;
+    pub const VERSION: u32 = 2;
     fn current_version() -> u32 {
         Self::VERSION
     }
@@ -130,15 +133,18 @@ impl CompactionState {
     }
 
     /// 所有应在拼请求时跳过的 message id(对齐 opencode `hidden`):
-    /// 已完成压缩的每个区间的 user_msg_id + assistant_msg_id。
+    /// 已完成压缩的每个区间的 head_message_ids + user_msg_id + assistant_msg_id。
     ///
     /// 注:这只是"原本要从历史里隐去的 message id 集",**不**包含摘要本身 —
-    /// 摘要文本由 `project_for_request` 在 head 第一个 hidden 位置插入合成消息覆盖。
+    /// 摘要文本由请求投影在 compaction trigger user_msg_id 位置插入合成消息覆盖。
     pub fn hidden_message_ids(&self) -> HashSet<String> {
-        self.completed
-            .iter()
-            .flat_map(|c| [c.user_msg_id.clone(), c.assistant_msg_id.clone()])
-            .collect()
+        let mut out = HashSet::new();
+        for c in &self.completed {
+            out.extend(c.head_message_ids.iter().cloned());
+            out.insert(c.user_msg_id.clone());
+            out.insert(c.assistant_msg_id.clone());
+        }
+        out
     }
 
     /// 调试 / 测试入口:看一条 marker 是否存在。
@@ -156,6 +162,7 @@ mod state_tests {
         CompletedCompaction {
             user_msg_id: uid.to_string(),
             assistant_msg_id: aid.to_string(),
+            head_message_ids: Vec::new(),
             tail_start_id: None,
             summary_text: Some(format!("summary-{aid}")),
             auto,
@@ -190,6 +197,34 @@ mod state_tests {
         assert!(h.contains("u2"));
         assert!(h.contains("a2"));
         assert_eq!(h.len(), 4);
+    }
+
+    #[test]
+    fn hidden_message_ids_includes_head_message_ids() {
+        let mut s = CompactionState::default();
+        let mut c = cc("u1", "a1", false);
+        c.head_message_ids = vec!["h1".to_string(), "h2".to_string(), "u1".to_string()];
+        s.push_completed(c);
+        let h = s.hidden_message_ids();
+        assert!(h.contains("h1"));
+        assert!(h.contains("h2"));
+        assert!(h.contains("u1"));
+        assert!(h.contains("a1"));
+        assert_eq!(h.len(), 4);
+    }
+
+    #[test]
+    fn v1_completed_compaction_deserializes_to_empty_head_message_ids() {
+        let json = r#"{
+            "user_msg_id":"u1",
+            "assistant_msg_id":"a1",
+            "tail_start_id":null,
+            "summary_text":"summary",
+            "auto":false,
+            "overflow":false
+        }"#;
+        let c: CompletedCompaction = serde_json::from_str(json).unwrap();
+        assert!(c.head_message_ids.is_empty());
     }
 
     #[test]

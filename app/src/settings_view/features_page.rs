@@ -59,8 +59,8 @@ use crate::terminal::alt_screen_reporting::{
     AltScreenReporting, FocusReportingEnabled, MouseReportingEnabled, ScrollReportingEnabled,
 };
 use crate::terminal::general_settings::{
-    AutoOpenCodeReviewPaneOnFirstAgentChange, GeneralSettings, LinkTooltip, QuitOnLastWindowClosed,
-    RestoreSession, ShowWarningBeforeQuitting,
+    AutoOpenCodeReviewPaneOnFirstAgentChange, GeneralSettings, LinkTooltip, PersistConversations,
+    QuitOnLastWindowClosed, RestoreSession, ShowWarningBeforeQuitting,
 };
 use crate::terminal::keys_settings::{
     ActivationHotkeyEnabled, CtrlTabBehaviorSetting, KeysSettings, KeysSettingsChangedEvent,
@@ -629,6 +629,7 @@ pub enum FeaturesPageAction {
     ToggleCopyOnSelect,
     ToggleNotifications,
     ToggleRestoreSession,
+    TogglePersistConversations,
     ToggleAutocompleteSymbols,
     ToggleLinuxClipboardSelection,
     ToggleOpenLinksInDesktopApp,
@@ -815,6 +816,10 @@ impl FeaturesPageAction {
             Self::ToggleRestoreSession => {
                 TelemetryEvent::ToggleRestoreSession(*GeneralSettings::as_ref(ctx).restore_session)
             }
+            Self::TogglePersistConversations => TelemetryEvent::FeaturesPageAction {
+                action: "TogglePersistConversations".to_string(),
+                value: to_string(*GeneralSettings::as_ref(ctx).persist_conversations),
+            },
             Self::ToggleAutocompleteSymbols => TelemetryEvent::FeaturesPageAction {
                 action: "ToggleAutocompleteSymbols".to_string(),
                 value: to_string(*AppEditorSettings::as_ref(ctx).autocomplete_symbols),
@@ -1371,6 +1376,13 @@ impl TypedActionView for FeaturesPageView {
             ToggleRestoreSession => {
                 GeneralSettings::handle(ctx).update(ctx, |general_settings, ctx| {
                     report_if_error!(general_settings.restore_session.toggle_and_save_value(ctx))
+                })
+            }
+            TogglePersistConversations => {
+                GeneralSettings::handle(ctx).update(ctx, |general_settings, ctx| {
+                    report_if_error!(general_settings
+                        .persist_conversations
+                        .toggle_and_save_value(ctx))
                 })
             }
             ToggleAutocompleteSymbols => {
@@ -2488,6 +2500,13 @@ impl FeaturesPageView {
             .is_supported_on_current_platform()
         {
             general_widgets.push(Box::new(SessionRestorationWidget::default()))
+        }
+
+        if general_settings
+            .persist_conversations
+            .is_supported_on_current_platform()
+        {
+            general_widgets.push(Box::new(ConversationPersistenceWidget::default()))
         }
 
         general_widgets.push(Box::new(SnackbarHeaderWidget::default()));
@@ -4371,6 +4390,55 @@ impl SettingsWidget for SessionRestorationWidget {
         } else {
             labeled_switch
         }
+    }
+}
+
+#[derive(Default)]
+struct ConversationPersistenceWidget {
+    switch_state: SwitchStateHandle,
+}
+
+impl SettingsWidget for ConversationPersistenceWidget {
+    type View = FeaturesPageView;
+
+    fn search_terms(&self) -> &str {
+        "persist conversations agent history database save 历史 对话 保存"
+    }
+
+    fn render(
+        &self,
+        view: &Self::View,
+        appearance: &Appearance,
+        app: &AppContext,
+    ) -> Box<dyn Element> {
+        let ui_builder = appearance.ui_builder();
+
+        let switch = ui_builder
+            .switch(self.switch_state.clone())
+            .check(*GeneralSettings::as_ref(app).persist_conversations)
+            .build()
+            .on_click(move |ctx, _, _| {
+                ctx.dispatch_typed_action(FeaturesPageAction::TogglePersistConversations);
+            })
+            .finish();
+
+        render_body_item::<FeaturesPageAction>(
+            crate::t!("settings-features-persist-conversations"),
+            None,
+            LocalOnlyIconState::for_setting(
+                PersistConversations::storage_key(),
+                PersistConversations::sync_to_cloud(),
+                &mut view
+                    .button_mouse_states
+                    .local_only_icon_tooltip_states
+                    .borrow_mut(),
+                app,
+            ),
+            ToggleState::Enabled,
+            appearance,
+            switch,
+            None,
+        )
     }
 }
 

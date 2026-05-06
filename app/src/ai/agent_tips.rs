@@ -1,4 +1,3 @@
-use crate::ai::persisted_workspace::PersistedWorkspace;
 use crate::palette::PaletteMode;
 use crate::server::telemetry::PaletteSource;
 use crate::settings::AISettings;
@@ -13,9 +12,9 @@ use crate::workspace::view::{
 };
 use crate::workspace::WorkspaceAction;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-use ai::index::full_source_code_embedding::manager::CodebaseIndexManager;
+
 use markdown_parser::FormattedTextFragment;
-use std::path::Path;
+
 use std::sync::LazyLock;
 use std::time::Duration;
 use warpui::keymap::Keystroke;
@@ -69,7 +68,6 @@ pub trait AITip: Clone {
 /// Kinds of agent tips for organizing and filtering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentTipKind {
-    CodebaseContext,
     WarpDrive,
     General,
     Mcp,
@@ -142,13 +140,7 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
             action: None,
             kind: AgentTipKind::Context,
         },
-        AgentTip {
-            description: crate::t!("agent-tip-init-index"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/codebase-context".to_string()),
-            binding_name: None,
-            action: None,
-            kind: AgentTipKind::CodebaseContext,
-        },
+
         AgentTip {
             description: crate::t!("agent-tip-agent-profiles"),
             link: Some("https://docs.warp.dev/agent-platform/capabilities/agent-profiles-permissions".to_string()),
@@ -396,20 +388,11 @@ impl AITip for AgentTip {
         fragments
     }
 
-    fn is_tip_applicable(&self, current_working_directory: Option<&str>, app: &AppContext) -> bool {
-        // Tips about indexing the repo are only applicable if the current directory is not already indexed.
-        if matches!(self.kind, AgentTipKind::CodebaseContext) {
-            let Some(cwd) = current_working_directory else {
-                return true;
-            };
-            let Some(root) = PersistedWorkspace::as_ref(app).root_for_workspace(Path::new(cwd))
-            else {
-                return true;
-            };
-            return CodebaseIndexManager::as_ref(app)
-                .get_codebase_index_status_for_path(root, app)
-                .is_none();
-        }
+    fn is_tip_applicable(
+        &self,
+        _current_working_directory: Option<&str>,
+        _app: &AppContext,
+    ) -> bool {
         true
     }
 }

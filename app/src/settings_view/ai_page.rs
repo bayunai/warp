@@ -26,12 +26,12 @@ use crate::settings::{
     AIAutoDetectionEnabled, AICommandDenylist, AISettingsChangedEvent,
     AgentModeCodingPermissionsType, AgentModeCommandExecutionDenylist,
     AgentModeCommandExecutionPredicate, AgentModeQuerySuggestionsEnabled, AwsBedrockAutoLogin,
-    AwsBedrockCredentialsEnabled, CodeSettings, CodebaseContextEnabled, FileBasedMcpEnabled,
-    GitOperationsAutogenEnabled, IncludeAgentCommandsInHistory, IntelligentAutosuggestionsEnabled,
-    MemoryEnabled, NLDInTerminalEnabled, NaturalLanguageAutosuggestionsEnabled,
-    OrchestrationEnabled, RuleSuggestionsEnabled, SharedBlockTitleGenerationEnabled,
-    ShouldRenderCLIAgentToolbar, ShouldRenderUseAgentToolbarForUserCommands, ShowAgentTips,
-    ShowConversationHistory, ShowHintText, ThinkingDisplayMode, VoiceInputEnabled,
+    AwsBedrockCredentialsEnabled, FileBasedMcpEnabled, GitOperationsAutogenEnabled,
+    IncludeAgentCommandsInHistory, IntelligentAutosuggestionsEnabled, MemoryEnabled,
+    NLDInTerminalEnabled, NaturalLanguageAutosuggestionsEnabled, OrchestrationEnabled,
+    RuleSuggestionsEnabled, SharedBlockTitleGenerationEnabled, ShouldRenderCLIAgentToolbar,
+    ShouldRenderUseAgentToolbarForUserCommands, ShowAgentTips, ShowConversationHistory,
+    ShowHintText, ThinkingDisplayMode, VoiceInputEnabled,
 };
 use crate::terminal::session_settings::{SessionSettings, SessionSettingsChangedEvent};
 use crate::terminal::CLIAgent;
@@ -347,19 +347,6 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
         .with_group(bindings::BindingGroup::WarpAi)],
         app,
     );
-    if !FeatureFlag::FullSourceCodeEmbedding.is_enabled() {
-        ToggleSettingActionPair::add_toggle_setting_action_pairs_as_bindings(
-            vec![ToggleSettingActionPair::new(
-                &crate::t!("toggle-suffix-codebase-index"),
-                builder(SettingsAction::AI(
-                    AISettingsPageAction::ToggleCodebaseContext,
-                )),
-                &(context.clone() & id!(flags::IS_ANY_AI_ENABLED)),
-                flags::IS_CODEBASE_INDEXING_ENABLED,
-            )],
-            app,
-        );
-    }
 }
 
 pub struct AISettingsPageView {
@@ -2213,7 +2200,6 @@ pub enum AISettingsPageAction {
     ToggleVoiceInput,
     ToggleCanUseWarpCreditsWithByok,
     HyperlinkClick(HyperlinkUrl),
-    ToggleCodebaseContext,
     ToggleShowInputHintText,
     ToggleShowAgentTips,
     SetThinkingDisplayMode(ThinkingDisplayMode),
@@ -2325,6 +2311,19 @@ pub enum AISettingsPageAction {
         provider_id: String,
         model_index: usize,
         max_output_tokens: u32,
+    },
+    AddAgentProviderHeader {
+        provider_id: String,
+    },
+    RemoveAgentProviderHeader {
+        provider_id: String,
+        header_index: usize,
+    },
+    UpdateAgentProviderHeader {
+        provider_id: String,
+        header_index: usize,
+        key: String,
+        value: String,
     },
     FetchAgentProviderModels {
         provider_id: String,
@@ -2669,24 +2668,7 @@ impl TypedActionView for AISettingsPageView {
                 }
                 ctx.notify();
             }
-            AISettingsPageAction::ToggleCodebaseContext => {
-                match CodeSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    settings.codebase_context_enabled.toggle_and_save_value(ctx)
-                }) {
-                    Ok(new_value) => {
-                        send_telemetry_from_ctx!(
-                            TelemetryEvent::ToggleCodebaseContext {
-                                is_codebase_context_enabled: new_value
-                            },
-                            ctx
-                        );
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to set value for Codebase Context: {e:?}");
-                    }
-                }
-                ctx.notify();
-            }
+
             AISettingsPageAction::ToggleVoiceInput => {
                 match AISettings::handle(ctx).update(ctx, |settings, ctx| {
                     settings
@@ -3340,6 +3322,50 @@ impl TypedActionView for AISettingsPageView {
                         }
                     },
                 );
+            }
+            AISettingsPageAction::AddAgentProviderHeader { provider_id } => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    let mut providers = settings.agent_providers.value().clone();
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
+                        p.extra_headers.push((String::new(), String::new()));
+                    }
+                    let _ = settings.agent_providers.set_value(providers, ctx);
+                });
+                // header 行数量变化后需要新建/销毁 EditorView handle,仅 notify 不会刷新 rows。
+                self.rebuild_current_page(ctx);
+            }
+            AISettingsPageAction::RemoveAgentProviderHeader {
+                provider_id,
+                header_index,
+            } => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    let mut providers = settings.agent_providers.value().clone();
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
+                        if *header_index < p.extra_headers.len() {
+                            p.extra_headers.remove(*header_index);
+                        }
+                    }
+                    let _ = settings.agent_providers.set_value(providers, ctx);
+                });
+                // 删除同样会导致 index 与现有 HeaderRow handle 漂移,需要重建页面。
+                self.rebuild_current_page(ctx);
+            }
+            AISettingsPageAction::UpdateAgentProviderHeader {
+                provider_id,
+                header_index,
+                key,
+                value,
+            } => {
+                AISettings::handle(ctx).update(ctx, |settings, ctx| {
+                    let mut providers = settings.agent_providers.value().clone();
+                    if let Some(p) = providers.iter_mut().find(|p| p.id == *provider_id) {
+                        if let Some(h) = p.extra_headers.get_mut(*header_index) {
+                            *h = (key.clone(), value.clone());
+                        }
+                    }
+                    let _ = settings.agent_providers.set_value(providers, ctx);
+                });
+                ctx.notify();
             }
             AISettingsPageAction::EnsureModelsDevLoaded => {
                 use crate::ai::agent_providers::models_dev;
@@ -4514,8 +4540,6 @@ impl SettingsWidget for ActiveAIWidget {
 
 #[derive(Default)]
 struct AgentsWidget {
-    codebase_context_toggle: SwitchStateHandle,
-    codebase_context_link_index: HighlightedHyperlink,
     show_in_prompt_checkbox: MouseStateHandle,
 }
 
@@ -4943,18 +4967,6 @@ impl AgentsWidget {
             widget_children.push(mcp_permissions);
         }
 
-        if !FeatureFlag::FullSourceCodeEmbedding.is_enabled() {
-            let codebase_context = Self::render_codebase_context_outline_generation_setting(
-                self.codebase_context_toggle.clone(),
-                self.codebase_context_link_index.clone(),
-                view,
-                ai_settings,
-                appearance,
-                app,
-            );
-            widget_children.push(codebase_context);
-        }
-
         Flex::column().with_children(widget_children).finish()
     }
 
@@ -5185,60 +5197,6 @@ impl AgentsWidget {
                 .then(|| appearance.theme().disabled_ui_text_color()),
             &view.base_model_dropdown,
         )
-    }
-
-    fn render_codebase_context_outline_generation_setting(
-        codebase_context_toggle: SwitchStateHandle,
-        codebase_context_link_index: HighlightedHyperlink,
-        view: &AISettingsPageView,
-        ai_settings: &AISettings,
-        appearance: &Appearance,
-        app: &warpui::AppContext,
-    ) -> Box<dyn Element> {
-        let code_settings = CodeSettings::as_ref(app);
-        let toggle = render_ai_setting_toggle::<CodebaseContextEnabled>(
-            crate::t!("settings-ai-codebase-context"),
-            AISettingsPageAction::ToggleCodebaseContext,
-            *code_settings.codebase_context_enabled,
-            ai_settings.is_any_ai_enabled(app),
-            codebase_context_toggle,
-            &view.local_only_icon_tooltip_states,
-            app,
-        );
-
-        let codebase_context_description = vec![
-            FormattedTextFragment::plain_text(
-                "Allow the Warp Agent to generate an outline of your codebase that can be used for context. No code is ever stored on our servers. ",
-            ),
-            FormattedTextFragment::hyperlink(
-                "Learn more",
-                "https://docs.warp.dev/agent-platform/capabilities/codebase-context",
-            ),
-        ];
-        let description = Container::new(
-            FormattedTextElement::new(
-                FormattedText::new([FormattedTextLine::Line(codebase_context_description)]),
-                CONTENT_FONT_SIZE,
-                appearance.ui_font_family(),
-                appearance.ui_font_family(),
-                styles::description_font_color(ai_settings.is_any_ai_enabled(app), app).into(),
-                codebase_context_link_index,
-            )
-            .with_hyperlink_font_color(appearance.theme().accent().into_solid())
-            .register_default_click_handlers(|url, ctx, _| {
-                ctx.dispatch_typed_action(AISettingsPageAction::HyperlinkClick(url));
-            })
-            .finish(),
-        )
-        .with_margin_top(styles::DESCRIPTION_NEGATIVE_MARGIN_OFFSET)
-        .with_margin_bottom(styles::DESCRIPTION_MARGIN_BOTTOM)
-        .with_margin_right(styles::TOGGLE_WIDTH_MARGIN)
-        .finish();
-
-        Flex::column()
-            .with_child(toggle)
-            .with_child(description)
-            .finish()
     }
 
     fn render_mcp_permissions(
