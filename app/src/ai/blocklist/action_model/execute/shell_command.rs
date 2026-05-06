@@ -44,19 +44,25 @@ use super::{ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessA
 ///
 /// Prefer unobfuscated grid text; some shells / timing paths leave the primary serialization empty
 /// while `output_to_string()` (displayed-output path) or the force-full path still has bytes.
+///
+/// Fallback: when output grids are empty (e.g. missing preexec / early-complete timing), extract
+/// the stdout portion from the command grid (everything after the first line).
 fn agent_shell_command_block_output(block: &Block) -> String {
     let primary = block.output_with_secrets_unobfuscated();
     if !primary.trim().is_empty() {
         return primary;
     }
+
     let displayed = block.output_to_string();
     if !displayed.trim().is_empty() {
         return displayed;
     }
+
     let forced = block.output_to_string_force_full_grid_contents();
     if !forced.trim().is_empty() {
         return forced;
     }
+
     let command_grid = block.command_with_secrets_unobfuscated(false);
     command_grid
         .split_once('\n')
@@ -659,43 +665,40 @@ impl ShellCommandExecutor {
 
             // At this point, we've either received block metadata or we've timed out.
             // Check the current state of the block and produce a result accordingly.
-            // Scope the lock so no `MutexGuard` overlaps `.await` (required for `Send`).
-            let result = {
-                let model = terminal_model.lock();
-                match block_selector.get_block(&model) {
-                    Some(block) => {
-                        if block.finished() {
-                            ActionResult::CommandFinished {
-                                block_id: block.id().clone(),
-                                output: agent_shell_command_block_output(block),
-                                exit_code: block.exit_code(),
-                            }
+            let model = terminal_model.lock();
+            let result = match block_selector.get_block(&model) {
+                Some(block) => {
+                    if block.finished() {
+                        ActionResult::CommandFinished {
+                            block_id: block.id().clone(),
+                            output: agent_shell_command_block_output(block),
+                            exit_code: block.exit_code(),
+                        }
+                    } else {
+                        let grid_contents = if model.is_alt_screen_active() {
+                            formatted_terminal_contents_for_input(
+                                model.alt_screen().grid_handler(),
+                                None,
+                                CURSOR_MARKER,
+                            )
                         } else {
-                            let grid_contents = if model.is_alt_screen_active() {
-                                formatted_terminal_contents_for_input(
-                                    model.alt_screen().grid_handler(),
-                                    None,
-                                    CURSOR_MARKER,
-                                )
-                            } else {
-                                formatted_terminal_contents_for_input(
-                                    block.output_grid().grid_handler(),
-                                    // TODO(vorporeal): This is probably too large.
-                                    Some(1000),
-                                    CURSOR_MARKER,
-                                )
-                            };
-                            ActionResult::LongRunningCommandSnapshot {
-                                block_id: block.id().clone(),
-                                grid_contents,
-                                cursor: CURSOR_MARKER,
-                                is_alt_screen_active: model.is_alt_screen_active(),
-                                is_preempted,
-                            }
+                            formatted_terminal_contents_for_input(
+                                block.output_grid().grid_handler(),
+                                // TODO(vorporeal): This is probably too large.
+                                Some(1000),
+                                CURSOR_MARKER,
+                            )
+                        };
+                        ActionResult::LongRunningCommandSnapshot {
+                            block_id: block.id().clone(),
+                            grid_contents,
+                            cursor: CURSOR_MARKER,
+                            is_alt_screen_active: model.is_alt_screen_active(),
+                            is_preempted,
                         }
                     }
-                    None => ActionResult::BlockNotFound,
                 }
+                None => ActionResult::BlockNotFound,
             };
 
             match result {

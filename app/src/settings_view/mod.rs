@@ -1207,6 +1207,7 @@ impl SettingsView {
             SettingsNavItem::Page(SettingsSection::Appearance),
             SettingsNavItem::Page(SettingsSection::Features),
             SettingsNavItem::Page(SettingsSection::Keybindings),
+            SettingsNavItem::Page(SettingsSection::Warpify),
             // 去中心化分支:Privacy 页恢复入口。原以为"全部内容是云端能力"判断有误——
             // 页内核心 widget 多数纯本地:SecretRedactionWidget(敏感信息混淆,本地正则)、
             // NetworkLogWidget(网络日志控制台,本地代理)、DataManagementWidget(外链)、
