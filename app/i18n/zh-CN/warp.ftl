@@ -2060,7 +2060,6 @@ keybinding-desc-nbeditor-toggle-case-sensitive-find = 切换大小写敏感搜�
 # 面板组 / 撤销关闭 binding desc
 keybinding-desc-get-started-terminal-session = 终端会话
 keybinding-desc-undo-close-reopen-session = 重新打开已关闭的会话
-keybinding-desc-pane-share-pane = 分享面板
 keybinding-desc-right-panel-toggle-maximize-code-review = 切换最大化代码审阅面板
 
 # 工作区输入同步 binding desc
@@ -2314,7 +2313,6 @@ menu-ai-block-copy-path = 复制路径
 menu-ai-block-copy-command = 复制命令
 menu-ai-block-copy-git-branch = 复制 git 分支
 menu-ai-block-save-as-prompt = 另存为提示词
-menu-ai-block-share-conversation = 分享对话
 menu-ai-block-copy-conversation-text = 复制对话文本
 menu-ai-block-fork-from-here = 从此处分叉
 menu-ai-block-rewind-to-before-here = 回退到此处之前
@@ -2560,7 +2558,7 @@ drive-import-file-upload-error = 文件上传到服务器失败
 drive-import-folder-upload-error = 文件夹上传到服务器失败
 
 # Drive 主面板和 workflow 编辑器(app/src/drive/index.rs, app/src/drive/workflows/*)
-drive-title = Warp Drive
+drive-title = Drive
 drive-create-team-text = 与团队成员共享命令和知识。
 drive-join-team-header = 与已经在 Warp 上的 { $count } 位团队成员协作。
 drive-environment-variables = 环境变量
@@ -2599,7 +2597,6 @@ drive-copy-variables = 复制变量
 drive-load-in-subshell = 在子 shell 中加载
 drive-delete-forever = 永久删除
 drive-rename = 重命名
-drive-share = 分享
 drive-retry = 重试
 drive-move-to-space = 移动到 { $space }
 drive-open-on-desktop = 在桌面端打开
@@ -2682,7 +2679,6 @@ workspace-conversation-list-no-matching = 没有匹配的对话
 workspace-conversation-list-delete = 删除
 workspace-conversation-list-delete-in-progress-error = 对话进行中时无法删除。
 workspace-conversation-list-delete-ambient-tooltip = 无法删除环境智能体对话
-workspace-conversation-list-share-conversation = 分享对话
 workspace-conversation-list-fork-new-pane = 在新窗格中派生
 workspace-conversation-list-fork-new-tab = 在新标签页中派生
 workspace-conversation-list-fallback-title = 对话
@@ -2787,13 +2783,6 @@ global-search-unavailable-description = 全局搜索需要访问本地工作区�
 global-search-remote-description = 全局搜索需要访问本地工作区,远程会话不支持此功能
 global-search-unsupported-session-description = 全局搜索目前不支持 Git Bash 或 WSL。
 global-search-failed = 全局搜索失败。
-
-# Reward view (app/src/reward_view.rs)
-reward-title = 恭喜！
-reward-subtitle-sent-referral = 你因成功邀请他人使用 Warp，获得了一个专属 Warp 主题。
-reward-subtitle-received-referral = 你因通过邀请加入 Warp，获得了一个专属 Warp 主题。
-reward-cta = 立即试用！
-reward-accessibility-help = 按回车键打开主题选择器，或按 Esc 键关闭。
 
 # Wasm NUX dialog (app/src/wasm_nux_dialog.rs)
 wasm-nux-open-desktop-title = 在 Warp 桌面版中打开？

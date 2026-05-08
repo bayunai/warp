@@ -1,22 +1,583 @@
 ---
-import Layout from '../layouts/Layout.astro';
-import Hero from '../components/Hero.astro';
-import Stats from '../components/Stats.astro';
-import Compare from '../components/Compare.astro';
-import Features from '../components/Features.astro';
-import ProviderShowcase from '../components/ProviderShowcase.astro';
-import FAQ from '../components/FAQ.astro';
-import CTA from '../components/CTA.astro';
+import LandingLayout from '../layouts/LandingLayout.astro';
 
-const locale = 'zh-CN' as const;
+const heroAscii = `▓▓▒▒░░  ▓▓▒▒░░  ▓▓▒▒░░  ▓▓▒▒░░
+░▒▓█  $ openwarp
+█▓▒░  ▸ provider: deepseek
+░▒▓█  ▸ model:    v4-pro
+█▓▒░  ▸ ssh:      prod-edge
+░▒▓█  ▸ block:    ▓▓▓▓▓▓▓▓▓▓
+█▓▒░  ▸ context:  cwd=~/openwarp
+░▒▓█
+█▓▒░  ╭──────────────────────╮
+░▒▓█  │  AI agent ready ▌    │
+█▓▒░  ╰──────────────────────╯
+░▒▓█
+█▓▒░  ▓▓▒▒░░  ▓▓▒▒░░  ▓▓▒▒░░  ░
+░▒▓█  ▓▓▒▒░░  ▓▓▒▒░░  ▓▓▒▒░░  ▒
+█▓▒░  ▓▓▒▒░░  ▓▓▒▒░░  ▓▓▒▒░░  ▓
+░▒▓█  ▓▓▒▒░░  ▓▓▒▒░░  ▓▓▒▒░░  █  `;
+
+const logos = ['DeepSeek', 'OpenAI', 'Anthropic', 'Gemini', 'Ollama', 'Kimi', 'Qwen', 'GLM', 'Mistral', 'Together', 'Groq', 'SiliconFlow'];
+const repo = 'https://github.com/zerx-lab/warp';
 ---
+<LandingLayout>
+  <!-- HERO -->
+  <section class="hero">
+    <div class="wrap hero-grid">
+      <div class="fade-in">
+        <h1 data-lang="en">The Open<br/><span class="em">Warp</span> terminal<span class="dot">.</span></h1>
+        <h1 data-lang="zh">开放的 <span class="em">Warp</span> 终端<span class="dot">.</span></h1>
+        <p class="lede" data-lang="en">A fully decentralized fork of Warp. Six native AI protocols, third-party CLI agents as first-class Blocks, a built-in SSH + tmux host manager. Every credential, conversation and key stays on your machine.</p>
+        <p class="lede" data-lang="zh">完全去中心化的 Warp 社区 fork。六套原生 AI 协议、第三方 CLI agent 一等公民、内置 SSH + tmux 管理器。所有凭证、对话与密钥都留在你的机器上。</p>
+        <div class="hero-cta">
+          <a class="btn" href="#install"><span data-lang="en">Install</span><span data-lang="zh">安装</span><span class="arr">→</span></a>
+          <a class="btn alt" href={repo} target="_blank" rel="noopener">GitHub</a>
+        </div>
+      </div>
+      <div class="hero-art fade-in" aria-hidden="true">
+        <pre class="ascii-fill">{heroAscii}</pre>
+        <span class="badge">v0 · OSS</span>
+        <span class="ow-tag">/* OpenWarp ▌ */</span>
+      </div>
+    </div>
+  </section>
 
-<Layout locale={locale}>
-  <Hero locale={locale} />
-  <Stats locale={locale} />
-  <Compare locale={locale} />
-  <Features locale={locale} />
-  <ProviderShowcase locale={locale} />
-  <FAQ locale={locale} />
-  <CTA locale={locale} />
-</Layout>
+  <!-- LOGOS -->
+  <div class="logos">
+    <div class="logos-track">
+      {[...logos, ...logos].map((l) => <span class="item">{l}</span>)}
+    </div>
+  </div>
+
+  <!-- QUOTE -->
+  <section class="quote fade-in">
+    <div class="wrap">
+      <blockquote>
+        <span data-lang="en">“I shouldn't have to ship my prompts, my keys, and my <span class="accent">cwd</span> to a server I don't control just to use a smart terminal.”</span>
+        <span data-lang="zh">“我不该为了用一个聪明的终端,就把 prompt、API key 和当前目录全交给一台我不掌控的服务器。”</span>
+      </blockquote>
+      <div class="who">
+        <span data-lang="en"><strong>The thesis behind OpenWarp</strong> · COMMUNITY FORK</span>
+        <span data-lang="zh"><strong>OpenWarp 的初衷</strong> · 社区 FORK</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- HOW IT WORKS -->
+  <section class="band-dark framed dark" id="how">
+    <div class="wrap">
+      <div class="ascii-rule">{'+'.padEnd(180, ' +')}</div>
+      <div class="sec-head fade-in">
+        <div>
+          <div class="sec-label"><span class="br">[</span> HOW <span class="br">]</span></div>
+          <h2 class="sec-h2" data-lang="en">How <span class="em">OpenWarp</span> handles every prompt.</h2>
+          <h2 class="sec-h2" data-lang="zh">每一次对话,OpenWarp <span class="em">是这样处理的</span>.</h2>
+          <p class="sec-sub" data-lang="en">OpenWarp keeps the upstream Warp UI — Blocks, Workflows, command suggestions — and replaces the closed AI gateway with explicit, local, editable plumbing.</p>
+          <p class="sec-sub" data-lang="zh">OpenWarp 完整保留上游 Warp 的 Blocks / Workflows / 命令建议,只把封闭的 AI gateway 换成显式、本地、可编辑的管线。</p>
+        </div>
+        <span class="pill" data-lang="en">3 stages</span>
+        <span class="pill" data-lang="zh">3 阶段</span>
+      </div>
+
+      <div class="how-cards">
+        <div class="how-card fade-in">
+          <div class="num">STAGE 01</div>
+          <div class="ttl" data-lang="en">Captures your block</div>
+          <div class="ttl" data-lang="zh">捕获你的 Block</div>
+          <div class="desc" data-lang="en">Each command becomes a Block with its cwd, env, exit code — the full unit of context.</div>
+          <div class="desc" data-lang="zh">每条命令封装成 Block,带上 cwd / 环境 / 退出码 ── 完整的上下文单元。</div>
+          <div class="vis">
+            <div class="term-mock">
+              <div class="term-mock__bar">
+                <div class="term-mock__dots"><span></span><span></span><span></span></div>
+                <div class="term-mock__title">~/openwarp <span class="ok">● exit 0</span></div>
+              </div>
+              <div class="term-mock__body">
+                <div class="term-mock__row"><span class="p">$</span> npm run build</div>
+                <div class="term-mock__row dim">› vite v5.4 · production</div>
+                <div class="term-mock__row dim">› 248 modules transformed</div>
+                <div class="term-mock__row"><span class="ok">✓ built in 1.24s</span></div>
+                <div class="term-mock__divider"></div>
+                <div class="term-mock__row"><span class="term-mock__chip">block</span><span class="dim">cwd · env · stdout · exit</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="how-card fade-in">
+          <div class="num">STAGE 02</div>
+          <div class="ttl" data-lang="en">Routes to your provider</div>
+          <div class="ttl" data-lang="zh">路由到你的 Provider</div>
+          <div class="desc" data-lang="en">Your <code>settings.toml</code> picks the model. The request goes straight from your machine to the endpoint — no middle hop, no gateway.</div>
+          <div class="desc" data-lang="zh">由 <code>settings.toml</code> 决定走哪个模型。请求从你的设备直连端点,没有中间一跳、没有 gateway。</div>
+          <div class="vis">
+            <div class="term-mock">
+              <div class="term-mock__bar">
+                <div class="term-mock__dots"><span></span><span></span><span></span></div>
+                <div class="term-mock__title">~/.config/openwarp/settings.toml</div>
+              </div>
+              <div class="term-mock__body">
+                <div class="term-mock__row"><span class="k">[providers.deepseek]</span></div>
+                <div class="term-mock__row">protocol = <span class="s">"deepseek"</span></div>
+                <div class="term-mock__row">base_url = <span class="s">"https://api.deepseek.com/v1"</span></div>
+                <div class="term-mock__row">api_key  = <span class="s">"sk-•••"</span></div>
+                <div class="term-mock__divider"></div>
+                <div class="term-mock__row"><span class="dim">→</span> POST /chat/completions <span class="ok">200</span> <span class="term-mock__chip ok">direct</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="how-card fade-in">
+          <div class="num">STAGE 03</div>
+          <div class="ttl" data-lang="en">Streams back into Blocks</div>
+          <div class="ttl" data-lang="zh">流式回写到 Block</div>
+          <div class="desc" data-lang="en">SSE tokens land in the same Block UI you already know. Local tools — shell / read / edit / search / mcp — execute on box and re-enter the loop.</div>
+          <div class="desc" data-lang="zh">SSE token 流式回到熟悉的 Block UI。shell / read / edit / search / mcp 等本地工具就地执行,再回到循环。</div>
+          <div class="vis">
+            <div class="term-mock">
+              <div class="term-mock__bar">
+                <div class="term-mock__dots"><span></span><span></span><span></span></div>
+                <div class="term-mock__title">block · streaming <span class="ok">● live</span></div>
+              </div>
+              <div class="term-mock__body">
+                <div class="term-mock__row"><span class="term-mock__chip">ai</span><span class="dim">deepseek-reasoner · 18 tools</span></div>
+                <div class="term-mock__row term-mock__stream"><span>The </span><span>build </span><span>finished </span><span>in </span><span>1.24s, </span><span>248 mods.</span><span class="term-mock__caret"></span></div>
+                <div class="term-mock__divider"></div>
+                <div class="term-mock__row dim">tool: <span class="k">read_file</span>(vite.config.ts) <span class="ok">✓</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- providers -->
+      <div class="catch-h fade-in">
+        <h3 data-lang="en">Bring any provider you want.</h3>
+        <h3 data-lang="zh">想接什么 provider,就接什么.</h3>
+        <p data-lang="en">Six native protocols — OpenAI / OpenAIResp / Anthropic / Gemini / Ollama / DeepSeek — plus any OpenAI-compatible endpoint. One TOML file, no gateway.</p>
+        <p data-lang="zh">六套原生协议 ── OpenAI / OpenAIResp / Anthropic / Gemini / Ollama / DeepSeek ── 加任意 OpenAI 兼容端点。一个 TOML 文件,不走 gateway。</p>
+      </div>
+      <div class="catch-tabs" role="tablist">
+        <button class="active" data-pf="frontier" type="button">FRONTIER</button>
+        <button data-pf="oss" type="button">GATEWAYS</button>
+        <button data-pf="local" type="button">LOCAL</button>
+      </div>
+
+      <div class="stat-grid" data-pf-pane="frontier">
+        <div class="stat-card">
+          <div class="label">DEEPSEEK</div>
+          <div class="h">deepseek family</div>
+          <div class="sub">native protocol · thinking + tools</div>
+          <div class="bar"><span style="width: 92%"></span></div>
+          <div class="desc" data-lang="en">Native DeepSeek protocol — reasoning trace and tool calling wired through, no compatibility shim.</div>
+          <div class="desc" data-lang="zh">DeepSeek 原生协议,思考链与 tool calling 已打通,没有兼容垫片。</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">ANTHROPIC</div>
+          <div class="h">claude 4.x family</div>
+          <div class="sub">native protocol · prompt cache</div>
+          <div class="bar"><span style="width: 88%"></span></div>
+          <div class="desc" data-lang="en">Tool-use loop, prompt caching and image inputs all bound to the native API.</div>
+          <div class="desc" data-lang="zh">工具循环、prompt cache、图像输入全部绑到原生 API。</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">OPENAI · GEMINI</div>
+          <div class="h">gpt + gemini</div>
+          <div class="sub">native protocol · function calling</div>
+          <div class="bar"><span style="width: 84%"></span></div>
+          <div class="desc" data-lang="en">OpenAI Chat + Responses API and Gemini are first-class — function calling, SSE, no proxy.</div>
+          <div class="desc" data-lang="zh">OpenAI Chat + Responses 与 Gemini 都是一等公民 ── function calling、SSE、不走代理。</div>
+        </div>
+      </div>
+
+      <div class="stat-grid" data-pf-pane="oss" hidden>
+        <div class="stat-card">
+          <div class="label">OPENROUTER</div>
+          <div class="h">aggregator</div>
+          <div class="sub">one key · hundreds of models</div>
+          <div class="bar"><span style="width: 78%"></span></div>
+          <div class="desc" data-lang="en">Point <code>base_url</code> at OpenRouter — one key reaches the whole catalog.</div>
+          <div class="desc" data-lang="zh">把 <code>base_url</code> 指到 OpenRouter,一把 key 接入全目录。</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">QWEN · GLM · KIMI</div>
+          <div class="h">openai-compatible</div>
+          <div class="sub">SiliconFlow / DashScope / Z.ai / Moonshot</div>
+          <div class="bar"><span style="width: 74%"></span></div>
+          <div class="desc" data-lang="en">Self-hosted or hosted — any OpenAI-compatible endpoint just works.</div>
+          <div class="desc" data-lang="zh">自托管或托管均可,任意 OpenAI 兼容端点直连。</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">GROQ · TOGETHER</div>
+          <div class="h">fast inference gateways</div>
+          <div class="sub">openai-compatible · low latency</div>
+          <div class="bar"><span style="width: 72%"></span></div>
+          <div class="desc" data-lang="en">Production-grade hosted inference — drop-in via the OpenAI-compatible adapter.</div>
+          <div class="desc" data-lang="zh">生产级托管推理 ── 通过 OpenAI 兼容适配器直接接入。</div>
+        </div>
+      </div>
+
+      <div class="stat-grid" data-pf-pane="local" hidden>
+        <div class="stat-card">
+          <div class="label">OLLAMA</div>
+          <div class="h">native protocol</div>
+          <div class="sub">localhost:11434 · no keys</div>
+          <div class="bar"><span style="width: 70%"></span></div>
+          <div class="desc" data-lang="en">First-class Ollama protocol bound — no key, no network, just <code>ollama serve</code>.</div>
+          <div class="desc" data-lang="zh">原生 Ollama 协议直连,不要 key、不出网,只需要 <code>ollama serve</code>。</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">LM STUDIO</div>
+          <div class="h">openai-compatible</div>
+          <div class="sub">localhost:1234</div>
+          <div class="bar"><span style="width: 60%"></span></div>
+          <div class="desc" data-lang="en">Drop-in OpenAI-compatible endpoint — point <code>base_url</code> and you're done.</div>
+          <div class="desc" data-lang="zh">即插即用的 OpenAI 兼容端点 ── 改 <code>base_url</code> 就完事。</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">VLLM</div>
+          <div class="h">your cluster</div>
+          <div class="sub">your-cluster:8000</div>
+          <div class="bar"><span style="width: 56%"></span></div>
+          <div class="desc" data-lang="en">Production-grade inference on your own hardware, fine-tunes included.</div>
+          <div class="desc" data-lang="zh">生产级推理跑你自己的硬件,微调模型一并支持。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ADAPTS -->
+  <section class="band-light" id="adapt">
+    <div class="wrap">
+      <div class="ascii-rule">{'~'.repeat(160)}</div>
+      <div class="sec-label"><span class="br">[</span> 02 / 04 <span class="br">]</span></div>
+      <h2 class="sec-h2 fade-in" data-lang="en">Adapts to <span class="em">your terminal</span>.</h2>
+      <h2 class="sec-h2 fade-in" data-lang="zh">完全 <span class="em">服从</span> 你的终端.</h2>
+      <p class="sec-sub" data-lang="en">Your provider, your prompts, your CLI agents. The AI side of OpenWarp is your house — not ours.</p>
+      <p class="sec-sub" data-lang="zh">你的 provider、你的 prompt、你的 CLI agent。OpenWarp 的 AI 层只是房子,屋主始终是你。</p>
+
+      <div class="reviews-grid three">
+        <div class="review-card fade-in">
+          <div class="h" data-lang="en">Bring your own provider</div>
+          <div class="h" data-lang="zh">自带 Provider</div>
+          <div class="d" data-lang="en">Point at any OpenAI-compatible endpoint, or speak the native protocol of DeepSeek / Anthropic / Gemini / Ollama.</div>
+          <div class="d" data-lang="zh">指向任意 OpenAI 兼容端点,或直接走 DeepSeek / Anthropic / Gemini / Ollama 的原生协议。</div>
+          <div class="vis">
+            <pre class="mini-toml"><span class="c"># settings.toml</span>
+<span class="k">[providers.deepseek]</span>
+base_url = <span class="s">"https://api.deepseek.com/v1"</span>
+protocol = <span class="s">"deepseek"</span>
+api_key  = <span class="s">"sk-•••"</span></pre>
+          </div>
+        </div>
+
+        <div class="review-card fade-in">
+          <div class="h" data-lang="en">Editable prompts, minijinja roles</div>
+          <div class="h" data-lang="zh">可编辑 Prompt · minijinja 模板</div>
+          <div class="d" data-lang="en">8 templates ported from opencode, rendered live by minijinja against cwd / language / role. Switch per Block — no server round-trip.</div>
+          <div class="d" data-lang="zh">8 套从 opencode 移植的模板,minijinja 按 cwd / 语言 / 角色实时渲染,每个 Block 独立切换 ── 不走服务端。</div>
+          <div class="vis role-list">
+            <span class="chip k">default</span>
+            <span class="chip">anthropic</span>
+            <span class="chip">gpt</span>
+            <span class="chip">beast</span>
+            <span class="chip">gemini</span>
+            <span class="chip">kimi</span>
+            <span class="chip">codex</span>
+            <span class="chip">trinity</span>
+          </div>
+        </div>
+
+        <div class="review-card fade-in">
+          <div class="h" data-lang="en">Bring any CLI agent</div>
+          <div class="h" data-lang="zh">任何 CLI agent 都能进 Block</div>
+          <div class="d" data-lang="en">First-class adapters for DeepSeek-TUI, Codex CLI and Claude Code. OSC9 / OSC777 routes their notifications into the same Block lifecycle and notification center.</div>
+          <div class="d" data-lang="zh">已为 DeepSeek-TUI / Codex CLI / Claude Code 接好 first-class 适配,OSC9 / OSC777 把它们的通知统一收进 Block 生命周期与通知中心。</div>
+          <div class="vis agent-list">
+            <span class="chip">deepseek-tui</span>
+            <span class="chip">codex</span>
+            <span class="chip">claude-code</span>
+            <span class="chip ext">your-agent</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SSH MANAGER -->
+  <section class="band-dark dark" id="layer">
+    <div class="wrap">
+      <div class="ascii-rule">{'─ '.repeat(80)}</div>
+      <div class="sec-head fade-in">
+        <div>
+          <div class="sec-label"><span class="br">[</span> 03 / 04 <span class="br">]</span></div>
+          <h2 class="sec-h2" data-lang="en">A <span class="em">first-class</span> SSH manager.</h2>
+          <h2 class="sec-h2" data-lang="zh">一等公民的 <span class="em">SSH 管理</span>.</h2>
+          <p class="sec-sub" data-lang="en">Net-new in OpenWarp on top of upstream Warp. Saved hosts, jump-host chains, Block-aware remote sessions — all backed by your existing <code>~/.ssh</code>.</p>
+          <p class="sec-sub" data-lang="zh">OpenWarp 在上游基础上新增的能力。保存主机、跳板链、Block 感知的远端会话 ── 全部沿用你现有的 <code>~/.ssh</code>。</p>
+        </div>
+        <span class="pill" data-lang="en">net-new</span>
+        <span class="pill" data-lang="zh">本仓新增</span>
+      </div>
+
+      <div class="cv-cards">
+        <div class="cv-card fade-in">
+          <div class="num">01</div>
+          <div class="vis">
+            <div class="term-mock">
+              <div class="term-mock__bar">
+                <div class="term-mock__dots"><span></span><span></span><span></span></div>
+                <div class="term-mock__title">ssh · hosts</div>
+              </div>
+              <div class="term-mock__body">
+                <div class="term-mock__row"><span class="ok">★</span> prod-edge <span class="dim">tokyo</span></div>
+                <div class="term-mock__row"><span class="dim">☆</span> staging   <span class="dim">hk</span></div>
+                <div class="term-mock__row"><span class="dim">☆</span> bastion   <span class="dim">sg</span></div>
+                <div class="term-mock__divider"></div>
+                <div class="term-mock__row"><span class="p">⏎</span> connect <span class="term-mock__caret"></span></div>
+              </div>
+            </div>
+          </div>
+          <div class="h" data-lang="en">Saved hosts</div>
+          <div class="h" data-lang="zh">主机收藏</div>
+          <div class="d" data-lang="en">Pin frequent hosts. One keystroke to connect — fuzzy-search built in.</div>
+          <div class="d" data-lang="zh">收藏常用主机,一次按键即连接,内置模糊搜索。</div>
+        </div>
+        <div class="cv-card fade-in">
+          <div class="num">02</div>
+          <div class="vis">
+            <div class="term-mock">
+              <div class="term-mock__bar">
+                <div class="term-mock__dots"><span></span><span></span><span></span></div>
+                <div class="term-mock__title">~/.config/openwarp/ssh.toml</div>
+              </div>
+              <div class="term-mock__body">
+                <div class="term-mock__row"><span class="k">[hosts.prod-edge]</span></div>
+                <div class="term-mock__row">user = <span class="s">"deploy"</span></div>
+                <div class="term-mock__row">jump = <span class="s">["bastion"]</span></div>
+                <div class="term-mock__divider"></div>
+                <div class="term-mock__row dim">you → bastion → edge</div>
+              </div>
+            </div>
+          </div>
+          <div class="h" data-lang="en">Jump chains</div>
+          <div class="h" data-lang="zh">跳板链</div>
+          <div class="d" data-lang="en">Multi-hop routing declared in <code>ssh.toml</code> — no <code>ProxyJump</code> wrangling.</div>
+          <div class="d" data-lang="zh">在 <code>ssh.toml</code> 里声明跳板链,不用再手撕 <code>ProxyJump</code>。</div>
+        </div>
+        <div class="cv-card fade-in">
+          <div class="num">03</div>
+          <div class="vis">
+            <div class="term-mock">
+              <div class="term-mock__bar">
+                <div class="term-mock__dots"><span></span><span></span><span></span></div>
+                <div class="term-mock__title">prod-edge:~ <span class="ok">● ssh</span> <span class="dim">· tmux</span></div>
+              </div>
+              <div class="term-mock__body">
+                <div class="term-mock__row"><span class="p">$</span> docker ps</div>
+                <div class="term-mock__row dim">CONTAINER  IMAGE   STATUS</div>
+                <div class="term-mock__row dim">a4f1       api:42  Up 3h</div>
+                <div class="term-mock__divider"></div>
+                <div class="term-mock__row"><span class="term-mock__chip">block</span><span class="dim">remote pane · same UX</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="h" data-lang="en">Block-aware remote · tmux</div>
+          <div class="h" data-lang="zh">Block 感知远端 · tmux</div>
+          <div class="d" data-lang="en">Remote sessions render as Blocks. Native tmux integration — windows, panes, persistence.</div>
+          <div class="d" data-lang="zh">远端会话同样渲染成 Block,原生 tmux 集成 ── 窗口/分屏/持久化都在。</div>
+        </div>
+        <div class="cv-card fade-in">
+          <div class="num">04</div>
+          <div class="vis">
+            <div class="term-mock">
+              <div class="term-mock__bar">
+                <div class="term-mock__dots"><span></span><span></span><span></span></div>
+                <div class="term-mock__title">~/.ssh/</div>
+              </div>
+              <div class="term-mock__body">
+                <div class="term-mock__row"><span class="dim">$</span> ls ~/.ssh</div>
+                <div class="term-mock__row dim">id_ed25519  id_ed25519.pub</div>
+                <div class="term-mock__row dim">config      known_hosts</div>
+                <div class="term-mock__divider"></div>
+                <div class="term-mock__row"><span class="term-mock__chip ok">local</span><span class="dim">keys never leave the box</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="h" data-lang="en">Keys stay home</div>
+          <div class="h" data-lang="zh">密钥不离开本机</div>
+          <div class="d" data-lang="en">Reuses existing <code>~/.ssh</code>. <code>ssh.toml</code> holds metadata only — never touches private keys.</div>
+          <div class="d" data-lang="zh">直接复用 <code>~/.ssh</code>,<code>ssh.toml</code> 只存元数据,不碰任何私钥。</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRIVACY -->
+  <section class="band-dark dark" id="privacy">
+    <div class="wrap">
+      <div class="ascii-rule">{'█ '.repeat(80)}</div>
+      <div class="sec-label"><span class="br">[</span> 04 / 04 <span class="br">]</span></div>
+      <h2 class="sec-h2 fade-in" data-lang="en">Privacy <span class="em">by default</span>, not by toggle.</h2>
+      <h2 class="sec-h2 fade-in" data-lang="zh">隐私 <span class="em">默认</span> 就是关的.</h2>
+      <p class="sec-sub" data-lang="en">Cloud Agent, Computer Use, telemetry — all off out of the box. Verify it yourself with the matrix below.</p>
+      <p class="sec-sub" data-lang="zh">Cloud Agent / Computer Use / 遥测 ── 出厂即关。下方为可自查的默认矩阵。</p>
+
+      <div class="privacy-block fade-in">
+        <div class="pl-row"><span class="key">cloud_agent</span><span class="val">OFF</span></div>
+        <div class="pl-row"><span class="key">computer_use</span><span class="val">OFF</span></div>
+        <div class="pl-row"><span class="key">telemetry</span><span class="val">OFF</span></div>
+        <div class="pl-row"><span class="key">referral</span><span class="val">OFF</span></div>
+        <div class="pl-row"><span class="key">api_keys.location</span><span class="val warn">~/.config/openwarp</span></div>
+        <div class="pl-row"><span class="key">network_egress</span><span class="val warn" data-lang="en">PROVIDER ONLY</span><span class="val warn" data-lang="zh">仅 PROVIDER</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INSTALL -->
+  <section class="band-light" id="install">
+    <div class="wrap">
+      <div class="ascii-rule">{'/ '.repeat(80)}</div>
+      <div class="sec-head fade-in">
+        <div>
+          <div class="sec-label"><span class="br">[</span> INSTALL <span class="br">]</span></div>
+          <h2 class="sec-h2" data-lang="en">Build it from <span class="em">source</span>.</h2>
+          <h2 class="sec-h2" data-lang="zh">从源码 <span class="em">构建</span>.</h2>
+          <p class="sec-sub" data-lang="en">No binary installers yet — OpenWarp is in early development. Use the bootstrap script or cargo directly.</p>
+          <p class="sec-sub" data-lang="zh">目前没有发布安装包,处于早期开发阶段。使用 bootstrap 脚本或直接 cargo。</p>
+        </div>
+        <span class="pill">v0.x</span>
+      </div>
+
+      <div class="install-card fade-in">
+        <div class="install-tabs" role="tablist">
+          <button class="active" data-tab="run" type="button">script/run<span class="meta" data-lang="en">recommended</span><span class="meta" data-lang="zh">推荐</span></button>
+          <button data-tab="cargo" type="button">cargo<span class="meta">OSS binary</span></button>
+        </div>
+        <div class="pre-wrap" data-pane="run">
+          <pre class="code"><span class="c"># Clone and bootstrap (recommended)</span>
+git clone https://github.com/zerx-lab/warp.git openwarp
+<span class="k">cd</span> openwarp
+
+./script/bootstrap   <span class="c"># platform-specific deps</span>
+./script/run         <span class="c"># build &amp; launch</span></pre>
+          <button class="copy" data-copy type="button">Copy</button>
+        </div>
+        <div class="pre-wrap" data-pane="cargo" hidden>
+          <pre class="code"><span class="c"># Always target the OSS binary explicitly</span>
+git clone https://github.com/zerx-lab/warp.git openwarp
+<span class="k">cd</span> openwarp
+
+cargo run --release <span class="a">--bin warp-oss</span></pre>
+          <button class="copy" data-copy type="button">Copy</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ACKS -->
+  <section class="band-light">
+    <div class="wrap">
+      <div class="ascii-rule">{'+ '.repeat(80)}</div>
+      <div class="sec-label"><span class="br">[</span> ACKS <span class="br">]</span></div>
+      <h2 class="sec-h2 fade-in" data-lang="en">Standing on shoulders.</h2>
+      <h2 class="sec-h2 fade-in" data-lang="zh">站在前人肩上.</h2>
+      <p class="sec-sub" data-lang="en">OpenWarp is a fork. Most of what makes the terminal feel good was built by upstream Warp and the open ecosystem — we just opened the AI layer.</p>
+      <p class="sec-sub" data-lang="zh">OpenWarp 是一个 fork。终端的好用之处大多由上游 Warp 与开源生态构建,我们做的事是把 AI 层打开。</p>
+
+      <div class="acks-grid">
+        <div class="ack fade-in">
+          <div class="ico">W</div>
+          <div>
+            <div class="h"><a href="https://github.com/warpdotdev/Warp" target="_blank" rel="noopener">warpdotdev/warp</a></div>
+            <div class="d" data-lang="en">Upstream Rust terminal — Blocks, Workflows, suggestions.</div>
+            <div class="d" data-lang="zh">上游 Rust 终端 ── Blocks / Workflows / 命令建议。</div>
+          </div>
+        </div>
+        <div class="ack fade-in">
+          <div class="ico">O</div>
+          <div>
+            <div class="h"><a href="https://github.com/sst/opencode" target="_blank" rel="noopener">opencode-ai/opencode</a></div>
+            <div class="d" data-lang="en">Provider catalog and prompt templates.</div>
+            <div class="d" data-lang="zh">Provider 目录与提示词模板。</div>
+          </div>
+        </div>
+        <div class="ack fade-in">
+          <div class="ico">M</div>
+          <div>
+            <div class="h"><a href="https://models.dev" target="_blank" rel="noopener">models.dev</a></div>
+            <div class="d" data-lang="en">Model metadata index, kept in sync.</div>
+            <div class="d" data-lang="zh">模型元数据索引,保持同步。</div>
+          </div>
+        </div>
+        <div class="ack fade-in">
+          <div class="ico">R</div>
+          <div>
+            <div class="h">Rust ecosystem</div>
+            <div class="d" data-lang="en">tokio, reqwest, ratatui, minijinja, serde — the unsung load-bearing crates.</div>
+            <div class="d" data-lang="zh">tokio / reqwest / ratatui / minijinja / serde ── 背地里扛重活的 crates。</div>
+          </div>
+        </div>
+        <div class="ack fade-in">
+          <div class="ico">D</div>
+          <div>
+            <div class="h"><a href="https://github.com/Hmbown/DeepSeek-TUI" target="_blank" rel="noopener">Hmbown/DeepSeek-TUI</a></div>
+            <div class="d" data-lang="en">Sibling project — a focused TUI for DeepSeek that informed our DeepSeek-native protocol path.</div>
+            <div class="d" data-lang="zh">姊妹项目 ── 一个聚焦 DeepSeek 的 TUI,启发了我们对 DeepSeek 原生协议的支持。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="band-light">
+    <div class="wrap" style="max-width: 880px">
+      <div class="sec-label" style="text-align:center"><span class="br">[</span> FAQ <span class="br">]</span></div>
+      <h2 class="sec-h2 fade-in" style="text-align:center" data-lang="en">Frequently asked.</h2>
+      <h2 class="sec-h2 fade-in" style="text-align:center" data-lang="zh">常见问题.</h2>
+
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary class="faq-q"><span data-lang="en">Is this affiliated with Warp Inc.?</span><span data-lang="zh">这是 Warp 官方的吗?</span><span class="plus">+</span></summary>
+          <div class="faq-a" data-lang="en">No. OpenWarp is a community fork. We are not affiliated with, endorsed by, or sponsored by Warp Inc. The trademarks belong to their respective owners.</div>
+          <div class="faq-a" data-lang="zh">不是。OpenWarp 是社区 fork,与 Warp Inc. 无任何隶属、背书或赞助关系。商标归各自所有者持有。</div>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q"><span data-lang="en">Can I use my company's private model?</span><span data-lang="zh">能接公司内部的私有模型吗?</span><span class="plus">+</span></summary>
+          <div class="faq-a" data-lang="en">Yes — if it speaks any of the supported native protocols or exposes an OpenAI-compatible Chat Completions endpoint, just point <code>base_url</code> at it.</div>
+          <div class="faq-a" data-lang="zh">可以 ── 只要支持任一原生协议,或暴露 OpenAI 兼容的 Chat Completions 端点,把 <code>base_url</code> 指过去就行。</div>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q"><span data-lang="en">What's different from upstream Warp?</span><span data-lang="zh">和上游 Warp 有什么差别?</span><span class="plus">+</span></summary>
+          <div class="faq-a" data-lang="en">Six things: AI provider (any vs cloud gateway), credentials (local vs cloud account), prompts (minijinja editable vs server-assembled), third-party CLI agents (DeepSeek-TUI / Codex / Claude Code wired in vs none), SSH + tmux (built-in vs none), cloud features (off vs on by default). Plus rendering fixes for code blocks, tables and CJK soft-wrap. Everything else from upstream stays.</div>
+          <div class="faq-a" data-lang="zh">六件事:AI provider(任意 vs 云端 gateway)、凭证(本地 vs 云端账号)、prompt(minijinja 可编辑 vs 服务端组装)、第三方 CLI agent(DeepSeek-TUI / Codex / Claude Code 已接入 vs 没有)、SSH + tmux(内置 vs 没有)、云端能力(默认关 vs 默认开)。另外修了代码块/表格/中文 soft-wrap 的渲染问题。其它上游能力全部保留。</div>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q"><span data-lang="en">Is it production-ready?</span><span data-lang="zh">能上生产吗?</span><span class="plus">+</span></summary>
+          <div class="faq-a" data-lang="en">Not yet. v0.x — expect breaking changes, rough edges, and thin docs. File issues, send PRs.</div>
+          <div class="faq-a" data-lang="zh">暂时不行。v0.x 阶段会有 breaking change、粗糙之处、文档不全。欢迎提 issue 与 PR。</div>
+        </details>
+        <details class="faq-item">
+          <summary class="faq-q"><span data-lang="en">License?</span><span data-lang="zh">许可证?</span><span class="plus">+</span></summary>
+          <div class="faq-a" data-lang="en">Source-available, inheriting the upstream Warp license terms. Commercial redistribution may require a separate agreement — check <code>LICENSE.md</code>.</div>
+          <div class="faq-a" data-lang="zh">Source-available,沿用上游 Warp 的许可条款。商业重分发可能需要单独协议 ── 详见 <code>LICENSE.md</code>。</div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta-band dark">
+    <div class="wrap">
+      <h2 data-lang="en">OpenWarp puts <span class="em">your terminal</span> back in your hands.</h2>
+      <h2 data-lang="zh">把终端的 <span class="em">主导权</span> 还给你.</h2>
+      <p data-lang="en">Bring your provider, edit your prompts, manage your hosts. All local, all editable, all yours.</p>
+      <p data-lang="zh">自带 provider,改你的 prompt,管你的主机。全部本地、全部可改、全部归你。</p>
+      <div class="btn-row">
+        <a class="btn" href="#install"><span data-lang="en">Install</span><span data-lang="zh">安装</span><span class="arr">→</span></a>
+        <a class="btn alt" href="/docs/introduction"><span data-lang="en">Read the docs</span><span data-lang="zh">阅读文档</span></a>
+      </div>
+    </div>
+  </section>
+</LandingLayout>

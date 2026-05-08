@@ -1,0 +1,18 @@
+---
+// Inline locale boot script — sets data-locale before paint to avoid FOUC.
+---
+<script is:inline>
+  (function () {
+    try {
+      var saved = localStorage.getItem('openwarp:locale');
+      var locale = (saved === 'en' || saved === 'zh')
+        ? saved
+        : ((navigator.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+      document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+      document.body && (document.body.dataset.locale = locale);
+      document.addEventListener('DOMContentLoaded', function () {
+        document.body.dataset.locale = locale;
+      });
+    } catch (_) {}
+  })();
+</script>

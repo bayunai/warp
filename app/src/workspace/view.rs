@@ -251,12 +251,10 @@ use crate::prompt::editor_modal::{
     EditorModal as PromptEditorModal, EditorModalEvent as PromptEditorModalEvent,
     OpenSource as PromptEditorOpenSource,
 };
-use crate::referral_theme_status::ReferralThemeEvent;
 use crate::resource_center::{
     mark_feature_used_and_write_to_user_defaults, skip_tips_and_write_to_user_defaults,
     ResourceCenterEvent, ResourceCenterPage, ResourceCenterView, Tip, TipAction, TipsCompleted,
 };
-use crate::reward_view::{RewardEvent, RewardKind, RewardView};
 use crate::root_view::{NewWorkspaceSource, OpenLaunchConfigArg};
 use crate::search::command_search::searcher::{
     AcceptedHistoryItem, AcceptedWorkflow, CommandSearchItemAction,
@@ -270,7 +268,7 @@ use crate::server::server_api::{ServerApi, ServerApiEvent, ServerApiProvider, Se
 use crate::server::telemetry::{
     AddTabWithShellSource, AnonymousUserSignupEntrypoint, CloseTarget, EnvVarTelemetryMetadata,
     FileTreeSource, KnowledgePaneEntrypoint, LaunchConfigUiLocation,
-    MCPServerCollectionPaneEntrypoint, OpenedWarpAISource, SharingDialogSource, WarpDriveSource,
+    MCPServerCollectionPaneEntrypoint, OpenedWarpAISource, WarpDriveSource,
 };
 use crate::session_management::{SessionNavigationData, SessionSource};
 use crate::settings::{
@@ -909,8 +907,6 @@ pub struct Workspace {
     import_modal: ViewHandle<ImportModal>,
     theme_chooser_view: ViewHandle<ThemeChooser>,
     previous_theme: Option<ThemeKind>,
-    reward_modal: ViewHandle<Modal<RewardView>>,
-    reward_modal_pending: Option<RewardKind>,
     pub(crate) current_workspace_state: WorkspaceState,
     previous_workspace_state: Option<WorkspaceState>,
     welcome_tips_view_state: WelcomeTipsViewState,
@@ -1430,38 +1426,6 @@ impl Workspace {
         modal
     }
 
-    fn build_reward_modal(ctx: &mut ViewContext<Self>) -> ViewHandle<Modal<RewardView>> {
-        let reward_view = ctx.add_typed_action_view(|_| RewardView::new());
-        ctx.subscribe_to_view(&reward_view, |me, _, event, ctx| {
-            me.handle_reward_view_event(event, ctx);
-        });
-        let modal = ctx.add_typed_action_view(|ctx| {
-            Modal::new(Some(String::new()), reward_view, ctx)
-                .with_modal_style(UiComponentStyles {
-                    width: Some(316.),
-                    height: Some(389.),
-                    ..Default::default()
-                })
-                .with_body_style(UiComponentStyles {
-                    height: Some(319.),
-                    padding: Some(Coords {
-                        // Default padding values except for the top, which is too much for the
-                        // reward modal
-                        top: 0.,
-                        bottom: 28.,
-                        left: 28.,
-                        right: 28.,
-                    }),
-                    ..Default::default()
-                })
-                .with_dismiss_on_click()
-        });
-        ctx.subscribe_to_view(&modal, |me, _, event, ctx| {
-            me.handle_reward_modal_event(event, ctx);
-        });
-        modal
-    }
-
     fn build_welcome_tips(
         tips_completed: ModelHandle<TipsCompleted>,
         ctx: &mut ViewContext<Self>,
@@ -1516,17 +1480,12 @@ impl Workspace {
     }
 
     fn build_settings_views(
-        global_resource_handles: GlobalResourceHandles,
+        _global_resource_handles: GlobalResourceHandles,
         tips_completed: ModelHandle<TipsCompleted>,
         ctx: &mut ViewContext<Self>,
     ) -> (ViewHandle<SettingsView>, ViewHandle<ThemeChooser>) {
-        let theme_chooser_view = ctx.add_typed_action_view(|ctx| {
-            ThemeChooser::new(
-                global_resource_handles.referral_theme_status,
-                ctx,
-                tips_completed,
-            )
-        });
+        let theme_chooser_view =
+            ctx.add_typed_action_view(|ctx| ThemeChooser::new(ctx, tips_completed));
 
         ctx.subscribe_to_view(&theme_chooser_view, |me, _, event, ctx| {
             me.handle_theme_chooser_event(event, ctx);
@@ -2504,7 +2463,6 @@ impl Workspace {
             model_event_sender,
             tips_completed,
             user_default_shell_unsupported_banner_model_handle,
-            referral_theme_status,
             settings_file_error,
         } = global_resource_handles.clone();
 
@@ -2566,16 +2524,6 @@ impl Workspace {
             }
         });
 
-        ctx.subscribe_to_model(&referral_theme_status, |me, _, event, ctx| {
-            me.handle_referral_theme_status_event(event, ctx);
-        });
-
-        let referrals_client = ServerApiProvider::as_ref(ctx).get_referrals_client();
-        // On startup, check if the user has earned a referral theme by referring other users
-        referral_theme_status.update(ctx, |model, ctx| {
-            model.query_referral_status(referrals_client, ctx);
-        });
-
         let bindings_notifier = KeybindingChangedNotifier::handle(ctx);
         ctx.subscribe_to_model(&bindings_notifier, |me, _, event, ctx| {
             me.handle_keybinding_changed(event, ctx);
@@ -2595,7 +2543,6 @@ impl Workspace {
             me.handle_changelog_event(event, ctx);
         });
 
-        let reward_modal = Self::build_reward_modal(ctx);
         let (welcome_tips_view, welcome_tips_view_state) =
             Self::build_welcome_tips(tips_completed.clone(), ctx);
         let (settings_pane, theme_chooser_view) =
@@ -3016,8 +2963,6 @@ impl Workspace {
             previous_theme: None,
             settings_pane,
             theme_chooser_view,
-            reward_modal,
-            reward_modal_pending: None,
             current_workspace_state: Default::default(),
             previous_workspace_state: None,
             model_event_sender,
@@ -5350,17 +5295,6 @@ impl Workspace {
         }
     }
 
-    /// Handle the close event from the reward modal
-    fn handle_reward_modal_event(&mut self, event: &ModalEvent, ctx: &mut ViewContext<Self>) {
-        match event {
-            ModalEvent::Close => {
-                self.current_workspace_state.is_reward_modal_open = false;
-                self.focus_active_tab(ctx);
-                ctx.notify();
-            }
-        }
-    }
-
     fn handle_suggested_agent_mode_workflow_modal_event(
         &mut self,
         event: &SuggestedAgentModeWorkflowModalEvent,
@@ -5388,16 +5322,6 @@ impl Workspace {
                     TerminalSessionFallbackBehavior::default(),
                     ctx,
                 );
-            }
-        }
-    }
-
-    /// Handle the call-to-action event from the reward modal view
-    fn handle_reward_view_event(&mut self, event: &RewardEvent, ctx: &mut ViewContext<Self>) {
-        match event {
-            RewardEvent::OpenThemePicker => {
-                self.current_workspace_state.is_reward_modal_open = false;
-                self.show_theme_chooser_for_active_theme(ctx);
             }
         }
     }
@@ -5929,25 +5853,6 @@ impl Workspace {
         }
         #[cfg(not(feature = "local_fs"))]
         let _ = (event, ctx);
-    }
-
-    /// Show the referral reward modal page, informing the user they have earned a theme reward
-    fn show_reward_modal(&mut self, kind: RewardKind, ctx: &mut ViewContext<Self>) {
-        // For certain context, like landing on a shared session, we don't want to show the reward modal
-        // or side panel.
-        if !ContextFlag::ShowRewardModal.is_enabled() {
-            return;
-        }
-        self.reward_modal.update(ctx, |modal, modal_ctx| {
-            modal.body().update(modal_ctx, |view, view_ctx| {
-                view.update_reward_kind(kind, view_ctx);
-            });
-        });
-
-        ctx.focus(&self.reward_modal);
-        self.reward_modal_pending = None;
-        self.current_workspace_state.is_reward_modal_open = true;
-        ctx.notify();
     }
 
     fn join_slack(&mut self, ctx: &mut ViewContext<Self>) {
@@ -6677,42 +6582,6 @@ impl Workspace {
             })
     }
 
-    /// Triggers the drive sharing onboarding block.
-    fn check_and_trigger_drive_sharing_onboarding_block(
-        &mut self,
-        object_id: CloudObjectTypeAndId,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        if self.auth_state.is_anonymous_or_logged_out() {
-            return;
-        }
-
-        if *WarpDriveSettings::as_ref(ctx)
-            .sharing_onboarding_block_shown
-            .value()
-        {
-            return;
-        }
-
-        if let Some(terminal_view_handle) = self.active_session_view(ctx) {
-            let terminal_view_id = terminal_view_handle.id();
-
-            // Don't show onboarding block while agent is actively streaming
-            let is_agent_in_progress = BlocklistAIHistoryModel::handle(ctx)
-                .as_ref(ctx)
-                .active_conversation(terminal_view_id)
-                .is_some_and(|conversation| conversation.status().is_in_progress());
-
-            if is_agent_in_progress {
-                return;
-            }
-
-            terminal_view_handle.update(ctx, |terminal_view, ctx| {
-                terminal_view.insert_drive_sharing_onboarding_block(object_id, ctx);
-            });
-        }
-    }
-
     fn check_and_trigger_telemetry_banner_for_existing_users(
         &mut self,
         ctx: &mut ViewContext<Self>,
@@ -6886,17 +6755,12 @@ impl Workspace {
                     &locator,
                 );
             }
-            // If the was an invitee email, open the share dialog as well after focusing the pane.
-            if let Some(invitee_email) = settings.invitee_email.clone() {
-                if let NotebookSource::Existing(sync_id) = source {
-                    self.open_object_sharing_settings(
-                        CloudObjectTypeAndId::from_id_and_type(*sync_id, ObjectType::Notebook),
-                        Some(invitee_email),
-                        SharingDialogSource::InviteeRequest,
-                        ctx,
-                    );
-                }
-            }
+            // TODO(openwarp-cloud-removal Phase 5): invitee_email/source 这条
+            // notebook 邀请链路已无 UI 出口,但 `OpenWarpDriveObjectSettings.invitee_email`
+            // 仍由 URL handler / drag-drop 链路传入。Phase 5 退役 invitee 概念时
+            // 把字段从 settings 结构里也删掉。
+            let _ = settings;
+            let _ = source;
         } else if default_to_new_pane {
             let window_id = ctx.window_id();
             let pane = notebook_manager.update(ctx, |manager, ctx| {
@@ -12447,23 +12311,6 @@ impl Workspace {
         });
     }
 
-    /// View an object in Warp Drive and open its sharing settings.
-    fn open_object_sharing_settings(
-        &mut self,
-        object_id: CloudObjectTypeAndId,
-        invitee_email: Option<String>,
-        source: SharingDialogSource,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        self.view_in_warp_drive(WarpDriveItemId::Object(object_id), ctx);
-        self.update_warp_drive_view(ctx, |warp_drive, ctx| {
-            warp_drive.reset_and_open_to_main_index(ctx);
-            warp_drive.open_object_sharing_settings(object_id, invitee_email, source, ctx);
-        });
-
-        ctx.notify();
-    }
-
     fn move_to_drive_space(
         &mut self,
         cloud_object_type_and_id: CloudObjectTypeAndId,
@@ -13492,18 +13339,6 @@ impl Workspace {
             }
             pane_group::Event::AnonymousUserSignup => {
                 self.initiate_user_signup(AnonymousUserSignupEntrypoint::RenotificationBlock, ctx);
-            }
-            pane_group::Event::OpenDriveObjectShareDialog {
-                cloud_object_type_and_id,
-                invitee_email,
-                source,
-            } => {
-                self.open_object_sharing_settings(
-                    *cloud_object_type_and_id,
-                    invitee_email.clone(),
-                    *source,
-                    ctx,
-                );
             }
             pane_group::Event::OpenPalette {
                 mode,
@@ -15063,14 +14898,10 @@ impl Workspace {
                 .server_id
                 .and_then(|id| CloudModel::as_ref(ctx).get_by_uid(&id.uid()))
             {
-                if created_object.space(ctx) == Space::Personal
-                    && created_object.renders_in_warp_drive()
-                {
-                    self.check_and_trigger_drive_sharing_onboarding_block(
-                        created_object.cloud_object_type_and_id(),
-                        ctx,
-                    );
-                }
+                // TODO(openwarp-cloud-removal Phase 5): drive sharing onboarding
+                // block 已退;`created_object` 仍是 cloud_object 创建结果,
+                // CloudObject 模型本身在后续 phase 一并退役。
+                let _ = created_object;
             }
         }
     }
@@ -15513,32 +15344,6 @@ impl Workspace {
                 .toggle_and_save_value(ctx)
                 .expect("FocusReportingEnabled failed to serialize");
         });
-    }
-
-    /// Handle an event from the referral theme status model, showing the reward modal if necessary
-    fn handle_referral_theme_status_event(
-        &mut self,
-        event: &ReferralThemeEvent,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        // A referral theme was activated, so we need to show the reward modal
-        // If the changelog modal is currently shown or pending, then we delay showing the
-        // reward modal until after that is completed / closed.
-
-        // Also: We overwrite the pending reward modal kind, so that only one is ever shown
-        // This could, in theory, lead to a user activating both in the same login and only
-        // seeing one modal, however that is low impact since it the modal still takes them to
-        // the theme picker, which will show both themes anyway.
-        let kind = match event {
-            ReferralThemeEvent::SentReferralThemeActivated => RewardKind::SentReferralTheme,
-            ReferralThemeEvent::ReceivedReferralThemeActivated => RewardKind::ReceivedReferralTheme,
-        };
-
-        if self.is_changelog_open_or_pending(ctx) {
-            self.reward_modal_pending = Some(kind);
-        } else {
-            self.show_reward_modal(kind, ctx);
-        }
     }
 
     /// This listens for changes to keybindings and keeps the cached versions up-to-date in our
@@ -20551,9 +20356,6 @@ impl TypedActionView for Workspace {
                 // Focus newly created object in WD
                 self.view_in_and_focus_warp_drive(*item_id, ctx);
             }
-            OpenObjectSharingSettings { object_id, source } => {
-                self.open_object_sharing_settings(*object_id, None, *source, ctx);
-            }
             UndoTrash(cloud_object_type_and_id) => {
                 self.update_warp_drive_view(ctx, |warp_drive, ctx| {
                     warp_drive.undo_trash(cloud_object_type_and_id, ctx);
@@ -22161,12 +21963,6 @@ impl View for Workspace {
 
         if self.current_workspace_state.is_theme_deletion_modal_open {
             stack.add_child(ChildView::new(&self.theme_deletion_modal).finish());
-        }
-
-        // OpenWarp:删除 shared_objects_creation_denied_modal 渲染分支
-
-        if self.current_workspace_state.is_reward_modal_open {
-            stack.add_child(Clipped::new(ChildView::new(&self.reward_modal).finish()).finish());
         }
 
         if self.launch_config_save_modal.is_open() {

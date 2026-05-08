@@ -1,22 +1,15 @@
 import { defineConfig } from 'astro/config';
-import tailwind from '@astrojs/tailwind';
-import react from '@astrojs/react';
+import mdx from '@astrojs/mdx';
+import sitemap from '@astrojs/sitemap';
 
-// https://astro.build/config
 export default defineConfig({
   site: 'https://openwarp.dev',
-  integrations: [tailwind({ applyBaseStyles: false }), react()],
-  i18n: {
-    defaultLocale: 'zh-CN',
-    locales: ['zh-CN', 'en'],
-    routing: {
-      prefixDefaultLocale: false,
-      redirectToDefaultLocale: false,
-    },
+  integrations: [mdx(), sitemap()],
+  trailingSlash: 'ignore',
+  redirects: {
+    '/docs': '/docs/introduction',
   },
-  vite: {
-    ssr: {
-      noExternal: ['framer-motion'],
-    },
+  build: {
+    format: 'directory',
   },
 });

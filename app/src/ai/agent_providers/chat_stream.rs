@@ -49,8 +49,8 @@ use warp_multi_agent_api as api;
 
 use genai::adapter::AdapterKind;
 use genai::chat::{
-    Binary, ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ContentPart,
-    MessageContent, Tool as GenaiTool, ToolCall, ToolResponse,
+    Binary, CacheControl, ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent,
+    ContentPart, MessageContent, Tool as GenaiTool, ToolCall, ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget, WebConfig};
@@ -855,11 +855,98 @@ fn build_chat_request(
         .map(sanitize_tool_for_request)
         .collect();
 
-    let mut req = ChatRequest::from_messages(messages).with_system(system_text);
+    // Prompt caching(1:1 移植自 opencode `provider/transform.ts::applyCaching`):
+    // - opencode 选 first 2 system message + last 2 non-system message,统一打上
+    //   anthropic.cacheControl / openaiCompatible.cache_control / bedrock.cachePoint
+    //   等多 SDK 兼容标记。AI SDK 各 provider 实现读对应 key,无关 key 自动忽略。
+    // - 我们走 rust-genai,Anthropic adapter 支持 per-message `cache_control`,
+    //   OpenAI / OpenAiResp adapter 仅认 `ChatOptions` 级别的 prompt_cache_key /
+    //   cache_control,DeepSeek / Gemini / Ollama 服务端隐式缓存,无需 client opt-in。
+    // - 故在此只对 Anthropic 路径"per-message"打标:把 system 文本作为
+    //   ChatRole::System message 推到 messages 头部并打 Ephemeral,再把末尾两条
+    //   非 system message 也打 Ephemeral(对应 opencode 的 system+last 2 模式)。
+    //   OpenAI 系的 `prompt_cache_key` / `cache_control` 在 `build_chat_options`
+    //   里设置(请求级别),也来自 opencode 同一组规则的下游 fallback。
+    let messages = if matches!(api_type, AgentProviderApiType::Anthropic) {
+        let mut msgs: Vec<ChatMessage> =
+            std::iter::once(ChatMessage::system(system_text.clone()))
+                .chain(messages.into_iter())
+                .collect();
+        apply_caching_anthropic(&mut msgs);
+        msgs
+    } else {
+        messages
+    };
+
+    let mut req = ChatRequest::from_messages(messages);
+    // Anthropic 路径 system 已经作为 ChatRole::System message 进 messages,
+    // 不再设 `with_system`,避免 genai Anthropic adapter 的"first system 不能挂
+    // cache_control"限制(`adapter_impl.rs::into_anthropic_request_parts` 注释)。
+    if !matches!(api_type, AgentProviderApiType::Anthropic) {
+        req = req.with_system(system_text);
+    }
     if !tools_array.is_empty() {
         req = req.with_tools(tools_array);
     }
     req
+}
+
+/// 1:1 移植自 opencode `provider/transform.ts::applyCaching` 的 Anthropic 分支:
+/// 给 first 2 个 system message + last 2 个 non-system message 打 Ephemeral
+/// cache 标记。
+///
+/// genai Anthropic adapter 在 `into_anthropic_request_parts` 内把
+/// `MessageOptions::cache_control` 落到该 message 最后一个 content part 上,
+/// 行为与 opencode 给 lastContent.providerOptions.anthropic.cacheControl 一致。
+///
+/// **TTL 排序**:全部用 `Ephemeral`(5m),不混 `Ephemeral1h`,避开 genai 的
+/// "1h 必须在 5m 之前"约束(`chat_message.rs::CacheControl` 注释)。
+fn apply_caching_anthropic(messages: &mut Vec<ChatMessage>) {
+    let n = messages.len();
+    if n == 0 {
+        return;
+    }
+    let mut tag = vec![false; n];
+
+    // first 2 system messages
+    let mut sys_seen = 0;
+    for (i, m) in messages.iter().enumerate() {
+        if matches!(m.role, ChatRole::System) {
+            tag[i] = true;
+            sys_seen += 1;
+            if sys_seen >= 2 {
+                break;
+            }
+        }
+    }
+    // last 2 non-system messages
+    let mut tail_seen = 0;
+    for (i, m) in messages.iter().enumerate().rev() {
+        if !matches!(m.role, ChatRole::System) {
+            tag[i] = true;
+            tail_seen += 1;
+            if tail_seen >= 2 {
+                break;
+            }
+        }
+    }
+
+    let original = std::mem::take(messages);
+    *messages = original
+        .into_iter()
+        .enumerate()
+        .map(|(i, m)| {
+            if tag[i] {
+                // ChatMessage 没有直接的 with_cache_control;cache_control 挂在
+                // `MessageOptions` 上,通过 `with_options` 注入。
+                // `MessageOptions: From<CacheControl>` 由 genai 提供
+                // (`chat_message.rs::impl From<CacheControl> for MessageOptions`)。
+                m.with_options(CacheControl::Ephemeral)
+            } else {
+                m
+            }
+        })
+        .collect();
 }
 
 /// 移除字符串中所有可能让 JSON 序列化产生非法转义的字符:
@@ -1668,6 +1755,7 @@ fn build_chat_options(
     model_id: &str,
     effort_setting: crate::settings::ReasoningEffortSetting,
     extra_headers: Vec<(String, String)>,
+    conversation_id: Option<&str>,
 ) -> ChatOptions {
     let mut opts = ChatOptions::default()
         .with_capture_content(true)
@@ -1677,6 +1765,28 @@ fn build_chat_options(
         // 让 genai 把 DeepSeek-style 模型在 content 中夹带的 <think>...</think>
         // 段抽出来归到 reasoning chunk,UI 显示更干净。仅对支持该格式的 adapter 生效。
         .with_normalize_reasoning_content(true);
+
+    // Prompt caching(对应 opencode `applyCaching` OpenAI 兼容路径)。
+    // genai 的 OpenAI / OpenAiResp adapter 不读 per-message cache_control,
+    // 只认 `ChatOptions::prompt_cache_key` 与 `ChatOptions::cache_control`:
+    //   - prompt_cache_key:OpenAI 把同 key 的请求路由到同一缓存分片,提升命中
+    //     (`prompt_cache_key` field,见 `adapter_shared.rs:194` /
+    //     `openai_resp/adapter_impl.rs:238`);用 conversation_id 作为稳定 key。
+    //   - cache_control = Ephemeral → 序列化为 `prompt_cache_retention: "in_memory"`
+    //     (genai `adapter_shared.rs:199`),触发服务端短 TTL 缓存。
+    // Anthropic 走 per-message cache_control(在 build_chat_request 里),不在此处。
+    // DeepSeek / Gemini / Ollama 服务端隐式缓存,跳过。
+    if matches!(
+        api_type,
+        AgentProviderApiType::OpenAi | AgentProviderApiType::OpenAiResp
+    ) {
+        if let Some(cid) = conversation_id {
+            if !cid.is_empty() {
+                opts = opts.with_prompt_cache_key(cid.to_owned());
+            }
+        }
+        opts = opts.with_cache_control(CacheControl::Ephemeral);
+    }
 
     // 仅在用户显式选了非 Auto 档位 **且** 模型支持 reasoning 时才注入。
     // - Auto:不传,让 genai 走"模型名后缀推断"(OpenAI/Anthropic adapter 内部)。
@@ -1802,19 +1912,24 @@ pub async fn generate_byop_output(
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
     let force_echo_reasoning = super::reasoning::model_requires_reasoning_echo(api_type, &model_id);
     let chat_req = build_chat_request(&params, force_echo_reasoning, api_type, &model_id);
+    let conversation_id = params
+        .conversation_token
+        .as_ref()
+        .map(|t| t.as_str().to_string())
+        .unwrap_or_default();
     let chat_opts = build_chat_options(
         api_type,
         &base_url,
         &model_id,
         reasoning_effort,
         extra_headers,
+        if conversation_id.is_empty() {
+            None
+        } else {
+            Some(conversation_id.as_str())
+        },
     );
     let client = build_client(api_type, base_url, api_key);
-    let conversation_id = params
-        .conversation_token
-        .as_ref()
-        .map(|t| t.as_str().to_string())
-        .unwrap_or_default();
     let request_id = Uuid::new_v4().to_string();
     let mcp_context = params.mcp_context.clone();
 

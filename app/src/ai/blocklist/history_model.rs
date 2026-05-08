@@ -802,6 +802,21 @@ impl BlocklistAIHistoryModel {
         Ok(conversation.create_optimistic_cli_subagent_task(&block_id, terminal_view_id, ctx))
     }
 
+    /// OpenWarp BYOP 专用:见 `Conversation::create_optimistic_cli_subagent_task_silent` 文档。
+    /// 创建真实 subagent task 但不 emit `CreatedSubtask`,避免触发 `CLISubagentView`
+    /// 在 task 没 exchange 时 panic。
+    pub fn create_silent_cli_subagent_task_for_conversation(
+        &mut self,
+        block_id: BlockId,
+        conversation_id: AIConversationId,
+    ) -> Result<TaskId, UpdateHistoryError> {
+        let conversation = self
+            .conversations_by_id
+            .get_mut(&conversation_id)
+            .ok_or(UpdateHistoryError::ConversationNotFound(conversation_id))?;
+        Ok(conversation.create_optimistic_cli_subagent_task_silent(&block_id))
+    }
+
     pub fn update_conversation_status(
         &mut self,
         terminal_view_id: EntityId,
