@@ -3,9 +3,11 @@
 #![cfg_attr(feature = "release_bundle", windows_subsystem = "windows")]
 
 use anyhow::Result;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use warp_core::features::FeatureFlag;
 use warp_core::{
     channel::{Channel, ChannelConfig, ChannelState, OzConfig, WarpServerConfig},
-    features::{FeatureFlag, DEBUG_FLAGS},
+    features::DEBUG_FLAGS,
     AppId,
 };
 
