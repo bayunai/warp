@@ -103,7 +103,36 @@ lazy_static! {
     };
 }
 
+/// Return the font that should render shared CJK Han ideographs (U+4E00..U+9FEF and related)
+/// based on the current UI locale. Without this, the upstream mapping hard-codes Noto Sans SC
+/// (Simplified Chinese) for every Han code point, which renders Japanese-locale UI text with
+/// Simplified Chinese glyph shapes (e.g. 直/設/規 look "off" to Japanese readers).
+fn cjk_han_font_for_ui_locale() -> ExternalFontFamily {
+    let locale = warpui::current_ui_locale();
+    let lower = locale.to_ascii_lowercase();
+    if lower.starts_with("ja") {
+        NOTO_SANS_JP.clone()
+    } else if lower.starts_with("ko") {
+        NOTO_SANS_KR.clone()
+    } else if lower.starts_with("zh-tw") || lower.starts_with("zh-hk") || lower.starts_with("zh-mo")
+    {
+        NOTO_SANS_TC.clone()
+    } else {
+        NOTO_SANS_SC.clone()
+    }
+}
+
 pub fn fallback_font_fn(ch: char) -> Option<ExternalFontFamily> {
+    let raw = fallback_font_fn_raw(ch);
+    if let Some(ref font) = raw {
+        if font.name == "Noto Sans SC" && warpui::is_shared_cjk_han(ch) {
+            return Some(cjk_han_font_for_ui_locale());
+        }
+    }
+    raw
+}
+
+fn fallback_font_fn_raw(ch: char) -> Option<ExternalFontFamily> {
     match ch {
         '\u{007F}'..='\u{007F}'
         | '\u{21EA}'..='\u{21EA}'

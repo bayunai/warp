@@ -1,14 +1,14 @@
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::blocklist::SerializedBlockListItem;
 use crate::appearance::Appearance;
-use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
-use crate::auth::auth_override_warning_modal::AuthOverrideWarningModalVariant;
-use crate::auth::auth_state::AuthState;
-use crate::auth::auth_view_modal::AuthRedirectPayload;
-use crate::auth::login_slide::{LoginSlideEvent, LoginSlideSource, LoginSlideView};
-use crate::auth::needs_sso_link_view::NeedsSsoLinkView;
-use crate::auth::paste_auth_token_modal::{PasteAuthTokenModalEvent, PasteAuthTokenModalView};
+use crate::auth::AuthOverrideWarningModalVariant;
+use crate::auth::AuthRedirectPayload;
+use crate::auth::AuthState;
+use crate::auth::NeedsSsoLinkView;
+use crate::auth::{AuthManager, AuthManagerEvent};
 use crate::auth::{AuthStateProvider, LoginFailureReason};
+use crate::auth::{LoginSlideEvent, LoginSlideSource, LoginSlideView};
+use crate::auth::{PasteAuthTokenModalEvent, PasteAuthTokenModalView};
 use crate::autoupdate::{AutoupdateState, AutoupdateStateEvent};
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::cloud_object::{GenericStringObjectFormat, JsonObjectType, ObjectType};
@@ -21,21 +21,17 @@ use crate::launch_configs::launch_config;
 use crate::linear::LinearIssueWork;
 use crate::notebooks::manager::NotebookSource;
 use crate::settings::apply_onboarding_settings;
-use crate::settings::cloud_preferences_syncer::{
-    CloudPreferencesSyncer, CloudPreferencesSyncerEvent,
-};
 use crate::settings::AISettings;
 use crate::workspace::tab_settings::TabSettings;
 use onboarding::{
     AgentOnboardingEvent, AgentOnboardingView, OnboardingIntention, SelectedSettings,
 };
 
+use crate::auth::UserAuthenticationError;
 use crate::persistence::ModelEvent;
 use crate::report_if_error;
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::experiments::is_free_user_no_ai_experiment_active;
 use crate::server::ids::SyncId;
-use crate::server::server_api::auth::UserAuthenticationError;
 use crate::server::server_api::ServerApiProvider;
 use crate::server::telemetry::LaunchConfigUiLocation;
 use crate::settings::QuakeModeSettings;
@@ -71,8 +67,8 @@ use crate::{
     UpdateQuakeModeEventArg,
 };
 use crate::{
-    auth::auth_override_warning_modal::{AuthOverrideWarningModal, AuthOverrideWarningModalEvent},
-    auth::auth_view_modal::{AuthView, AuthViewVariant},
+    auth::{AuthOverrideWarningModal, AuthOverrideWarningModalEvent},
+    auth::{AuthView, AuthViewVariant},
     server::server_api::ServerApi,
     workspace::{view::OnboardingTutorial, PaneViewLocator, Workspace, WorkspaceRegistry},
 };
@@ -117,9 +113,20 @@ use warpui::{
 use warpui::{FocusContext, NextNewWindowsHasThisWindowsBoundsUponClose};
 
 #[cfg(target_family = "wasm")]
-use crate::auth::web_handoff::{WebHandoffEvent, WebHandoffView};
+use crate::auth::{WebHandoffEvent, WebHandoffView};
 
-const WINDOW_TITLE: &str = "Warp";
+/// 返回当前 channel 的产品名,作为窗口标题初始值与 quake/transferred 窗口标题。
+///
+/// 取 `ChannelState::app_id().application_name()` 是为了让 OSS 构建显示 `OpenWarp`、
+/// 而 Stable/Preview/Dev 等上游 channel 仍显示各自的 `Warp` / `WarpPreview` / `WarpDev`,
+/// 避免在 fork 中跨多处硬编码字符串(Windows 任务管理器按窗口标题做进程分组,
+/// 硬编码 `"Warp"` 会让 OpenWarp 在任务管理器里显示成 `Warp(N)`)。
+///
+/// 注意:窗口创建后,`Workspace::update_window_title()` 会在每次 tab 切换/重命名时
+/// 用 tab 标题覆盖此值,所以此函数仅决定窗口刚打开、还未挂上 tab 时的初始标题。
+fn window_title() -> String {
+    ChannelState::app_id().application_name().to_owned()
+}
 
 lazy_static! {
     static ref FALLBACK_WINDOW_SIZE: Vector2F = vec2f(800.0, 600.0);
@@ -306,7 +313,6 @@ pub fn init(app: &mut AppContext) {
         "root_view:maybe_stop_active_voice_input",
         RootView::maybe_stop_active_voice_input,
     );
-    app.add_action("root_view:log_out", RootView::log_out);
     app.add_action(
         "root_view:handle_incoming_auth_url",
         RootView::handle_incoming_auth_url,
@@ -616,7 +622,7 @@ pub fn create_transferred_window(
         AddWindowOptions {
             window_style,
             window_bounds,
-            title: Some(WINDOW_TITLE.to_owned()),
+            title: Some(window_title()),
             background_blur_radius_pixels: Some(*window_settings.background_blur_radius),
             background_blur_texture: *window_settings.background_blur_texture,
             on_gpu_driver_selected: on_gpu_driver_selected_callback(),
@@ -710,7 +716,7 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
                         AddWindowOptions {
                             window_style: WindowStyle::Pin,
                             window_bounds: WindowBounds::ExactPosition(frame_args.window_bounds),
-                            title: Some("Warp".to_owned()),
+                            title: Some(window_title()),
                             fullscreen_state: window.fullscreen_state,
                             background_blur_radius_pixels,
                             background_blur_texture,
@@ -753,7 +759,7 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
                         ctx.add_window(
                             AddWindowOptions {
                                 window_bounds: WindowBounds::new(window.bounds),
-                                title: Some("Warp".to_owned()),
+                                title: Some(window_title()),
                                 fullscreen_state: window.fullscreen_state,
                                 background_blur_radius_pixels,
                                 background_blur_texture,
@@ -805,7 +811,7 @@ fn open_from_restored(arg: &OpenFromRestoredArg, ctx: &mut AppContext) {
                 ctx.add_window(
                     AddWindowOptions {
                         window_bounds: WindowBounds::new(window.bounds),
-                        title: Some("Warp".to_owned()),
+                        title: Some(window_title()),
                         fullscreen_state: window.fullscreen_state,
                         background_blur_radius_pixels,
                         background_blur_texture,
@@ -965,7 +971,7 @@ fn open_team_settings_with_email_invite_in_new_window(
         if let AuthOnboardingState::Terminal(workspace_view_handle) =
             &root_view.auth_onboarding_state
         {
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
             let email_invite = arg.invite_email.clone();
             workspace_view_handle.update(ctx, |_, ctx| {
                 let _ = ctx.spawn(initial_load_complete, move |workspace, _, ctx| {
@@ -1001,7 +1007,7 @@ fn open_mcp_settings_in_new_window(args: &OpenMCPSettingsArgs, ctx: &mut AppCont
         if let AuthOnboardingState::Terminal(workspace_view_handle) =
             &root_view.auth_onboarding_state
         {
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
             workspace_view_handle.update(ctx, |_, ctx| {
                 let _ = ctx.spawn(initial_load_complete, move |workspace, _, ctx| {
                     workspace.open_mcp_servers_page(
@@ -1022,7 +1028,7 @@ fn open_codex_in_new_window(_: &(), ctx: &mut AppContext) {
         if let AuthOnboardingState::Terminal(workspace_view_handle) =
             &root_view.auth_onboarding_state
         {
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
             workspace_view_handle.update(ctx, |_, ctx| {
                 let _ = ctx.spawn(initial_load_complete, move |workspace, _, ctx| {
                     workspace.open_codex_modal(ctx)
@@ -1178,7 +1184,7 @@ fn default_window_options(window_settings: &WindowSettings, ctx: &AppContext) ->
     AddWindowOptions {
         window_style,
         window_bounds: next_bounds,
-        title: Some("Warp".to_owned()),
+        title: Some(window_title()),
         background_blur_radius_pixels: Some(*window_settings.background_blur_radius),
         background_blur_texture: *window_settings.background_blur_texture,
         on_gpu_driver_selected: on_gpu_driver_selected_callback(),
@@ -1363,7 +1369,7 @@ fn toggle_quake_mode_window(global_resource_handles: &GlobalResourceHandles, ctx
                 AddWindowOptions {
                     window_style: WindowStyle::Pin,
                     window_bounds: WindowBounds::ExactPosition(config.window_bounds),
-                    title: Some("Warp".to_owned()),
+                    title: Some(window_title()),
                     background_blur_radius_pixels: Some(*window_settings.background_blur_radius),
                     background_blur_texture: *window_settings.background_blur_texture,
                     // Ignore the quake window for positioning the next window
@@ -1629,7 +1635,7 @@ pub struct RootView {
     /// Stores the tutorial from onboarding when the user needs to log in before
     /// the guided tour can start. Consumed after auth completes.
     pending_tutorial: Option<OnboardingTutorial>,
-    /// settings to apply after a new user login / initial cloud load completes
+    /// settings to apply after auth / onboarding 状态切换完成
     pending_post_auth_onboarding_settings: Option<SelectedSettings>,
     paste_auth_token_modal: Option<ViewHandle<PasteAuthTokenModalView>>,
 }
@@ -1648,9 +1654,9 @@ impl RootView {
             me.handle_auth_manager_event(event, ctx);
         });
 
-        ctx.subscribe_to_model(&CloudPreferencesSyncer::handle(ctx), |me, _, event, ctx| {
-            me.handle_cloud_preferences_syncer_event(event, ctx);
-        });
+        // OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。
+        // 原 `InitialLoadCompleted` 事件用于在云端 preferences 同步完成后调用
+        // `apply_onboarding_settings`,本地化场景下 onboarding 设置直接本地应用。
 
         let auth_view =
             ctx.add_typed_action_view(|ctx| AuthView::new(AuthViewVariant::Initial, ctx));
@@ -1852,13 +1858,6 @@ impl RootView {
     }
 
     // Switch to Auth Screen while destroying Workspace.
-    fn log_out(&mut self, _: &(), ctx: &mut ViewContext<Self>) -> bool {
-        self.auth_onboarding_state.log_out(ctx);
-        ctx.focus_self();
-        ctx.notify();
-        true
-    }
-
     fn show_needs_sso_link_view(&mut self, email: String, ctx: &mut ViewContext<Self>) -> bool {
         self.needs_sso_link_view.update(ctx, |view, _| {
             view.set_email(email);
@@ -2289,6 +2288,9 @@ impl RootView {
                         me.focus(ctx);
                         ctx.notify();
                     }
+                    // OpenWarp Wave 3-1:`TokenSubmitted` 由 stub facade 提供,运行时
+                    // 不会被触发。
+                    PasteAuthTokenModalEvent::TokenSubmitted(_) => {}
                 });
                 ctx.focus(&modal);
                 self.paste_auth_token_modal = Some(modal);
@@ -2835,7 +2837,7 @@ impl RootView {
     ) -> bool {
         if let AuthOnboardingState::Terminal(handle) = &self.auth_onboarding_state {
             let autoinstall = args.autoinstall.clone();
-            let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+            let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
             handle.update(ctx, |_, ctx| {
                 let _ = ctx.spawn(initial_load_complete, move |workspace, _, ctx| {
                     workspace.open_mcp_servers_page(
@@ -2886,12 +2888,12 @@ impl RootView {
         true
     }
 
-    /// Syncs the local "onboarding completed" flag to the server if the user
-    /// finished onboarding pre-login and has since authenticated. Runs on every
-    /// `AuthComplete`, so it also covers users who skipped login during onboarding
-    /// and later signed up through a different entrypoint (e.g. login modal,
-    /// settings, command palette) while already in the `Terminal` state.
-    fn sync_local_onboarding_to_server(auth_state: &AuthState, ctx: &mut AppContext) {
+    /// 如果用户在进入终端前已完成本地 onboarding,则在 auth facade 进入“可用”状态后
+    /// 立刻补齐本地 `is_onboarded` 标记。
+    ///
+    /// 该逻辑在每次 `AuthComplete` 时运行,因此也覆盖“先跳过登录,之后从其它入口进入
+    /// 已认证态”的路径;整个过程只更新本地 auth facade,不做任何服务端同步。
+    fn finalize_local_onboarding_after_auth(auth_state: &AuthState, ctx: &mut AppContext) {
         let is_onboarded = auth_state.is_onboarded().unwrap_or(true);
         let is_anonymous = auth_state.is_user_anonymous().unwrap_or(false);
         let has_completed_local_onboarding = has_completed_local_onboarding(ctx);
@@ -2908,12 +2910,9 @@ impl RootView {
             AuthManagerEvent::AuthComplete => {
                 self.paste_auth_token_modal = None;
 
-                // If onboarding was completed pre-login, sync the server-side flag now
-                // that the user is authenticated. This must happen regardless of the
-                // current `auth_onboarding_state` so we also cover users who skipped
-                // login during onboarding and later signed up from a different
-                // entrypoint (i.e. we're already in the `Terminal` state).
-                Self::sync_local_onboarding_to_server(&auth_state, ctx);
+                // 如果 onboarding 在进入 auth 完成态之前已结束,这里补齐本地
+                // `is_onboarded` 位,避免后续仍按“未完成引导”分支行事。
+                Self::finalize_local_onboarding_after_auth(&auth_state, ctx);
 
                 // If the user needs SSO after auth is complete, no matter what their current state is,
                 // we need to block their access to the rest of the app.
@@ -2975,9 +2974,8 @@ impl RootView {
                             // application, which ought to be valid.
                             self.web_handoff(ctx);
                         } else {
-                            // On native, force sign them out, as they should not be able to continue
-                            // to use Warp. Instead, they can sign in or up with a valid account.
-                            crate::auth::log_out(ctx);
+                            // OpenWarp 已移除 log_out UI 入口,native 不再强制登出。
+                            log::warn!("User account disabled; ignoring (OpenWarp 已移除 log_out)");
                         }
                     }
                 }
@@ -3033,12 +3031,7 @@ impl RootView {
     ) {
         match event {
             AuthOverrideWarningModalEvent::Close => {
-                if matches!(
-                    self.auth_onboarding_state,
-                    AuthOnboardingState::ConfirmIncomingAuth(_)
-                ) {
-                    self.log_out(&(), ctx);
-                }
+                // OpenWarp 已移除 log_out 入口,关闭时不再触发登出。
             }
             AuthOverrideWarningModalEvent::BulkExport => {
                 self.export_all_warp_drive_objects(ctx);
@@ -3184,28 +3177,9 @@ impl RootView {
         true
     }
 
-    /// If onboarding stashed `SelectedSettings` to be applied after auth + the
-    /// initial cloud-pref sync, drain the stash and apply now.
-    ///
-    /// Mirrors `start_pending_tutorial` in shape but triggers on a later event:
-    /// `CloudPreferencesSyncerEvent::InitialLoadCompleted` fires once
-    /// `handle_initial_load` has finished reconciling cloud→local, so any
-    /// writes we make here are the last writes and won't be clobbered by that
-    /// pass. By this point the user is also logged in, so AIExecutionProfile
-    /// edits can successfully create cloud objects via `edit_profile_internal`.
-    fn handle_cloud_preferences_syncer_event(
-        &mut self,
-        event: &CloudPreferencesSyncerEvent,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        if !matches!(event, CloudPreferencesSyncerEvent::InitialLoadCompleted) {
-            return;
-        }
-        let Some(selected_settings) = self.pending_post_auth_onboarding_settings.take() else {
-            return;
-        };
-        apply_onboarding_settings(&selected_settings, ctx);
-    }
+    /// OpenWarp(本地化,Phase 5):原 `handle_cloud_preferences_syncer_event` 在云端
+    /// preferences 同步初始加载完成后应用 onboarding settings,随同步器物理删除。
+    /// onboarding settings 现在在 onboarding 完成时直接应用,不需要延迟到 cloud sync 后。
 
     /// If onboarding stored a pending tutorial (because login was required first),
     /// start it now that the workspace exists.
@@ -3417,9 +3391,8 @@ impl WorkspaceArgs {
 impl AuthOnboardingState {
     fn complete_auth_and_create_workspace(&mut self, ctx: &mut ViewContext<RootView>) {
         // Check if we should show onboarding (only for users who are not yet onboarded).
-        // The server-side `is_onboarded` flag is synced separately by
-        // `RootView::sync_local_onboarding_to_server`, which runs on every `AuthComplete`
-        // before we get here.
+        // 本地 `is_onboarded` 标记会在 `AuthComplete` 时由
+        // `RootView::finalize_local_onboarding_after_auth` 补齐。
         let auth_state = AuthStateProvider::as_ref(ctx).get();
         let is_onboarded = auth_state.is_onboarded().unwrap_or(true);
         let is_anonymous = auth_state.is_user_anonymous().unwrap_or(false);
@@ -3533,57 +3506,6 @@ impl AuthOnboardingState {
                 *self = AuthOnboardingState::NeedsSsoLink(AuthOnboardingTarget::Terminal(
                     terminal_view_handle.clone(),
                 ))
-            }
-        }
-    }
-
-    fn log_out(&mut self, ctx: &mut ViewContext<RootView>) {
-        match self {
-            AuthOnboardingState::Auth(_) => (),
-            AuthOnboardingState::ConfirmIncomingAuth(workspace_args) => {
-                *self = AuthOnboardingState::Auth(workspace_args.clone());
-                ctx.emit(RootViewEvent::AuthOnboardingStateChanged);
-            }
-            #[cfg(target_family = "wasm")]
-            AuthOnboardingState::WebImport(_) => {
-                // TODO(ben): Eventually, we could support logout here by logging out of the JS
-                // Firebase client.
-            }
-            AuthOnboardingState::NeedsSsoLink(needs_sso_link_mode) => match needs_sso_link_mode {
-                AuthOnboardingTarget::Workspace(args) => {
-                    *self = AuthOnboardingState::Auth(args.clone());
-                    ctx.emit(RootViewEvent::AuthOnboardingStateChanged);
-                }
-                AuthOnboardingTarget::Terminal(_) => {}
-            },
-            AuthOnboardingState::Onboarding { .. } | AuthOnboardingState::LoginSlide { .. } => {
-                // No workspace to clean up for onboarding/login slide state
-            }
-            AuthOnboardingState::Terminal(workspace) => {
-                // Clean up current workspace before resetting.
-                workspace.update(ctx, |workspace, ctx| {
-                    workspace.on_log_out(ctx);
-                });
-
-                let global_resource_handles =
-                    GlobalResourceHandlesProvider::as_ref(ctx).get().clone();
-                // When a user logs out, reset workspace_setting so user logs back into a
-                // fresh workspace.
-                let workspace_setting = NewWorkspaceSource::Empty {
-                    previous_active_window: None,
-                    shell: None,
-                };
-                let workspace_args = WorkspaceArgs {
-                    global_resource_handles,
-                    server_time: None,
-                    workspace_setting,
-                };
-
-                // Auth no longer holds the original workspace view handle
-                // This way it is destroyed at this step, and we will re-create
-                // a new workspace view handle when the user logs in.
-                *self = AuthOnboardingState::Auth(workspace_args.into());
-                ctx.emit(RootViewEvent::AuthOnboardingStateChanged);
             }
         }
     }

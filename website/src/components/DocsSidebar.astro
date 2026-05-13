@@ -20,91 +20,31 @@ const groups: Group[] = [
   {
     label_en: 'Get Started',
     label_zh: '快速开始',
-    collapsible: true,
     items: [
-      { slug: 'introduction', label_en: 'Introduction', label_zh: '介绍' },
-      { slug: 'why-fork', label_en: 'Why a fork?', label_zh: '为什么 fork' },
-      { slug: 'install', label_en: 'Install', label_zh: '安装' },
-      { slug: 'first-run', label_en: 'First run', label_zh: '首次运行' },
-    ],
-  },
-  {
-    label_en: 'Concepts',
-    label_zh: '核心概念',
-    collapsible: true,
-    items: [
-      { slug: 'blocks', label_en: 'Blocks', label_zh: 'Blocks' },
-      { slug: 'workflows', label_en: 'Workflows', label_zh: '工作流' },
-      { slug: 'agent-loop', label_en: 'Agent loop', label_zh: 'Agent 循环' },
-    ],
-  },
-  {
-    label_en: 'Providers',
-    label_zh: 'Provider 配置',
-    collapsible: true,
-    items: [
-      { slug: 'providers-overview', label_en: 'Overview', label_zh: '总览' },
-      { slug: 'providers-protocols', label_en: 'Native protocols', label_zh: '原生协议' },
-      { slug: 'providers-openai', label_en: 'OpenAI-compatible', label_zh: 'OpenAI 兼容' },
-      { slug: 'providers-deepseek', label_en: 'DeepSeek', label_zh: 'DeepSeek' },
-      { slug: 'providers-ollama', label_en: 'Ollama (local)', label_zh: 'Ollama(本地)' },
-    ],
-  },
-  {
-    label_en: 'SSH Manager',
-    label_zh: 'SSH 管理',
-    items: [
-      { slug: 'ssh-overview', label_en: 'Overview', label_zh: '总览' },
-      { slug: 'ssh-config', label_en: 'Configuration', label_zh: '配置' },
-      { slug: 'ssh-jump', label_en: 'Jump hosts', label_zh: '跳板机' },
-    ],
-  },
-  {
-    label_en: 'Privacy',
-    label_zh: '隐私',
-    items: [
-      { slug: 'privacy-defaults', label_en: 'Defaults', label_zh: '默认设置' },
-      { slug: 'privacy-keys', label_en: 'Keys on disk', label_zh: '本地密钥' },
-    ],
-  },
-  {
-    label_en: 'Localization',
-    label_zh: '本地化',
-    items: [
-      { slug: 'i18n', label_en: 'EN / 简体中文', label_zh: '英文 / 简体中文' },
-      { slug: 'i18n-contrib', label_en: 'Contribute a locale', label_zh: '贡献语言包' },
+      { slug: 'quickstart', label_en: 'Quick Start', label_zh: '快速开始' },
     ],
   },
 ];
 
 const groupIcons: Record<string, string> = {
   'Get Started': '<path d="M3 4l5 3 5-3M3 4v8l5 3 5-3V4M3 4l5-3 5 3"/>',
-  'Concepts': '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
-  'Providers': '<path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7"/>',
-  'SSH Manager': '<path d="M3 6l3 3 7-7"/><path d="M13 8v5H3V3h7"/>',
-  'Privacy': '<path d="M3 5h10v8H3z"/><path d="M3 5l5-3 5 3"/>',
-  'Localization': '<circle cx="8" cy="8" r="5.5"/><path d="M3 8c2-3 8-3 10 0M3 8c2 3 8 3 10 0"/>',
 };
 ---
 <aside class="sidebar" id="docs-sidebar">
   <div class="sb-version">
-    <span class="v">v0.x · main</span>
-    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 5l3 3 3-3"/></svg>
+    <span class="v">preview</span>
   </div>
-  <div class="sb-search">
+  <button class="sb-search" id="docs-search-trigger" type="button">
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="M14 14l-3.5-3.5"/></svg>
     <span data-lang="en">Search docs</span><span data-lang="zh">搜索文档</span>
     <span class="kbd">⌘K</span>
-  </div>
+  </button>
 
   {groups.map((g) => (
     <div class="sb-group">
       <div class="sb-head">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" set:html={groupIcons[g.label_en] ?? ''}></svg>
         <span data-lang="en">{g.label_en}</span><span data-lang="zh">{g.label_zh}</span>
-        {g.collapsible && (
-          <svg class="chev" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 5l3 3 3-3"/></svg>
-        )}
       </div>
       <div class="sb-list">
         {g.items.map((it) => (

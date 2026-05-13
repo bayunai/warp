@@ -6,7 +6,7 @@ use warpui::App;
 use crate::{
     cloud_object::model::persistence::CloudModel,
     network::NetworkStatus,
-    server::{cloud_objects::update_manager::UpdateManager, sync_queue::SyncQueue},
+    server::cloud_objects::update_manager::UpdateManager,
     workspaces::{team_tester::TeamTesterStatus, user_workspaces::UserWorkspaces},
     GlobalResourceHandles, GlobalResourceHandlesProvider,
 };
@@ -24,7 +24,6 @@ fn test_expand_directories() {
         app.add_singleton_model(UserWorkspaces::default_mock);
         app.add_singleton_model(|_| Appearance::mock());
         app.add_singleton_model(|_| NetworkStatus::new());
-        app.add_singleton_model(SyncQueue::mock);
         app.add_singleton_model(TeamTesterStatus::mock);
         app.add_singleton_model(UpdateManager::mock);
 

@@ -141,6 +141,17 @@ impl DetailsBar {
                     .build()
                     .finish()
             });
+        } else {
+            // openWarp UX: 给 "铅笔" 切换按钮加 tooltip,避免用户(特别是首次使用)
+            // 不知道这个图标能点、点了会发生什么。Tooltip 按当前 mode
+            // 表达「点击后会发生的动作」,而不是重复旁边的状态文字。
+            let tooltip_text = match mode {
+                Mode::View => crate::t!("common-tooltip-enter-edit-mode"),
+                Mode::Editing => crate::t!("common-tooltip-exit-edit-mode"),
+            };
+            let ui_builder = appearance.ui_builder().clone();
+            edit_button = edit_button
+                .with_tooltip(move || ui_builder.tool_tip(tooltip_text.clone()).build().finish());
         }
 
         Container::new(

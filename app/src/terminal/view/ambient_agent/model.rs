@@ -8,7 +8,6 @@ use warp_core::send_telemetry_from_ctx;
 use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::{Entity, EntityId, ModelContext, SingletonEntity};
 
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent_conversations_model::AgentConversationsModel;
 use crate::ai::ambient_agents::spawn::{spawn_task, AmbientAgentEvent};
@@ -23,7 +22,6 @@ use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::execution_profiles::{CloudAgentComputerUseState, ComputerUsePermission};
 use crate::ai::llms::{LLMId, LLMPreferences};
 use crate::cloud_object::model::persistence::{CloudModel, CloudModelEvent};
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ServerId, SyncId};
 use crate::server::server_api::ai::{
     AgentConfigSnapshot, AmbientAgentTaskState, AttachmentInput, SpawnAgentRequest,
@@ -132,7 +130,7 @@ impl AmbientAgentViewModel {
         // Validate the default environment once Warp Drive sync completes.
         // The environment ID may be restored from settings before environments are synced,
         // so we need to validate it once the initial load is complete.
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
         ctx.spawn(initial_load_complete, |me, _, ctx| {
             me.validate_environment_after_initial_load(ctx);
         });
@@ -407,49 +405,18 @@ impl AmbientAgentViewModel {
         ctx.emit(AmbientAgentViewModelEvent::EnteredComposingState);
     }
 
-    /// This is used when we join an already-running ambient agent shared session (e.g. from the
-    /// agent management view). We want the ambient agent UI affordances (like the environment
-    /// selector) to be visible even though we did not spawn the agent from this view model.
+    /// 用于加入已在运行的 ambient agent 共享会话。
     pub fn enter_viewing_existing_session(
         &mut self,
         task_id: AmbientAgentTaskId,
         ctx: &mut ModelContext<Self>,
     ) {
-        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-
-        // Store the task ID for later use
         self.task_id = Some(task_id);
 
         if matches!(self.status, Status::NotAmbientAgent) {
             self.status = Status::AgentRunning;
         }
-
-        // Fetch the task so we can set the correct environment (instead of defaulting to the most
-        // recently-used one) and the correct harness (so non-oz viewers know to use the
-        // queued-prompt / harness-command-started flow).
-        ctx.spawn(
-            async move { ai_client.get_ambient_agent_task(&task_id).await },
-            |me, result, ctx| match result {
-                Ok(task) => {
-                    let snapshot = task.agent_config_snapshot.as_ref();
-                    let environment_id = snapshot
-                        .and_then(|s| s.environment_id.as_deref())
-                        .and_then(|id| ServerId::try_from(id).ok())
-                        .map(SyncId::ServerId);
-                    let harness = snapshot
-                        .and_then(|s| s.harness.as_ref())
-                        .map(|h| h.harness_type)
-                        .unwrap_or(Harness::Oz);
-
-                    me.set_environment_id(environment_id, ctx);
-                    me.set_harness(harness, ctx);
-                }
-                Err(err) => {
-                    log::warn!("Failed to fetch ambient agent task for shared session: {err}");
-                    me.set_environment_id(None, ctx);
-                }
-            },
-        );
+        ctx.notify();
     }
 
     pub fn status(&self) -> &Status {
@@ -613,12 +580,6 @@ impl AmbientAgentViewModel {
                         // even though its server-side source may not be user-initiated.
                         AgentConversationsModel::handle(ctx).update(ctx, |model, ctx| {
                             model.mark_task_as_manually_opened(task_id, ctx);
-                        });
-
-                        // Mark this task as active immediately so it renders under the Active section
-                        // (and doesn't briefly appear under Past before the shared session join completes).
-                        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
-                            model.register_ambient_session(me.terminal_view_id, task_id, ctx);
                         });
 
                         // Emit event so terminal view knows to show the info button

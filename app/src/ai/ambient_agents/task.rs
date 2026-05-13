@@ -286,15 +286,6 @@ pub struct AttachmentInput {
     pub data: String, // base64-encoded data
 }
 
-/// Information about a task attachment retrieved from the server
-#[derive(Clone, Debug)]
-pub struct TaskAttachment {
-    pub file_id: String,
-    pub filename: String,
-    pub download_url: String,
-    pub mime_type: String,
-}
-
 impl AmbientAgentTask {
     /// Total credits used (inference + compute).
     pub fn credits_used(&self) -> Option<f32> {

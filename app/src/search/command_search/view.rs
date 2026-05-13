@@ -29,10 +29,7 @@ use crate::{
         execution_context::WarpAiExecutionContext, GenerateCommandsFromNaturalLanguageError,
     },
     appearance::Appearance,
-    auth::{
-        auth_manager::AuthManager, auth_state::AuthState, auth_view_modal::AuthViewVariant,
-        AuthStateProvider, UserUid,
-    },
+    auth::{AuthManager, AuthState, AuthStateProvider, AuthViewVariant, UserUid},
     completer::SessionContext,
     drive::settings::WarpDriveSettings,
     search::{

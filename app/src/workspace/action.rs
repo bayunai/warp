@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+﻿use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -9,7 +9,7 @@ use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::AIAgentExchangeId;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentVersion};
-use crate::auth::auth_manager::LoginGatedFeature;
+use crate::auth::LoginGatedFeature;
 use crate::drive::items::WarpDriveItemId;
 use crate::drive::CloudObjectTypeAndId;
 use crate::palette::PaletteMode;
@@ -150,6 +150,8 @@ pub enum WorkspaceAction {
     },
     /// 打开/关闭左侧 panel 的 SSH 管理器视图(openWarp 独有)。
     ToggleSshManager,
+    /// 打开/关闭左侧 panel 的 Skill 管理器视图(openWarp 独有)。
+    ToggleSkillManager,
     AddTabWithShell {
         shell: AvailableShell,
         source: AddTabWithShellSource,
@@ -397,8 +399,8 @@ pub enum WorkspaceAction {
     },
     OpenAIFactCollection,
     OpenMCPServerCollection,
-    /// Open the Environment Management pane in Create mode.
-    OpenEnvironmentManagementPane,
+    // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` WorkspaceAction 随 Cloud Mode UI
+    // 子系统物理删。
     ToggleAIDocumentPane {
         document_id: AIDocumentId,
         document_version: AIDocumentVersion,
@@ -623,9 +625,6 @@ pub enum WorkspaceAction {
     OpenWorktreeInRepo {
         repo_path: String,
     },
-    /// Open a folder picker to add a new repo to PersistedWorkspace (from the
-    /// "New worktree config" submenu's "+ Add new repo..." item).
-    OpenWorktreeAddRepoPicker,
     SaveCurrentTabAsNewConfig(usize),
     SyncTrafficLights,
     /// Opens a tab config file in the editor and dismisses the associated error toast.
@@ -654,9 +653,6 @@ pub enum WorkspaceAction {
     FixSettingsWithOz {
         error_description: String,
     },
-    /// Opens (or focuses) the in-app network log pane as a right-split of the
-    /// active pane group. Gated on `ContextFlag::NetworkLogConsole`.
-    OpenNetworkLogPane,
 }
 
 impl From<&WorkspaceAction> for LoginGatedFeature {
@@ -728,6 +724,7 @@ impl WorkspaceAction {
             | AddTerminalTab { .. }
             | OpenSshTerminal { .. }
             | ToggleSshManager
+            | ToggleSkillManager
             | AddTabWithShell { .. }
             | AddGetStartedTab
             | AddAgentTab
@@ -839,7 +836,6 @@ impl WorkspaceAction {
             | OpenNewWorktreeModal
             | OpenNewWorktreeRepoPicker
             | OpenWorktreeInRepo { .. }
-            | OpenWorktreeAddRepoPicker
             | Crash
             | Panic
             | DumpHeapProfile
@@ -919,8 +915,7 @@ impl WorkspaceAction {
             | TabConfigSidecarEditConfig { .. }
             | TabConfigSidecarRemoveConfig { .. }
             | OpenSettingsFile
-            | FixSettingsWithOz { .. }
-            | OpenNetworkLogPane => false,
+            | FixSettingsWithOz { .. } => false,
             #[cfg(debug_assertions)]
             ShowHoaOnboardingFlow => false,
             #[cfg(target_family = "wasm")]
@@ -945,7 +940,8 @@ impl WorkspaceAction {
             FileRenamed { .. } => false, // File rename doesn't change workspace state
             #[cfg(feature = "local_fs")]
             FileDeleted { .. } => false, // File deletion doesn't change workspace state
-            OpenEnvironmentManagementPane => false,
+            // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` WorkspaceAction 随 Cloud Mode UI
+            // 子系统物理删。
             #[cfg(target_os = "linux")]
             DismissWaylandCrashRecoveryBannerAndOpenLink => false,
             #[cfg(target_family = "wasm")]

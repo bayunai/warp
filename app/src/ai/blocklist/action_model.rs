@@ -52,10 +52,7 @@ use parking_lot::FairMutex;
 use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
 
 use crate::{
-    ai::{
-        agent::{AIAgentAction, AIAgentActionId, AIAgentActionResult},
-        get_relevant_files::controller::GetRelevantFilesController,
-    },
+    ai::agent::{AIAgentAction, AIAgentActionId, AIAgentActionResult},
     terminal::{
         model::session::active_session::ActiveSession, model_events::ModelEventDispatcher,
         TerminalModel,
@@ -63,9 +60,8 @@ use crate::{
 };
 
 use self::execute::{
-    ask_user_question::AskUserQuestionExecutor, search_codebase::SearchCodebaseExecutor,
-    BlocklistAIActionExecutor, BlocklistAIActionExecutorEvent, NotExecutedReason,
-    RunningActionPhase, TryExecuteResult,
+    ask_user_question::AskUserQuestionExecutor, BlocklistAIActionExecutor,
+    BlocklistAIActionExecutorEvent, NotExecutedReason, RunningActionPhase, TryExecuteResult,
 };
 
 use super::BlocklistAIHistoryModel;
@@ -259,7 +255,6 @@ impl BlocklistAIActionModel {
         terminal_model: Arc<FairMutex<TerminalModel>>,
         active_session: ModelHandle<ActiveSession>,
         model_event_dispatcher: &ModelHandle<ModelEventDispatcher>,
-        get_relevant_files_controller: ModelHandle<GetRelevantFilesController>,
         terminal_view_id: EntityId,
         ctx: &mut ModelContext<Self>,
     ) -> Self {
@@ -268,7 +263,6 @@ impl BlocklistAIActionModel {
                 terminal_model,
                 active_session.clone(),
                 model_event_dispatcher,
-                get_relevant_files_controller,
                 terminal_view_id,
                 ctx,
             )
@@ -376,13 +370,6 @@ impl BlocklistAIActionModel {
             .as_ref(app)
             .request_file_edits_executor()
             .clone()
-    }
-
-    pub fn search_codebase_executor<'a>(
-        &'a self,
-        app: &'a AppContext,
-    ) -> &'a ModelHandle<SearchCodebaseExecutor> {
-        self.executor.as_ref(app).search_codebase_executor()
     }
 
     pub fn suggest_prompt_executor(

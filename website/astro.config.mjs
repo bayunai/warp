@@ -7,7 +7,10 @@ export default defineConfig({
   integrations: [mdx(), sitemap()],
   trailingSlash: 'ignore',
   redirects: {
-    '/docs': '/docs/introduction',
+    '/docs': '/docs/quickstart',
+    '/docs/introduction': '/docs/quickstart',
+    '/docs/install': '/docs/quickstart',
+    '/docs/first-run': '/docs/quickstart',
   },
   build: {
     format: 'directory',

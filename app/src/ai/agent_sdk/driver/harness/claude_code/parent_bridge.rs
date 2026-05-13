@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use futures::StreamExt as _;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use tempfile::NamedTempFile;
@@ -25,11 +26,12 @@ use warpui::ModelSpawner;
 
 use crate::ai::agent_events::{
     run_agent_event_driver, AgentEventConsumer, AgentEventConsumerControlFlow,
-    AgentEventDriverConfig, MessageHydrator, ServerApiAgentEventSource,
+    AgentEventDriverConfig, AgentEventSource, AgentEventSourceItem, MessageHydrator,
 };
 use crate::ai::agent_sdk::driver::{AgentDriver, OZ_MESSAGE_LISTENER_STATE_ROOT_ENV};
+use crate::server::server_api::ai::AIClient;
 use crate::server::server_api::ai::AgentRunEvent;
-use crate::server::server_api::ServerApi;
+use crate::server::server_api::AgentEventStreamClient;
 
 const LEGACY_MESSAGE_LISTENER_STATE_ROOT_ENV: &str = "OZ_PARENT_STATE_ROOT";
 const PARENT_BRIDGE_DEFAULT_STATE_ROOT: &str = ".claude-code/oz-parent-bridge";
@@ -50,6 +52,65 @@ pub(super) struct MessageBridge {
 }
 struct MessageBridgeRuntime {
     task: SpawnedFutureHandle,
+}
+
+cfg_if::cfg_if! {
+    if #[cfg(target_family = "wasm")] {
+        type ProviderAgentEventSourceStream =
+            futures::stream::LocalBoxStream<'static, Result<AgentEventSourceItem>>;
+    } else {
+        type ProviderAgentEventSourceStream =
+            futures::stream::BoxStream<'static, Result<AgentEventSourceItem>>;
+    }
+}
+
+struct ProviderAgentEventSource {
+    client: Arc<dyn AgentEventStreamClient>,
+}
+
+impl ProviderAgentEventSource {
+    fn new(client: Arc<dyn AgentEventStreamClient>) -> Self {
+        Self { client }
+    }
+}
+
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
+impl AgentEventSource for ProviderAgentEventSource {
+    async fn open_stream(
+        &self,
+        run_ids: &[String],
+        since_sequence: i64,
+    ) -> Result<ProviderAgentEventSourceStream> {
+        let stream = self
+            .client
+            .stream_agent_events(run_ids, since_sequence)
+            .await?;
+
+        let stream = stream.filter_map(|event_result| async move {
+            match event_result {
+                Ok(reqwest_eventsource::Event::Open) => Some(Ok(AgentEventSourceItem::Open)),
+                Ok(reqwest_eventsource::Event::Message(message)) => {
+                    match serde_json::from_str::<AgentRunEvent>(&message.data) {
+                        Ok(event) => Some(Ok(AgentEventSourceItem::Event(event))),
+                        Err(err) => {
+                            log::warn!("Skipping malformed agent event from SSE stream: {err}");
+                            None
+                        }
+                    }
+                }
+                Err(err) => Some(Err(anyhow!("SSE stream error: {err:?}"))),
+            }
+        });
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_family = "wasm")] {
+                Ok(stream.boxed_local())
+            } else {
+                Ok(stream.boxed())
+            }
+        }
+    }
 }
 
 struct MessageBridgeEventConsumer {
@@ -142,7 +203,7 @@ impl MessageBridge {
     pub(super) async fn start(
         &self,
         foreground: &ModelSpawner<AgentDriver>,
-        server_api: Arc<ServerApi>,
+        agent_event_stream_client: Arc<dyn AgentEventStreamClient>,
     ) -> Result<()> {
         if self.runtime.lock().is_some() {
             return Ok(());
@@ -155,8 +216,12 @@ impl MessageBridge {
             .spawn(move |_, ctx| {
                 ctx.spawn(
                     async move {
-                        if let Err(err) =
-                            run_parent_bridge_forever(server_api, run_id, state_dir.clone()).await
+                        if let Err(err) = run_parent_bridge_forever(
+                            agent_event_stream_client,
+                            run_id,
+                            state_dir.clone(),
+                        )
+                        .await
                         {
                             log::warn!(
                                 "Claude message bridge stopped for {}: {err:#}",
@@ -173,12 +238,12 @@ impl MessageBridge {
         Ok(())
     }
 
-    pub(super) async fn handle_session_update(&self, server_api: Arc<ServerApi>) -> Result<()> {
+    pub(super) async fn handle_session_update(&self, ai_client: Arc<dyn AIClient>) -> Result<()> {
         if !self.state_dir.exists() {
             return Ok(());
         }
 
-        let hydrator = MessageHydrator::new(server_api);
+        let hydrator = MessageHydrator::new(ai_client);
         let _guard = self.state_lock.lock().await;
         acknowledge_parent_bridge_hook_output(&hydrator, &self.state_dir).await?;
         prepare_parent_bridge_hook_output(
@@ -189,12 +254,12 @@ impl MessageBridge {
         .await
     }
 
-    pub(super) async fn flush_acks(&self, server_api: Arc<ServerApi>) -> Result<()> {
+    pub(super) async fn flush_acks(&self, ai_client: Arc<dyn AIClient>) -> Result<()> {
         if !self.state_dir.exists() {
             return Ok(());
         }
 
-        let hydrator = MessageHydrator::new(server_api);
+        let hydrator = MessageHydrator::new(ai_client);
         let _guard = self.state_lock.lock().await;
         acknowledge_parent_bridge_hook_output(&hydrator, &self.state_dir).await
     }
@@ -574,7 +639,7 @@ pub(super) async fn acknowledge_parent_bridge_hook_output(
 }
 
 async fn run_parent_bridge_forever(
-    server_api: Arc<ServerApi>,
+    agent_event_stream_client: Arc<dyn AgentEventStreamClient>,
     run_id: String,
     state_dir: PathBuf,
 ) -> Result<()> {
@@ -583,7 +648,7 @@ async fn run_parent_bridge_forever(
     // loop, which is all this per-session bridge needs because the state dir is
     // not reused across sessions.
     let config = AgentEventDriverConfig::retry_forever(vec![run_id.clone()], 0);
-    let source = ServerApiAgentEventSource::new(server_api);
+    let source = ProviderAgentEventSource::new(agent_event_stream_client);
     let mut consumer = MessageBridgeEventConsumer { run_id, state_dir };
     run_agent_event_driver(source, config, &mut consumer).await
 }

@@ -1,44 +1,26 @@
+// OpenWarp:`ManagedSecretsClient for ServerApi` 已本地化为 stub。
+// 历史职责:通过 warp.dev 后端 GraphQL 维护"团队/用户托管密钥"——
+// CRUD(create/update/delete)、列表(list_secrets)、配置查询
+// (get_managed_secret_configs)、按云端任务取密钥(get_task_secrets)、
+// 以及给 BYOH cloud agent task 颁发 OIDC 身份令牌
+// (issue_task_identity_token,后端再由 AWS STS / GCP STS 兑换 federated
+// credentials)。OpenWarp 已切除 cloud agent/任务运行链路,所有云端
+// 密钥相关动作无服务端可达,这里全部本地化:
+//   - 查询/列表类返回空集合,避免 UI 入口(若残留)崩溃。
+//   - 写动作 + 颁发 OIDC token 返回 `disabled in OpenWarp` 错误。
+// 保留:`ManagedSecretsClient` trait 路径、模块导出(`ManagedSecretConfigs`、
+// `ManagedSecretsClient`),crates/managed_secrets 上层 manager 与 agent_sdk
+// 多处直接消费。
+
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use cynic::{MutationBuilder, QueryBuilder};
-use warp_graphql::mutations::issue_task_identity_token::{
-    IssueTaskIdentityToken, IssueTaskIdentityTokenInput, IssueTaskIdentityTokenResult,
-    IssueTaskIdentityTokenVariables,
-};
-use warp_graphql::object_permissions::OwnerType;
-use warp_graphql::queries::list_managed_secrets::{
-    ListManagedSecrets, ListManagedSecretsVariables, ManagedSecretsInput, ManagedSecretsResult,
-};
-use warp_graphql::queries::managed_secret_config::{
-    GetManagedSecretConfig, GetManagedSecretConfigVariables, UserResult,
-};
-use warp_graphql::queries::task_secrets::{
-    ManagedSecretValue, TaskSecrets, TaskSecretsInput, TaskSecretsResult, TaskSecretsVariables,
-};
-use warp_graphql::{
-    managed_secrets::{ManagedSecret, ManagedSecretType},
-    mutations::{
-        create_managed_secret::{
-            CreateManagedSecret, CreateManagedSecretInput, CreateManagedSecretResult,
-            CreateManagedSecretVariables,
-        },
-        delete_managed_secret::{
-            DeleteManagedSecret, DeleteManagedSecretInput, DeleteManagedSecretResult,
-            DeleteManagedSecretVariables,
-        },
-        update_managed_secret::{
-            UpdateManagedSecret, UpdateManagedSecretInput, UpdateManagedSecretResult,
-            UpdateManagedSecretVariables,
-        },
-    },
-    object_permissions::Owner,
-};
+use warp_graphql::managed_secrets::{ManagedSecret, ManagedSecretType};
+use warp_graphql::queries::task_secrets::ManagedSecretValue;
 use warp_managed_secrets::client::{SecretOwner, TaskIdentityToken};
 
 use super::ServerApi;
-use crate::server::graphql::{get_request_context, get_user_facing_error_message};
 
 pub use warp_managed_secrets::client::{ManagedSecretConfigs, ManagedSecretsClient};
 
@@ -46,246 +28,56 @@ pub use warp_managed_secrets::client::{ManagedSecretConfigs, ManagedSecretsClien
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 impl ManagedSecretsClient for ServerApi {
     async fn get_managed_secret_configs(&self) -> Result<ManagedSecretConfigs> {
-        let variables = GetManagedSecretConfigVariables {
-            request_context: get_request_context(),
-        };
-        let operation = GetManagedSecretConfig::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.user {
-            UserResult::UserOutput(output) => {
-                let mut team_configs = HashMap::new();
-                for workspace in output.user.workspaces {
-                    for team in workspace.teams {
-                        if let Some(config) = team.managed_secrets {
-                            // DO NOT inline the `insert` call into the `debug_assert!` macro. It will get compiled out in release builds.
-                            let prior_config = team_configs.insert(team.uid.into_inner(), config);
-                            debug_assert!(
-                                prior_config.is_none(),
-                                "Duplicate team UID returned from server"
-                            );
-                        }
-                    }
-                }
-                Ok(ManagedSecretConfigs {
-                    user_secrets: output.user.managed_secrets,
-                    team_secrets: team_configs,
-                })
-            }
-            UserResult::UserFacingError(error) => {
-                Err(anyhow!(get_user_facing_error_message(error)))
-            }
-            UserResult::Unknown => Err(anyhow!(
-                "Unknown error while getting managed secret configs"
-            )),
-        }
+        Ok(ManagedSecretConfigs {
+            user_secrets: None,
+            team_secrets: HashMap::new(),
+        })
     }
 
     async fn create_managed_secret(
         &self,
-        owner: SecretOwner,
-        name: String,
-        secret_type: ManagedSecretType,
-        encrypted_value: String,
-        description: Option<String>,
+        _owner: SecretOwner,
+        _name: String,
+        _secret_type: ManagedSecretType,
+        _encrypted_value: String,
+        _description: Option<String>,
     ) -> Result<ManagedSecret> {
-        let graphql_owner = match owner {
-            SecretOwner::CurrentUser => Owner {
-                type_: OwnerType::User,
-                uid: None,
-            },
-            SecretOwner::Team { team_uid } => Owner {
-                type_: OwnerType::Team,
-                uid: Some(cynic::Id::new(team_uid)),
-            },
-        };
-
-        let variables = CreateManagedSecretVariables {
-            input: CreateManagedSecretInput {
-                description,
-                encrypted_value,
-                name,
-                owner: graphql_owner,
-                type_: secret_type,
-            },
-            request_context: get_request_context(),
-        };
-        let operation = CreateManagedSecret::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.create_managed_secret {
-            CreateManagedSecretResult::CreateManagedSecretOutput(output) => {
-                Ok(output.managed_secret)
-            }
-            CreateManagedSecretResult::UserFacingError(error) => {
-                Err(anyhow!(get_user_facing_error_message(error)))
-            }
-            CreateManagedSecretResult::Unknown => {
-                Err(anyhow!("Unknown error while creating managed secret"))
-            }
-        }
+        Err(anyhow!("Cloud managed secrets disabled in OpenWarp"))
     }
 
-    async fn delete_managed_secret(&self, owner: SecretOwner, name: String) -> Result<()> {
-        let graphql_owner = match owner {
-            SecretOwner::CurrentUser => Owner {
-                type_: OwnerType::User,
-                uid: None,
-            },
-            SecretOwner::Team { team_uid } => Owner {
-                type_: OwnerType::Team,
-                uid: Some(cynic::Id::new(team_uid)),
-            },
-        };
-
-        let variables = DeleteManagedSecretVariables {
-            input: DeleteManagedSecretInput {
-                name,
-                owner: graphql_owner,
-            },
-            request_context: get_request_context(),
-        };
-        let operation = DeleteManagedSecret::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.delete_managed_secret {
-            DeleteManagedSecretResult::DeleteManagedSecretOutput(_) => Ok(()),
-            DeleteManagedSecretResult::UserFacingError(error) => {
-                Err(anyhow!(get_user_facing_error_message(error)))
-            }
-            DeleteManagedSecretResult::Unknown => {
-                Err(anyhow!("Unknown error while deleting managed secret"))
-            }
-        }
+    async fn delete_managed_secret(&self, _owner: SecretOwner, _name: String) -> Result<()> {
+        Err(anyhow!("Cloud managed secrets disabled in OpenWarp"))
     }
 
     async fn update_managed_secret(
         &self,
-        owner: SecretOwner,
-        name: String,
-        encrypted_value: Option<String>,
-        description: Option<String>,
+        _owner: SecretOwner,
+        _name: String,
+        _encrypted_value: Option<String>,
+        _description: Option<String>,
     ) -> Result<ManagedSecret> {
-        let graphql_owner = match owner {
-            SecretOwner::CurrentUser => Owner {
-                type_: OwnerType::User,
-                uid: None,
-            },
-            SecretOwner::Team { team_uid } => Owner {
-                type_: OwnerType::Team,
-                uid: Some(cynic::Id::new(team_uid)),
-            },
-        };
-
-        let variables = UpdateManagedSecretVariables {
-            input: UpdateManagedSecretInput {
-                name,
-                owner: graphql_owner,
-                encrypted_value,
-                description,
-            },
-            request_context: get_request_context(),
-        };
-        let operation = UpdateManagedSecret::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.update_managed_secret {
-            UpdateManagedSecretResult::UpdateManagedSecretOutput(output) => {
-                Ok(output.managed_secret)
-            }
-            UpdateManagedSecretResult::UserFacingError(error) => {
-                Err(anyhow!(get_user_facing_error_message(error)))
-            }
-            UpdateManagedSecretResult::Unknown => {
-                Err(anyhow!("Unknown error while updating managed secret"))
-            }
-        }
+        Err(anyhow!("Cloud managed secrets disabled in OpenWarp"))
     }
 
     async fn list_secrets(&self) -> Result<Vec<ManagedSecret>> {
-        let variables = ListManagedSecretsVariables {
-            // Pagination over managed secrets is not yet supported.
-            input: ManagedSecretsInput { cursor: None },
-            request_context: get_request_context(),
-        };
-        let operation = ListManagedSecrets::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.managed_secrets {
-            ManagedSecretsResult::ManagedSecretsOutput(output) => Ok(output.managed_secrets),
-            ManagedSecretsResult::UserFacingError(error) => {
-                Err(anyhow!(get_user_facing_error_message(error)))
-            }
-            ManagedSecretsResult::Unknown => {
-                Err(anyhow!("Unknown error while listing managed secrets"))
-            }
-        }
+        Ok(Vec::new())
     }
 
     async fn get_task_secrets(
         &self,
-        task_id: String,
-        workload_token: String,
+        _task_id: String,
+        _workload_token: String,
     ) -> Result<HashMap<String, ManagedSecretValue>> {
-        let variables = TaskSecretsVariables {
-            input: TaskSecretsInput {
-                task_id: cynic::Id::new(task_id),
-                workload_token,
-            },
-            request_context: get_request_context(),
-        };
-        let operation = TaskSecrets::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.task_secrets {
-            TaskSecretsResult::TaskSecretsOutput(output) => {
-                let mut secrets = HashMap::new();
-                for entry in output.secrets {
-                    secrets.insert(entry.name, entry.value);
-                }
-                Ok(secrets)
-            }
-            TaskSecretsResult::UserFacingError(error) => {
-                Err(anyhow!(get_user_facing_error_message(error)))
-            }
-            TaskSecretsResult::Unknown => Err(anyhow!("Unknown error while getting task secrets")),
-        }
+        // BYOP 无云端任务密钥,返回空映射,允许 agent_sdk 路径继续走本地 secrets。
+        Ok(HashMap::new())
     }
 
     async fn issue_task_identity_token(
         &self,
-        options: warp_managed_secrets::client::IdentityTokenOptions,
+        _options: warp_managed_secrets::client::IdentityTokenOptions,
     ) -> Result<TaskIdentityToken> {
-        let requested_duration_seconds = options
-            .requested_duration
-            .as_secs()
-            .try_into()
-            .context("Requested duration out of bounds")?;
-        let variables = IssueTaskIdentityTokenVariables {
-            input: IssueTaskIdentityTokenInput {
-                audience: options.audience,
-                requested_duration_seconds,
-                subject_template: Some(options.subject_template.into_vec()),
-            },
-            request_context: get_request_context(),
-        };
-        let operation = IssueTaskIdentityToken::build(variables);
-        let response = self.send_graphql_request(operation, None).await?;
-
-        match response.issue_task_identity_token {
-            IssueTaskIdentityTokenResult::IssueTaskIdentityTokenOutput(output) => {
-                Ok(TaskIdentityToken {
-                    token: output.token,
-                    expires_at: output.expires_at.utc(),
-                    issuer: output.issuer,
-                })
-            }
-            IssueTaskIdentityTokenResult::UserFacingError(error) => {
-                Err(anyhow!(get_user_facing_error_message(error)))
-            }
-            IssueTaskIdentityTokenResult::Unknown => {
-                Err(anyhow!("Unknown error while issuing task identity token"))
-            }
-        }
+        // OpenWarp 无服务端 OIDC issuer,Bedrock/Vertex federated 凭据路径
+        // 直接失败;BYOP AWS 用户走 access key / SSO,与本路径无关。
+        Err(anyhow!("Task identity token issuance disabled in OpenWarp"))
     }
 }

@@ -1,15 +1,15 @@
 # openWarp 上游同步指南
 
-## 当前同步状态(基线 master = e089051,本地 openWarp tip = 3c4c11b)
+## 当前同步状态
 
-上游 0443f3f..upstream/master 共 **138 条 commit**,处理结果:
+| 阶段 | 上游范围 | commit 数 | 已合入 | 永久黑名单 | 暂不评估 | 完成日期 |
+|---|---|---:|---:|---:|---:|---|
+| 第一轮(初始) | `0443f3f..e089051` | 138 | 81 | 57 | 0 | 2026-05-04 |
+| **第二轮(终端+安全)** | **`e089051..898336e3`** | **151** | **15** | **3** | **133** | **2026-05-08** |
 
-| 状态 | 数量 | 说明 |
-|---|---|---|
-| **已合入** | **81** | 之前 79 + 本轮 2(`3ce4239` PREVIEW flag 删除 + `d7c45ca` DOGFOOD 加 DragTabsToWindows 手工对齐) |
-| **永久黑名单** | **57** | 之前 54 + 本轮 3(`e089051` OSS .desktop / `525dfb6` spec GH478 / `cabd329` Code Review with Oz) |
+第二轮采用**主题分批策略**:本轮只处理**终端 + 安全**主题(15 个 cherry-pick + 3 个永久黑名单),其余 133 个非终端非安全 commit 暂不评估,留给后续按主题分批合并(AI/Agent / 编辑器 / Notebook / Bootstrap / 其他)。
 
-**所有 138 条 commit 已 100% 明确归属**,黑名单写在下方表格,后续 sync 用同一份判断标准。
+**所有已评估 commit 100% 明确归属**,黑名单写在下方表格,后续 sync 用同一份判断标准。
 
 ### 2026-05-04 增量同步(03ef4d0..e089051,新增 5 条)
 
@@ -20,6 +20,53 @@
 | `d7c45ca` | enable tab dragging between windows for internal warp users (#9991) | 已合入(手工只取 `DragTabsToWindows`,丢弃上游试图引入的 `CloudModeInputV2` 与重复 `SshRemoteServer`) |
 | `525dfb6` | Spec: per-tab theme overrides driven by directory and launch configurations (GH478) (#9910) | 黑名单(纯上游内部 spec 文档) |
 | `cabd329` | docs: replace Becoming a Collaborator with Code Review section (#9982) | 黑名单(上游 Oz review 流程,zerx-lab fork 不适用) |
+
+### 2026-05-08 增量同步(`e089051..898336e3`,新增 151 条)
+
+**策略**: 主题分批 — 本轮只处理"**终端 + 安全**"两类。其余主题(AI/Agent、编辑器、Notebook、Bootstrap、CI/文档、UI 杂项 等)留给后续轮次按主题分批评估。
+
+#### 已合入(15 条,按 cherry-pick 顺序)
+
+所有候选已逐 diff 核对 `main` 上对应代码 + 无云端依赖。
+
+| # | Commit | PR | 主题 | 说明 |
+|--:|---|---|---|---|
+| 1 | `71edcac8` | #9624 | 终端 | PageUp/PageDown 在 prompt 处滚动终端输出,改为可绑定快捷键 |
+| 2 | `a9a5b6af` | #9987 | 终端/Windows | restored block 关闭 reset grid checks 防 panic |
+| 3 | `c65ae255` | #9891 | 终端/Windows | quake mode 窗口正确 sized 且接收 focus |
+| 4 | `b7dd0ef8` | #9448 | 终端 | 拖选超出可视区时自动滚动(z-index 绕过) |
+| 5 | `b9e21940` | #10186 | 编辑器/AI 稳定性 | V4A diff 重叠 panic — 影响 BYOP apply diff |
+| 6 | `69638b8f` | #10057 | 终端 find | 输出流式追加时焦点漂移修复 |
+| 7 | `3ff78d29` | #9730 | 终端/IME | macOS 日语 IME Enter 不误提交表单 |
+| 8 | `74672609` | #10241 | 终端/race | 并行对话中 requested commands 被误取消 — `controller.rs` 自治区,手工带 2 行 |
+| 9 | `c28fdddb` | #10305 | 终端 | RowIterator 在 CLI agent 下 grid resize 崩溃(防御性) |
+| 10 | `fc1157e0` | #9711 | 终端/IME | macOS 第三方 IME(超注音/Yahoo Bopomofo)compose 时方向键双触发 |
+| 11 | `543d54ec` | #9602 | 终端/IME | Linux/Wayland 启用 IME — CJK 用户必需 |
+| 12 | `4dbf8758` | #10004 | 终端 | tree 命令输出文件名识别为 file link |
+| 13 | `5aec7009` | #9981 | **安全** | actix-http 3.12.1 → GHSA-xhj4-vrgc-hr34(本地 `cargo update -p actix-http --precise 3.12.1` 等价上游 `c68b9775`,因 BYOP 导致 Cargo.lock 分叉) |
+| 14 | `9af4629d` | #10263 | **安全** | diesel → GHSA-h5x4-m2qf-r4f2(干净 cherry-pick `9d9972cb`) |
+| 15 | `2a48032e` | #10060 | **安全** | rand 0.9.4 → GHSA-cq8v-f236-94qc(`cargo update -p rand@0.9.1 --precise 0.9.4` 等价上游 `64a0dfbe`) |
+
+附:`9cb749b8` chore — cherry-pick `c65ae255` 时附带的 `specs/CODE-1787/` 上游产品文档已删除。
+
+#### 永久黑名单(3 条 — 谨慎评估永久排除,后续 sync 不再重复检查)
+
+| Commit | 标题 | 永久排除原因 |
+|---|---|---|
+| `a639d761` | Fix deadlock in terminal view rendering (#10308) | 修复目标 `is_cloud_agent_pre_first_exchange` 的"加锁参数"在 OpenWarp 基线就**没有**(上游另一条已合 commit 引入,OpenWarp 没合)。即 OpenWarp 不存在此 bug。且改 `app/src/terminal/view/ambient_agent/**` 自治区。 |
+| `361c267a` | Implement full-frame clear for active block CLI Agents (#9877) | **行为变化**而非修复(改变 grid `ClearMode::All` 行为)。其引入的回归才是 `c28fdddb` 修的 — 我们只取 `c28fdddb` 防御性 fix。 |
+| `9eaa55f7` | remove block attachment in has_locking_attachment (#10416) | **行为变化**而非修复("block 不再算 locking attachment",上游 commit message 自述"as a quick fix to unblock release")。涉及 `BlocklistAIInputModel`/NLD 路径,与 OpenWarp BYOP 输入策略可能冲突。 |
+
+#### 暂不评估(133 条 — 待后续主题轮次)
+
+非"终端/安全"主题的 133 commit 留待按主题分批评估,**不视为永久排除**。下次 sync 应针对以下主题逐个评估:
+
+- AI / Agent / CLI agent / MCP / harness 相关(部分可能合入)
+- 编辑器 / 代码视图 / Notebook / 设置
+- Bootstrap / 跨平台编译 / FreeBSD / Xcode / .deb / Windows installer
+- 文件类型识别(.h++/.htm/.command/.yml 等)
+- UI 杂项(file picker / file tree / command palette 等)
+- 文档 / 内部 STAKEHOLDERS / CI / README / spec 文档(基本默认黑名单)
 
 ## 一次性配置(每个 clone)
 
@@ -101,6 +148,9 @@ bash script/setup-merge-drivers.sh
 | 模块 / 路径 | 删除原因 | 处理方式 |
 |---|---|---|
 | `cloud_conversations` 全家桶 | openWarp BYOP 不接 Warp 云 | 上游若新增此目录文件,直接 `git rm` |
+| `app/src/server/cloud_objects/**` | OpenWarp 不接云对象 RTC/初始加载/服务端 fan-in;本地写入入口迁到 `app/src/cloud_object/update_manager.rs` | 上游若恢复此目录,直接 `git rm`;保留 `server/mod.rs` 内兼容转发模块 |
+| `app/src/server/server_api/object.rs` | `ObjectClient` 云对象 RPC 已物理删除,本地对象 create/update 只走 CloudModel/SQLite | 上游若恢复此文件或 `get_cloud_objects_client()`,直接删除并保留本地路径 |
+| `crates/graphql/src/api/queries/get_updated_cloud_objects.rs` / `get_oauth_connect_tx_status.rs` | 云对象更新轮询与 OAuth cloud poll 已删除 | 上游若恢复,直接 `git rm`;BYOP OAuth 只保留本地禁用语义 |
 | AI 回复 footer 点赞/点踩(`render_response_footer` 中的 thumbs up/down) | 移除 telemetry 反馈链路 | 上游若改 output.rs 这段,保留 openWarp 版 |
 | 智能体署名 `AgentAttributionWidget` + `AISettings.agent_attribution_enabled` | 不需要 | 上游若修改,丢弃 |
 | Oz 更新日志 toggle UI | 仅删 UI/action/keybinding,字段保留 | 同上 |

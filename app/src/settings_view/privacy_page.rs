@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+﻿use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -10,7 +10,6 @@ use warpui::r#async::{SpawnedFutureHandle, Timer};
 
 use regex::Regex;
 use settings::Setting as _;
-use warp_core::context_flag::ContextFlag;
 use warp_core::ui::theme::WarpTheme;
 use warpui::elements::{
     Align, ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
@@ -41,7 +40,7 @@ use crate::ui_components::buttons::icon_button;
 use crate::view_components::{Dropdown, DropdownItem};
 use crate::{
     appearance::Appearance,
-    auth::auth_manager::AuthManager,
+    auth::AuthManager,
     channel::ChannelState,
     report_if_error, send_telemetry_from_ctx,
     server::telemetry::TelemetryEvent,
@@ -103,7 +102,6 @@ pub struct PrivacyPageView {
 
 #[derive(Clone, Copy)]
 pub enum PrivacyPageViewEvent {
-    LaunchNetworkLogging,
     ShowAddRegexModal,
     HideAddRegexModal,
 }
@@ -213,9 +211,6 @@ impl PrivacyPageView {
             Box::new(AppAnalyticsWidget::default()),
             Box::new(CrashReportsWidget::default()),
         ];
-        if ContextFlag::NetworkLogConsole.is_enabled() {
-            widgets.push(Box::new(NetworkLogWidget::default()));
-        }
         widgets.push(Box::new(DataManagementWidget::default()));
         widgets.push(Box::new(PrivacyPolicyWidget::default()));
         PageType::new_uncategorized(
@@ -366,10 +361,6 @@ impl PrivacyPageView {
         ctx.notify();
     }
 
-    fn launch_network_logging(&mut self, ctx: &mut ViewContext<Self>) {
-        ctx.emit(PrivacyPageViewEvent::LaunchNetworkLogging);
-    }
-
     fn show_add_regex_modal(&mut self, ctx: &mut ViewContext<Self>) {
         self.add_regex_modal_state.open(ctx);
         ctx.emit(PrivacyPageViewEvent::ShowAddRegexModal);
@@ -467,7 +458,6 @@ pub enum PrivacyPageAction {
     SetSecretDisplayMode(SecretDisplayMode),
     ToggleTelemetry,
     ToggleCrashReporting,
-    LaunchNetworkLogging,
     RemoveCustomRegex(usize),
     OpenDataManagementWebpage,
     AddAllRecommendedRegexes,
@@ -547,7 +537,6 @@ impl TypedActionView for PrivacyPageView {
             }
             PrivacyPageAction::ToggleTelemetry => self.toggle_telemetry(ctx),
             PrivacyPageAction::ToggleCrashReporting => self.toggle_crash_reporting(ctx),
-            PrivacyPageAction::LaunchNetworkLogging => self.launch_network_logging(ctx),
             PrivacyPageAction::RemoveCustomRegex(idx) => {
                 self.queue_regex_removal(*idx, ctx);
             }
@@ -1631,79 +1620,6 @@ impl SettingsWidget for CrashReportsWidget {
                     })
                     .build()
                     .finish(),
-            )
-            .finish()
-    }
-}
-
-#[derive(Default)]
-struct NetworkLogWidget {
-    link_mouse_state: MouseStateHandle,
-}
-
-impl SettingsWidget for NetworkLogWidget {
-    type View = PrivacyPageView;
-
-    fn search_terms(&self) -> &str {
-        "network log audit console data collection"
-    }
-
-    fn render(
-        &self,
-        _view: &Self::View,
-        appearance: &Appearance,
-        _app: &AppContext,
-    ) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        Flex::column()
-            .with_child(render_body_item::<PrivacyPageAction>(
-                crate::t!("settings-privacy-network-log-title").into(),
-                None,
-                // Not rendering a setting, so no need to show local only icon state.
-                LocalOnlyIconState::Hidden,
-                ToggleState::Enabled,
-                appearance,
-                Empty::new().finish(),
-                None,
-            ))
-            .with_child(
-                ui_builder
-                    .paragraph(crate::t!("settings-privacy-network-log-description"))
-                    .with_style(UiComponentStyles {
-                        font_color: Some(
-                            appearance
-                                .theme()
-                                .sub_text_color(appearance.theme().surface_2())
-                                .into_solid(),
-                        ),
-                        margin: Some(
-                            Coords::default()
-                                .top(styles::DESCRIPTION_NEGATIVE_MARGIN_OFFSET)
-                                .bottom(styles::DESCRIPTION_LINE_MARGIN_BOTTOM),
-                        ),
-                        ..Default::default()
-                    })
-                    .build()
-                    .finish(),
-            )
-            .with_child(
-                Align::new(
-                    ui_builder
-                        .link(
-                            crate::t!("settings-privacy-network-log-link"),
-                            None,
-                            Some(Box::new(|ctx| {
-                                ctx.dispatch_typed_action(PrivacyPageAction::LaunchNetworkLogging);
-                            })),
-                            self.link_mouse_state.clone(),
-                        )
-                        .soft_wrap(false)
-                        .build()
-                        .with_margin_bottom(styles::DESCRIPTION_MARGIN_BOTTOM)
-                        .finish(),
-                )
-                .left()
-                .finish(),
             )
             .finish()
     }

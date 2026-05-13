@@ -94,7 +94,9 @@ fn report_artifact(
     output_format: OutputFormat,
 ) -> Result<()> {
     runner.update(ctx, |_, ctx| {
-        let client = ServerApiProvider::as_ref(ctx).get_harness_support_client();
+        let client: std::sync::Arc<
+            dyn crate::server::server_api::harness_support::HarnessSupportClient,
+        > = ServerApiProvider::as_ref(ctx).get_harness_support_client();
 
         let artifact = match args.command {
             ReportArtifactCommand::PullRequest(pr_args) => Artifact::PullRequest {
@@ -140,7 +142,9 @@ fn notify_user(
     output_format: OutputFormat,
 ) -> Result<()> {
     runner.update(ctx, |_, ctx| {
-        let client = ServerApiProvider::as_ref(ctx).get_harness_support_client();
+        let client: std::sync::Arc<
+            dyn crate::server::server_api::harness_support::HarnessSupportClient,
+        > = ServerApiProvider::as_ref(ctx).get_harness_support_client();
 
         ctx.spawn(
             async move { client.notify_user(&args.message).await },
@@ -174,7 +178,9 @@ fn finish_task(
     output_format: OutputFormat,
 ) -> Result<()> {
     runner.update(ctx, |_, ctx| {
-        let client = ServerApiProvider::as_ref(ctx).get_harness_support_client();
+        let client: std::sync::Arc<
+            dyn crate::server::server_api::harness_support::HarnessSupportClient,
+        > = ServerApiProvider::as_ref(ctx).get_harness_support_client();
 
         ctx.spawn(
             async move {

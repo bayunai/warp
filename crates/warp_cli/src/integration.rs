@@ -1,12 +1,6 @@
 use clap::{Args, Subcommand};
 
-use crate::{
-    config_file::ConfigFileArgs,
-    environment::{EnvironmentCreateArgs, EnvironmentUpdateArgs},
-    mcp::MCPSpec,
-    model::ModelArgs,
-    provider::ProviderType,
-};
+use crate::{config_file::ConfigFileArgs, mcp::MCPSpec, model::ModelArgs, provider::ProviderType};
 
 /// Integration-related subcommands.
 #[derive(Debug, Clone, Subcommand)]
@@ -29,9 +23,7 @@ pub struct CreateIntegrationArgs {
     #[command(flatten)]
     pub model: ModelArgs,
 
-    #[clap(flatten)]
-    pub environment: EnvironmentCreateArgs,
-
+    // OpenWarp Wave 7-2:`environment` (EnvironmentCreateArgs) 随 cloud ambient agent 主体物理删。
     #[command(flatten)]
     pub config_file: ConfigFileArgs,
 
@@ -64,9 +56,7 @@ pub struct UpdateIntegrationArgs {
     #[command(flatten)]
     pub model: ModelArgs,
 
-    #[command(flatten)]
-    pub environment: EnvironmentUpdateArgs,
-
+    // OpenWarp Wave 7-2:`environment` (EnvironmentUpdateArgs) 随 cloud ambient agent 主体物理删。
     #[command(flatten)]
     pub config_file: ConfigFileArgs,
 

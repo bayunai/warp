@@ -4,8 +4,6 @@ use crate::ai::document::ai_document_model::AIDocumentModel;
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::facts::manager::AIFactManager;
 use crate::ai::llms::LLMPreferences;
-use crate::ai::outline::RepoOutlines;
-use crate::ai::persisted_workspace::PersistedWorkspace;
 use crate::ai::restored_conversations::RestoredAgentConversations;
 use crate::ai::skills::SkillManager;
 use crate::ai::AIRequestUsageModel;
@@ -25,19 +23,14 @@ use crate::user_config::tab_configs_dir;
 use repo_metadata::repositories::DetectedRepositories;
 use repo_metadata::watcher::DirectoryWatcher;
 #[cfg(feature = "local_fs")]
-use repo_metadata::CanonicalizedPath;
-#[cfg(feature = "local_fs")]
 use repo_metadata::RepoMetadataModel;
 use session_sharing_protocol::sharer::SessionSourceType;
 use std::collections::HashMap;
-#[cfg(feature = "local_fs")]
-use tempfile::TempDir;
 use watcher::HomeDirectoryWatcher;
 
-use crate::server::cloud_objects::{listener::Listener, update_manager::UpdateManager};
+use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::experiments::ServerExperiments;
 use crate::server::server_api::ServerApiProvider;
-use crate::server::sync_queue::SyncQueue;
 
 use crate::server::telemetry::context_provider::AppTelemetryContextProvider;
 use crate::settings::PrivacySettings;
@@ -57,7 +50,6 @@ use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::terminal::local_tty::spawner::PtySpawner;
 use crate::terminal::shared_session::{SharedSessionScrollbackType, SharedSessionStatus};
 
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent_conversations_model::AgentConversationsModel;
 use crate::ai::ambient_agents::github_auth_notifier::GitHubAuthNotifier;
 use crate::ai::mcp::{
@@ -70,17 +62,16 @@ use crate::test_util::settings::initialize_settings_for_tests;
 use crate::undo_close::UndoCloseSettings;
 use crate::warp_managed_paths_watcher::WarpManagedPathsWatcher;
 use crate::workflows::local_workflows::LocalWorkflows;
+use crate::ObjectActions;
 use crate::{experiments, workspace, GlobalResourceHandlesProvider};
-use crate::{AgentNotificationsModel, ObjectActions};
 
-use crate::settings::cloud_preferences_syncer::CloudPreferencesSyncer;
+// OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。
 
 use ai::project_context::model::ProjectContextModel;
 use pane_group::{NotebookPane, PaneState, SplitPaneState, TerminalPaneId};
 use session_sharing_protocol::common::SessionId;
 use terminal::shared_session::permissions_manager::SessionPermissionsManager;
 use terminal::view::ActiveSessionState;
-use warp_editor::editor::NavigationKey;
 use warpui::AddSingletonModel;
 use warpui::{platform::WindowStyle, App, ViewHandle};
 
@@ -97,7 +88,6 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(|ctx| AutoupdateState::new(ServerApiProvider::as_ref(ctx).get()));
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| SystemStats::new());
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(CloudModel::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(|_ctx| UserProfiles::new(Vec::new()));
@@ -106,7 +96,6 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(UpdateManager::mock);
     app.add_singleton_model(MCPGalleryManager::new);
     app.add_singleton_model(CloudViewModel::mock);
-    app.add_singleton_model(Listener::mock);
     app.add_singleton_model(|_| Appearance::mock());
     app.add_singleton_model(AppearanceManager::new);
     app.add_singleton_model(|_| DisplayCount::mock());
@@ -115,6 +104,7 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_ctx| RelaunchModel::new());
     app.add_singleton_model(|ctx| ChangelogModel::new(ServerApiProvider::as_ref(ctx).get()));
     app.add_singleton_model(|_| GitHubAuthNotifier::new());
+    app.add_singleton_model(|_| crate::ssh_manager::SshTreeChangedNotifier::new());
     app.add_singleton_model(|_ctx| SyncedInputState::mock());
     app.add_singleton_model(|_| ResizableData::default());
     app.add_singleton_model(LocalWorkflows::new);
@@ -126,17 +116,9 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(NotebookKeybindings::new);
     app.add_singleton_model(TerminalKeybindings::new);
     app.add_singleton_model(NotebookManager::mock);
-    app.add_singleton_model(|ctx| {
-        CloudPreferencesSyncer::new(
-            false,                     // force_local_wins_on_startup
-            std::path::PathBuf::new(), // unused in tests that don't exercise the hash path
-            ctx,
-        )
-    });
+    // OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除,test singleton 不再需要。
     app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
     app.add_singleton_model(|_| CLIAgentSessionsModel::new());
-    app.add_singleton_model(|_| ActiveAgentViewsModel::new());
-    app.add_singleton_model(AgentNotificationsModel::new);
     app.add_singleton_model(AgentConversationsModel::new);
     app.add_singleton_model(SessionPermissionsManager::new);
     app.add_singleton_model(LLMPreferences::new);
@@ -155,7 +137,7 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(|ctx| {
         AIExecutionProfilesModel::new(&crate::LaunchMode::new_for_unit_test(), ctx)
     });
-    app.add_singleton_model(RepoOutlines::new_for_test);
+    // OpenWarp:RepoOutlines 已删除,不再注册。
     #[cfg(feature = "voice_input")]
     app.add_singleton_model(voice_input::VoiceInput::new);
     app.add_singleton_model(BlocklistAIPermissions::new);
@@ -196,7 +178,6 @@ fn initialize_app(app: &mut App) {
         crate::workspace::bonus_grant_notification_model::BonusGrantNotificationModel::new,
     );
 
-    app.add_singleton_model(|ctx| PersistedWorkspace::new(vec![], HashMap::new(), None, ctx));
     app.add_singleton_model(|_| ProjectContextModel::default());
     app.add_singleton_model(|_| PricingInfoModel::new());
     app.add_singleton_model(AIDocumentModel::new);
@@ -301,203 +282,30 @@ fn open_worktree_sidecar(workspace: &ViewHandle<Workspace>, app: &mut App) {
 
 #[cfg(feature = "local_fs")]
 #[test]
+#[ignore = "依赖已下线的 PersistedWorkspace"]
 fn test_worktree_sidecar_hover_takes_precedence_over_selection() {
-    let _tab_configs_guard = FeatureFlag::TabConfigs.override_enabled(true);
-
-    App::test((), |mut app| async move {
-        initialize_app(&mut app);
-
-        let workspace = mock_workspace(&mut app);
-        let temp_root = TempDir::new().expect("failed to create temp dir");
-        let alpha_repo = temp_root.path().join("alpha-repo");
-        let beta_repo = temp_root.path().join("beta-repo");
-        std::fs::create_dir_all(&alpha_repo).expect("failed to create alpha repo dir");
-        std::fs::create_dir_all(&beta_repo).expect("failed to create beta repo dir");
-
-        workspace.update(&mut app, |_, ctx| {
-            PersistedWorkspace::handle(ctx).update(ctx, |persisted, ctx| {
-                persisted.user_added_workspace(alpha_repo.clone(), ctx);
-                persisted.user_added_workspace(beta_repo.clone(), ctx);
-            });
-        });
-
-        open_worktree_sidecar(&workspace, &mut app);
-
-        workspace.update(&mut app, |workspace, ctx| {
-            workspace
-                .new_session_sidecar_menu
-                .update(ctx, |menu, view_ctx| {
-                    menu.set_selected_by_index(1, view_ctx);
-                    menu.handle_action(
-                        &crate::menu::MenuAction::HoverSubmenuLeafNode {
-                            depth: 0,
-                            row_index: 2,
-                            position: Vector2F::zero(),
-                        },
-                        view_ctx,
-                    );
-                });
-
-            workspace.handle_new_session_sidecar_event(&MenuEvent::ItemHovered, ctx);
-        });
-
-        workspace.read(&app, |workspace, ctx| {
-            assert_eq!(
-                workspace
-                    .new_session_sidecar_menu
-                    .read(ctx, |menu, _| menu.selected_index()),
-                Some(2)
-            );
-        });
-    });
+    unimplemented!("PersistedWorkspace 已下线,worktree sidecar 仓库列表测试暂停");
 }
 
 #[cfg(feature = "local_fs")]
 #[test]
+#[ignore = "依赖已下线的 PersistedWorkspace"]
 fn test_worktree_sidecar_pointer_entry_does_not_select_top_repo() {
-    let _tab_configs_guard = FeatureFlag::TabConfigs.override_enabled(true);
-
-    App::test((), |mut app| async move {
-        initialize_app(&mut app);
-
-        let workspace = mock_workspace(&mut app);
-        let temp_root = TempDir::new().expect("failed to create temp dir");
-        let alpha_repo = temp_root.path().join("alpha-repo");
-        let beta_repo = temp_root.path().join("beta-repo");
-        std::fs::create_dir_all(&alpha_repo).expect("failed to create alpha repo dir");
-        std::fs::create_dir_all(&beta_repo).expect("failed to create beta repo dir");
-
-        workspace.update(&mut app, |_, ctx| {
-            PersistedWorkspace::handle(ctx).update(ctx, |persisted, ctx| {
-                persisted.user_added_workspace(alpha_repo.clone(), ctx);
-                persisted.user_added_workspace(beta_repo.clone(), ctx);
-            });
-        });
-
-        workspace.update(&mut app, |workspace, ctx| {
-            workspace.open_new_session_dropdown_menu(Vector2F::zero(), ctx);
-
-            let worktree_index = workspace
-                .new_session_dropdown_menu
-                .read(ctx, |menu, _| {
-                    menu.items().iter().position(|item| {
-                        matches!(
-                            item,
-                            MenuItem::Item(fields) if fields.label() == "New worktree config"
-                        )
-                    })
-                })
-                .expect("expected new worktree config item in new-session menu");
-
-            workspace
-                .new_session_dropdown_menu
-                .update(ctx, |menu, view_ctx| {
-                    menu.handle_action(
-                        &crate::menu::MenuAction::HoverSubmenuWithChildren(
-                            0,
-                            crate::menu::SelectAction::Index {
-                                row: worktree_index,
-                                item: 0,
-                            },
-                        ),
-                        view_ctx,
-                    );
-                });
-            workspace.update_new_session_sidecar(ctx);
-        });
-
-        workspace.read(&app, |workspace, ctx| {
-            assert!(workspace.show_new_session_sidecar);
-            assert_eq!(
-                workspace
-                    .new_session_sidecar_menu
-                    .read(ctx, |menu, _| menu.selected_index()),
-                None
-            );
-        });
-    });
+    unimplemented!("PersistedWorkspace 已下线,worktree sidecar 仓库列表测试暂停");
 }
 
 #[cfg(feature = "local_fs")]
 #[test]
+#[ignore = "依赖已下线的 PersistedWorkspace"]
 fn test_worktree_sidecar_close_via_select_item_executes_from_workspace() {
-    let _tab_configs_guard = FeatureFlag::TabConfigs.override_enabled(true);
-
-    App::test((), |mut app| async move {
-        let _cleanup = TabConfigCleanupGuard::new("alpha-repo");
-
-        initialize_app(&mut app);
-
-        let workspace = mock_workspace(&mut app);
-        let temp_root = TempDir::new().expect("failed to create temp dir");
-        let alpha_repo = temp_root.path().join("alpha-repo");
-        std::fs::create_dir_all(&alpha_repo).expect("failed to create alpha repo dir");
-
-        workspace.update(&mut app, |_, ctx| {
-            PersistedWorkspace::handle(ctx).update(ctx, |persisted, ctx| {
-                persisted.user_added_workspace(alpha_repo.clone(), ctx);
-            });
-        });
-
-        open_worktree_sidecar(&workspace, &mut app);
-
-        workspace.update(&mut app, |workspace, ctx| {
-            workspace
-                .new_session_sidecar_menu
-                .update(ctx, |menu, view_ctx| {
-                    menu.set_selected_by_index(1, view_ctx);
-                });
-            workspace.handle_new_session_sidecar_event(
-                &MenuEvent::Close {
-                    via_select_item: true,
-                },
-                ctx,
-            );
-            workspace.handle_new_session_sidecar_event(&MenuEvent::ItemSelected, ctx);
-        });
-
-        workspace.read(&app, |workspace, _| {
-            assert_eq!(workspace.tab_count(), 2);
-        });
-    });
+    unimplemented!("PersistedWorkspace 已下线,worktree sidecar 仓库列表测试暂停");
 }
 
 #[cfg(feature = "local_fs")]
 #[test]
+#[ignore = "依赖已下线的 PersistedWorkspace"]
 fn test_worktree_sidecar_search_editor_enter_executes_selection() {
-    let _tab_configs_guard = FeatureFlag::TabConfigs.override_enabled(true);
-
-    App::test((), |mut app| async move {
-        let _cleanup = TabConfigCleanupGuard::new("alpha-repo");
-
-        initialize_app(&mut app);
-
-        let workspace = mock_workspace(&mut app);
-        let temp_root = TempDir::new().expect("failed to create temp dir");
-        let alpha_repo = temp_root.path().join("alpha-repo");
-        std::fs::create_dir_all(&alpha_repo).expect("failed to create alpha repo dir");
-
-        workspace.update(&mut app, |_, ctx| {
-            PersistedWorkspace::handle(ctx).update(ctx, |persisted, ctx| {
-                persisted.user_added_workspace(alpha_repo.clone(), ctx);
-            });
-        });
-
-        open_worktree_sidecar(&workspace, &mut app);
-
-        workspace.update(&mut app, |workspace, ctx| {
-            workspace
-                .worktree_sidecar_search_editor
-                .update(ctx, |_, ctx| {
-                    ctx.emit(Event::Enter);
-                });
-        });
-
-        workspace.read(&app, |workspace, _| {
-            assert_eq!(workspace.tab_count(), 2);
-            assert!(workspace.show_new_session_dropdown_menu.is_none());
-        });
-    });
+    unimplemented!("PersistedWorkspace 已下线,worktree sidecar 仓库列表测试暂停");
 }
 
 /// RAII guard that removes tab config TOML files whose name starts with
@@ -1778,6 +1586,45 @@ fn test_view_only_session() {
 }
 
 #[test]
+fn test_server_token_compatibility_finds_restored_local_conversation() {
+    use crate::ai::agent::conversation::AIConversation;
+
+    App::test((), |mut app| async move {
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let token = ServerConversationToken::new("restored-token".to_string());
+        let conversation_id = history_model.update(&mut app, |model, ctx| {
+            let mut conversation = AIConversation::new(false);
+            conversation.set_server_conversation_token(token.as_str().to_string());
+            let conversation_id = conversation.id();
+            model.restore_conversations(EntityId::new(), vec![conversation], ctx);
+            conversation_id
+        });
+
+        app.read(|ctx| {
+            assert_eq!(
+                Workspace::find_local_conversation_id_by_server_token(&token, ctx),
+                Some(conversation_id),
+            );
+        });
+    });
+}
+
+#[test]
+fn test_server_token_compatibility_ignores_unknown_token() {
+    App::test((), |app| async move {
+        app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let token = ServerConversationToken::new("missing-token".to_string());
+
+        app.read(|ctx| {
+            assert_eq!(
+                Workspace::find_local_conversation_id_by_server_token(&token, ctx),
+                None,
+            );
+        });
+    });
+}
+
+#[test]
 // This tests the end-to-end behavior to correctly switch focus among panels.
 // (The only panels that can be focused currently are WD, workspace, & AI assistant.)
 fn test_switch_focus_panels() {
@@ -2689,195 +2536,16 @@ fn test_unified_new_session_menu_includes_reopen_closed_session() {
 
 #[cfg(feature = "local_fs")]
 #[test]
+#[ignore = "依赖已下线的 PersistedWorkspace"]
 fn test_worktree_sidecar_search_editor_proxies_navigation_and_escape() {
-    let _tab_configs_guard = FeatureFlag::TabConfigs.override_enabled(true);
-
-    App::test((), |mut app| async move {
-        initialize_app(&mut app);
-
-        let workspace = mock_workspace(&mut app);
-        let temp_root = TempDir::new().expect("failed to create temp dir");
-        let alpha_repo = temp_root.path().join("alpha-repo");
-        let beta_repo = temp_root.path().join("beta-repo");
-        std::fs::create_dir_all(&alpha_repo).expect("failed to create alpha repo dir");
-        std::fs::create_dir_all(&beta_repo).expect("failed to create beta repo dir");
-
-        workspace.update(&mut app, |_, ctx| {
-            PersistedWorkspace::handle(ctx).update(ctx, |persisted, ctx| {
-                persisted.user_added_workspace(alpha_repo.clone(), ctx);
-                persisted.user_added_workspace(beta_repo.clone(), ctx);
-            });
-        });
-
-        open_worktree_sidecar(&workspace, &mut app);
-
-        workspace.read(&app, |workspace, ctx| {
-            assert!(workspace.show_new_session_sidecar);
-            assert!(workspace.worktree_sidecar_search_editor.is_focused(ctx));
-            assert_eq!(
-                workspace
-                    .new_session_sidecar_menu
-                    .read(ctx, |menu, _| menu.selected_index()),
-                Some(1)
-            );
-        });
-
-        workspace.update(&mut app, |workspace, ctx| {
-            workspace
-                .worktree_sidecar_search_editor
-                .update(ctx, |_, ctx| {
-                    ctx.emit(Event::Navigate(NavigationKey::Down));
-                });
-        });
-        workspace.read(&app, |workspace, ctx| {
-            assert_eq!(
-                workspace
-                    .new_session_sidecar_menu
-                    .read(ctx, |menu, _| menu.selected_index()),
-                Some(2)
-            );
-        });
-
-        workspace.update(&mut app, |workspace, ctx| {
-            workspace
-                .worktree_sidecar_search_editor
-                .update(ctx, |_, ctx| {
-                    ctx.emit(Event::Navigate(NavigationKey::Up));
-                });
-        });
-        workspace.read(&app, |workspace, ctx| {
-            assert_eq!(
-                workspace
-                    .new_session_sidecar_menu
-                    .read(ctx, |menu, _| menu.selected_index()),
-                Some(1)
-            );
-        });
-
-        workspace.update(&mut app, |workspace, ctx| {
-            workspace
-                .worktree_sidecar_search_editor
-                .update(ctx, |editor, ctx| {
-                    editor.set_buffer_text("beta", ctx);
-                });
-        });
-        workspace.read(&app, |workspace, ctx| {
-            assert_eq!(workspace.worktree_sidecar_search_query, "beta");
-            assert_eq!(
-                workspace
-                    .new_session_sidecar_menu
-                    .read(ctx, |menu, _| menu.items_len()),
-                2
-            );
-            assert_eq!(
-                workspace
-                    .new_session_sidecar_menu
-                    .read(ctx, |menu, _| menu.selected_index()),
-                Some(1)
-            );
-        });
-
-        workspace.update(&mut app, |workspace, ctx| {
-            workspace
-                .worktree_sidecar_search_editor
-                .update(ctx, |_, ctx| {
-                    ctx.emit(Event::Escape);
-                });
-        });
-        workspace.read(&app, |workspace, ctx| {
-            assert!(workspace.show_new_session_dropdown_menu.is_none());
-            assert!(!workspace.show_new_session_sidecar);
-            assert!(workspace.worktree_sidecar_search_query.is_empty());
-            assert!(workspace
-                .worktree_sidecar_search_editor
-                .as_ref(ctx)
-                .buffer_text(ctx)
-                .is_empty());
-        });
-    });
+    unimplemented!("PersistedWorkspace 已下线,worktree sidecar 仓库列表测试暂停");
 }
 
 #[cfg(feature = "local_fs")]
 #[test]
+#[ignore = "依赖已下线的 PersistedWorkspace"]
 fn test_worktree_sidecar_hides_linked_worktrees_from_repo_list() {
-    let _tab_configs_guard = FeatureFlag::TabConfigs.override_enabled(true);
-
-    App::test((), |mut app| async move {
-        initialize_app(&mut app);
-
-        let workspace = mock_workspace(&mut app);
-        let temp_root = TempDir::new().expect("failed to create temp dir");
-        let main_repo = temp_root.path().join("main-repo");
-        let linked_worktree = temp_root.path().join("linked-worktree");
-        let external_git_dir = main_repo
-            .join(".git")
-            .join("worktrees")
-            .join("linked-worktree");
-
-        std::fs::create_dir_all(&main_repo).expect("failed to create main repo dir");
-        std::fs::create_dir_all(&linked_worktree).expect("failed to create linked worktree dir");
-        std::fs::create_dir_all(&external_git_dir).expect("failed to create external git dir");
-
-        workspace.update(&mut app, |_, ctx| {
-            PersistedWorkspace::handle(ctx).update(ctx, |persisted, ctx| {
-                persisted.user_added_workspace(main_repo.clone(), ctx);
-                persisted.user_added_workspace(linked_worktree.clone(), ctx);
-            });
-
-            let main_repo_canon =
-                CanonicalizedPath::try_from(main_repo.as_path()).expect("canonical main repo");
-            let linked_worktree_canon = CanonicalizedPath::try_from(linked_worktree.as_path())
-                .expect("canonical linked worktree");
-            let external_git_dir_canon = CanonicalizedPath::try_from(external_git_dir.as_path())
-                .expect("canonical external git dir");
-
-            let main_repo_std: warp_util::standardized_path::StandardizedPath =
-                main_repo_canon.into();
-            let linked_worktree_std: warp_util::standardized_path::StandardizedPath =
-                linked_worktree_canon.into();
-            let external_git_dir_std: warp_util::standardized_path::StandardizedPath =
-                external_git_dir_canon.into();
-
-            DetectedRepositories::handle(ctx).update(ctx, |repos, _ctx| {
-                repos.insert_test_repo_root(main_repo_std.clone());
-                repos.insert_test_repo_root(linked_worktree_std.clone());
-            });
-
-            DirectoryWatcher::handle(ctx).update(ctx, |watcher, ctx| {
-                watcher
-                    .add_directory_with_git_dir(main_repo_std, None, ctx)
-                    .expect("register main repo");
-                watcher
-                    .add_directory_with_git_dir(
-                        linked_worktree_std,
-                        Some(external_git_dir_std),
-                        ctx,
-                    )
-                    .expect("register linked worktree");
-            });
-        });
-
-        open_worktree_sidecar(&workspace, &mut app);
-
-        workspace.read(&app, |workspace, ctx| {
-            let labels = workspace.new_session_sidecar_menu.read(ctx, |menu, _| {
-                menu.items()
-                    .iter()
-                    .filter_map(|item| match item {
-                        MenuItem::Item(fields) => Some(fields.label().to_string()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-            });
-
-            let main_repo_label = main_repo.to_string_lossy().to_string();
-            let linked_worktree_label = linked_worktree.to_string_lossy().to_string();
-
-            assert!(labels.iter().any(|label| label == "Search repos"));
-            assert!(labels.iter().any(|label| label == &main_repo_label));
-            assert!(!labels.iter().any(|label| label == &linked_worktree_label));
-        });
-    });
+    unimplemented!("PersistedWorkspace 已下线,worktree sidecar 仓库列表测试暂停");
 }
 
 #[test]
@@ -2933,43 +2601,5 @@ fn test_standard_tab_context_menu_shows_hover_only_tab_bar() {
     });
 }
 
-#[test]
-fn test_open_cloud_agent_setup_guide_action_opens_management_view_and_is_idempotent() {
-    let _agent_management_guard = FeatureFlag::AgentManagementView.override_enabled(true);
-
-    App::test((), |mut app| async move {
-        initialize_app(&mut app);
-
-        let workspace = mock_workspace(&mut app);
-
-        workspace.update(&mut app, |workspace, ctx| {
-            assert!(
-                !workspace
-                    .current_workspace_state
-                    .is_agent_management_view_open
-            );
-
-            workspace.handle_action(&WorkspaceAction::OpenCloudAgentSetupGuide, ctx);
-            assert!(
-                workspace
-                    .current_workspace_state
-                    .is_agent_management_view_open
-            );
-            assert!(workspace
-                .agent_management_view
-                .as_ref(ctx)
-                .is_showing_setup_guide());
-
-            workspace.handle_action(&WorkspaceAction::OpenCloudAgentSetupGuide, ctx);
-            assert!(
-                workspace
-                    .current_workspace_state
-                    .is_agent_management_view_open
-            );
-            assert!(workspace
-                .agent_management_view
-                .as_ref(ctx)
-                .is_showing_setup_guide());
-        });
-    });
-}
+// 已删:test_open_cloud_agent_setup_guide_action_opens_management_view_and_is_idempotent
+// agent_management_view 字段连同 cloud agent setup guide 整片功能在 Phase 2c 已删。

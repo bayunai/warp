@@ -42,7 +42,8 @@ use warpui::{Entity, ModelContext, ModelHandle, RequestState, RetryOption, Singl
 use websocket::{Message, Sink, Stream, WebSocket, WebsocketMessage as _};
 
 use crate::editor::CrdtOperation;
-use crate::server::server_api::ServerApiProvider;
+// OpenWarp Wave 3-1:`ServerApiProvider` 不再被本文件使用,`auth_client`
+// 调用点随 AuthClient 一同物理删。
 use crate::terminal::model::block::BlockId;
 use crate::terminal::shared_session::{
     EventNumber, SharedSessionScrollbackType, SELECTION_THROTTLE_PERIOD,
@@ -592,8 +593,9 @@ impl Network {
         source_type: SessionSourceType,
         ctx: &mut ModelContext<Self>,
     ) {
-        let auth_client = ServerApiProvider::as_ref(ctx).get_auth_client();
-        let anonymous_id = AuthStateProvider::as_ref(ctx).get().anonymous_id();
+        let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
+        let anonymous_id = auth_state.anonymous_id();
+        let local_access_token = auth_state.get_access_token_ignoring_validity();
 
         // Get the selected model before spawning the async task
         let llm_prefs = crate::ai::llms::LLMPreferences::as_ref(ctx);
@@ -610,11 +612,10 @@ impl Network {
                 };
                 let user_id = UserID {
                     anonymous_id,
-                    access_token: auth_client
-                        .get_or_refresh_access_token()
-                        .await
-                        .ok()
-                        .and_then(|token| token.bearer_token()),
+                    // OpenWarp Wave 3-1:原 `auth_client.get_or_refresh_access_token()`
+                    // 随 AuthClient 一同物理删,bearer token 直接取 AuthState
+                    // 本地缓存。
+                    access_token: local_access_token,
                 };
                 let socket = WebSocket::connect(create_endpoint, None).await?;
                 anyhow::Ok((socket.split().await, user_id))
@@ -689,7 +690,6 @@ impl Network {
             return;
         };
 
-        let auth_client = ServerApiProvider::as_ref(ctx).get_auth_client();
         let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
         let abort_handle = ctx
             .spawn_with_retry_on_error(
@@ -697,16 +697,12 @@ impl Network {
                     log::info!("Attempting to reconnect to session sharing server");
                     let reconnect_endpoint = reconnect_endpoint.clone();
                     let auth_state = auth_state.clone();
-                    let auth_client = auth_client.clone();
                     async move {
                         let socket = WebSocket::connect(reconnect_endpoint, None).await?;
                         let user_id = UserID {
                             anonymous_id: auth_state.anonymous_id(),
-                            access_token: auth_client
-                                .get_or_refresh_access_token()
-                                .await
-                                .ok()
-                                .and_then(|token| token.bearer_token()),
+                            // OpenWarp Wave 3-1:同上。
+                            access_token: auth_state.get_access_token_ignoring_validity(),
                         };
                         anyhow::Ok((socket.split().await, user_id))
                     }
@@ -818,7 +814,7 @@ impl Network {
                 match serialized {
                     Ok(serialized) => {
                         if let Err(e) = sink.send(Message::new(serialized)).await {
-                            // Errors are not typically retryable. For a case like no network connection, 
+                            // Errors are not typically retryable. For a case like no network connection,
                             // sink.send will succeed and the message will actually be sent when connection is restored.
                             log::warn!("Failed to send message over shared session websocket as sharer: {e}. Terminating connection.");
                             break;

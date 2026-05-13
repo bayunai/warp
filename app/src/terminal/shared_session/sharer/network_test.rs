@@ -1,4 +1,4 @@
-use std::sync::Arc;
+﻿use std::sync::Arc;
 
 use async_channel::Sender;
 use futures_util::stream::AbortHandle;
@@ -16,7 +16,7 @@ use warpui::{App, ModelHandle};
 use websocket::{Message, WebsocketMessage as _};
 
 use crate::{
-    auth::{auth_manager::AuthManager, AuthStateProvider},
+    auth::{AuthManager, AuthStateProvider},
     editor::ReplicaId,
     server::{
         server_api::ServerApiProvider, telemetry::context_provider::AppTelemetryContextProvider,

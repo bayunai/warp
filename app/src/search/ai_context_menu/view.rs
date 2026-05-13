@@ -4,10 +4,6 @@ use crate::drive::settings::WarpDriveSettings;
 #[cfg(not(target_family = "wasm"))]
 use crate::search::ai_context_menu::blocks::data_source::BlockDataSource;
 #[cfg(not(target_family = "wasm"))]
-use crate::search::ai_context_menu::code::data_source::{code_data_source, CodeSymbolCache};
-#[cfg(not(target_family = "wasm"))]
-use crate::search::ai_context_menu::code::is_code_symbols_indexing;
-#[cfg(not(target_family = "wasm"))]
 use crate::search::ai_context_menu::commands::data_source::CommandDataSource;
 use crate::search::ai_context_menu::conversations::data_source::ConversationDataSource;
 #[cfg(not(target_family = "wasm"))]
@@ -35,7 +31,6 @@ use crate::search::search_bar::{SearchBar, SearchBarEvent, SearchBarState, Searc
 use crate::settings::InputSettings;
 use async_channel::Sender;
 use itertools::Itertools;
-use settings::Setting as _;
 use std::collections::HashSet;
 use std::ops::Range;
 use std::time::Duration;
@@ -242,8 +237,6 @@ pub struct AIContextMenu {
     /// a lot of helpful logic for managing the search state.
     search_bar: ViewHandle<SearchBar<AIContextMenuSearchableAction>>,
     search_bar_state: ModelHandle<SearchBarState<AIContextMenuSearchableAction>>,
-    #[cfg(not(target_family = "wasm"))]
-    code_symbol_cache: ModelHandle<CodeSymbolCache>,
     state: AIContextMenuState,
     /// Debounce channel for search queries
     search_debounce_tx: Sender<String>,
@@ -424,15 +417,8 @@ impl AIContextMenu {
                     categories.push(AIContextMenuCategory::CurrentFolderFiles);
                 }
             }
-            if FeatureFlag::AIContextMenuCode.is_enabled()
-                && *InputSettings::as_ref(app)
-                    .outline_codebase_symbols_for_at_context_menu
-                    .value()
-                && is_active_dir_in_git_repo
-                && !is_shared_session_viewer
-            {
-                categories.push(AIContextMenuCategory::Code);
-            }
+            // OpenWarp:原会根据 outline_codebase_symbols_for_at_context_menu 设置 push Code
+            // 分类,现 outline 下线,Code 分类不再出现。
             return categories;
         }
 
@@ -466,15 +452,7 @@ impl AIContextMenu {
                 categories.push(AIContextMenuCategory::Commands);
             }
             categories.push(AIContextMenuCategory::Blocks);
-            if FeatureFlag::AIContextMenuCode.is_enabled()
-                && *InputSettings::as_ref(app)
-                    .outline_codebase_symbols_for_at_context_menu
-                    .value()
-                && is_active_dir_in_git_repo
-                && !is_shared_session_viewer
-            {
-                categories.push(AIContextMenuCategory::Code);
-            }
+            // OpenWarp:Code 分类随 outline 下线同步推退,不再 push。
             if show_warp_drive && FeatureFlag::DriveObjectsAsContext.is_enabled() {
                 categories.push(AIContextMenuCategory::Workflows);
                 categories.push(AIContextMenuCategory::Notebooks);
@@ -495,22 +473,14 @@ impl AIContextMenu {
             categories.push(AIContextMenuCategory::Skills);
             categories
         } else if !is_shared_session_viewer {
-            // Terminal mode: show Files and Code categories (when enabled)
-            let mut categories = if is_active_dir_in_git_repo {
+            // Terminal mode: show Files category only.
+            // OpenWarp:原这里还会按 outline_codebase_symbols_for_at_context_menu push Code
+            // 分类,现 outline 下线,Code 分类不再出现。
+            let categories = if is_active_dir_in_git_repo {
                 vec![AIContextMenuCategory::RepoFiles]
             } else {
                 vec![AIContextMenuCategory::CurrentFolderFiles]
             };
-
-            // Also show Code category in terminal mode when enabled
-            if FeatureFlag::AIContextMenuCode.is_enabled()
-                && *InputSettings::as_ref(app)
-                    .outline_codebase_symbols_for_at_context_menu
-                    .value()
-                && is_active_dir_in_git_repo
-            {
-                categories.push(AIContextMenuCategory::Code);
-            }
 
             categories
         } else {
@@ -626,33 +596,14 @@ impl AIContextMenu {
         // Get initial categories for proper initialization
         let initial_categories = Self::get_categories_for_mode(true, false, false, false, ctx); // Default to AI mode, not a viewer, not ambient agent, not CLI agent input
 
-        #[cfg(not(target_family = "wasm"))]
-        let code_symbol_cache = ctx.add_model(CodeSymbolCache::new);
-
-        // When the outline updates (e.g. indexing finishes), re-run the current
-        // mixer query so the Code results refresh automatically.
-        #[cfg(not(target_family = "wasm"))]
-        ctx.subscribe_to_model(&code_symbol_cache, |me, _handle, _event, ctx| {
-            let code_active = matches!(
-                me.state.navigation_state,
-                NavigationState::Category(AIContextMenuCategory::Code)
-                    | NavigationState::AllCategories
-            );
-            if code_active {
-                me.mixer.update(ctx, |mixer, ctx| {
-                    if let Some(query) = mixer.current_query().cloned() {
-                        mixer.run_query(query, ctx);
-                    }
-                });
-            }
-        });
+        // OpenWarp:原这里会创建 CodeSymbolCache(订阅 RepoOutlines) 以支持
+        // 代码符号搜索。该功能已随 outline 推退下线,这些订阅/创建代码
+        // 一并删除。
 
         let mut result = Self {
             mixer,
             search_bar,
             search_bar_state,
-            #[cfg(not(target_family = "wasm"))]
-            code_symbol_cache,
             state: AIContextMenuState {
                 navigation_state: if initial_categories.len() > 1 {
                     NavigationState::MainMenu
@@ -917,28 +868,8 @@ impl AIContextMenu {
                     );
                 });
             }
-            #[cfg(not(target_family = "wasm"))]
-            NavigationState::Category(AIContextMenuCategory::Code) => {
-                self.mixer.update(ctx, |mixer, ctx| {
-                    mixer.add_async_source(
-                        code_data_source(self.code_symbol_cache.as_ref(ctx)),
-                        [QueryFilter::Code],
-                        AddAsyncSourceOptions {
-                            debounce_interval: Some(Duration::from_millis(50)),
-                            run_in_zero_state: true,
-                            run_when_unfiltered: true,
-                        },
-                        ctx,
-                    );
-                    mixer.run_query(
-                        Query {
-                            text: "".into(),
-                            filters: HashSet::new(),
-                        },
-                        ctx,
-                    );
-                });
-            }
+            // OpenWarp:Code 分类随 outline 下线推退。该分类不会出现在 categories 中,
+            // 但 enum variant 保留以避免 match 大面积破坏;这里不会被命中。
             #[cfg(not(target_family = "wasm"))]
             NavigationState::Category(AIContextMenuCategory::Workflows) => {
                 let workflow_data_source = ctx.add_model(|_| WorkflowDataSource::new());
@@ -1113,20 +1044,9 @@ impl AIContextMenu {
                         mixer.add_sync_source(block_data_source, [QueryFilter::Blocks]);
                     });
                 }
-                AIContextMenuCategory::Code => {
-                    self.mixer.update(ctx, |mixer, ctx| {
-                        mixer.add_async_source(
-                            code_data_source(self.code_symbol_cache.as_ref(ctx)),
-                            [QueryFilter::Code],
-                            AddAsyncSourceOptions {
-                                debounce_interval: Some(Duration::from_millis(50)),
-                                run_in_zero_state: true,
-                                run_when_unfiltered: true,
-                            },
-                            ctx,
-                        );
-                    });
-                }
+                // OpenWarp:Code 分类随 outline 下线推退;不会出现但保留 noop 分支
+                // 避免 match 错误。
+                AIContextMenuCategory::Code => {}
                 AIContextMenuCategory::Workflows => {
                     let workflow_data_source = ctx.add_model(|_| WorkflowDataSource::new());
                     self.mixer.update(ctx, |mixer, _ctx| {
@@ -1416,22 +1336,9 @@ impl AIContextMenu {
         .finish()
     }
 
-    #[cfg_attr(target_family = "wasm", allow(dead_code))]
-    fn render_code_symbols_indexing(&self, app: &AppContext) -> Box<dyn Element> {
-        let appearance = Appearance::as_ref(app);
-        let theme = appearance.theme();
-        Container::new(
-            Text::new(
-                "Code symbols indexing...",
-                appearance.ui_font_family(),
-                appearance.monospace_font_size(),
-            )
-            .with_color(theme.main_text_color(theme.background()).into_solid())
-            .finish(),
-        )
-        .with_uniform_padding(PADDING)
-        .finish()
-    }
+    // OpenWarp:原 `render_code_symbols_indexing` 负责在代码符号索引中时渲染
+    // “Code symbols indexing...” 提示。outline 下线后该渲染路径不会被调,
+    // 函数一并删除。
 
     fn render_matching_results(
         &self,
@@ -1638,12 +1545,9 @@ impl AIContextMenu {
         fallback: Box<dyn Element>,
         app: &AppContext,
     ) -> Box<dyn Element> {
-        #[cfg(not(target_family = "wasm"))]
-        if let Some(cat) = category {
-            if *cat == AIContextMenuCategory::Code && is_code_symbols_indexing(app) {
-                return self.render_code_symbols_indexing(app);
-            }
-        }
+        // OpenWarp:原这里会检查 Code 分类下是否正在索引代码符号,如是则走
+        // `render_code_symbols_indexing` 提示。outline 下线后该分类不会出现,完全删除。
+        let _ = category;
 
         if self.mixer.as_ref(app).is_loading() {
             self.render_loading_results(app)

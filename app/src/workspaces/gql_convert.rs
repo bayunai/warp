@@ -5,18 +5,19 @@ use super::{
     workspace::{
         AIAutonomyPolicy, AddonCreditsSettings, AdminEnablementSetting, AiAutonomySettings,
         AiPermissionsSettings, AmbientAgentsPolicy, BillingMetadata,
-        CloudConversationStorageSettings, CodebaseContextSettings, CustomerType, DelinquencyStatus,
-        EmailInvite, EnterpriseSecretRegex, HostEnablementSetting, InstanceShape,
-        InviteLinkDomainRestriction, LinkSharingSettings, LlmSettings, SandboxedAgentSettings,
-        SecretRedactionSettings, SessionSharingPolicy, SharedNotebooksPolicy,
-        SharedWorkflowsPolicy, TelemetryDataCollectionPolicy, TelemetrySettings, Tier,
-        UgcCollectionEnablementSetting, UgcCollectionSettings, UgcDataCollectionPolicy,
-        UsageBasedPricingPolicy, WarpAiPolicy, Workspace, WorkspaceInviteCode, WorkspaceMember,
-        WorkspaceMemberUsageInfo, WorkspaceSettings, WorkspaceSizePolicy,
+        CloudConversationStorageSettings, CustomerType, DelinquencyStatus, EmailInvite,
+        EnterpriseSecretRegex, HostEnablementSetting, InstanceShape, InviteLinkDomainRestriction,
+        LinkSharingSettings, LlmSettings, SandboxedAgentSettings, SecretRedactionSettings,
+        SessionSharingPolicy, SharedNotebooksPolicy, SharedWorkflowsPolicy,
+        TelemetryDataCollectionPolicy, TelemetrySettings, Tier, UgcCollectionEnablementSetting,
+        UgcCollectionSettings, UgcDataCollectionPolicy, UsageBasedPricingPolicy, WarpAiPolicy,
+        Workspace, WorkspaceInviteCode, WorkspaceMember, WorkspaceMemberUsageInfo,
+        WorkspaceSettings, WorkspaceSizePolicy,
     },
 };
 use crate::{
-    ai::blocklist::usage::conversation_usage_view::ConversationUsageInfo,
+    // OpenWarp Wave 3-1:`ConversationUsageInfo` 随 `get_conversation_usage`
+    // GraphQL operation + AuthClient 随 一同物理删。
     ai::execution_profiles::{ActionPermission, ComputerUsePermission, WriteToPtyPermission},
     ai::{BonusGrant, BonusGrantScope},
     auth::UserUid,
@@ -26,22 +27,20 @@ use crate::{
     server::ids::ServerId,
     settings::AgentModeCommandExecutionPredicate,
     workspaces::workspace::{
-        AiOverages, BonusGrantsPurchased, ByoApiKeyPolicy, CodebaseContextPolicy,
-        EnterpriseCreditsAutoReloadPolicy, EnterprisePayAsYouGoPolicy, MultiAdminPolicy,
-        PurchaseAddOnCreditsPolicy, UsageBasedPricingSettings,
+        AiOverages, BonusGrantsPurchased, ByoApiKeyPolicy, EnterpriseCreditsAutoReloadPolicy,
+        EnterprisePayAsYouGoPolicy, MultiAdminPolicy, PurchaseAddOnCreditsPolicy,
+        UsageBasedPricingSettings,
     },
 };
 use crate::{
     cloud_object::{
-        ServerAmbientAgentEnvironment, ServerCloudAgentConfig, ServerCloudObject,
-        ServerEnvVarCollection, ServerFolder, ServerMCPServer, ServerNotebook, ServerPreference,
-        ServerScheduledAmbientAgent, ServerTemplatableMCPServer, ServerWorkflow,
-        ServerWorkflowEnum,
+        ServerAmbientAgentEnvironment, ServerCloudObject, ServerEnvVarCollection, ServerFolder,
+        ServerMCPServer, ServerNotebook, ServerPreference, ServerTemplatableMCPServer,
+        ServerWorkflow, ServerWorkflowEnum,
     },
     convert_to_server_experiment,
-    server::cloud_objects::listener::ObjectUpdateMessage,
 };
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use regex::Regex;
 use std::path::PathBuf;
 use warp_graphql::workspace::AddonCreditsSettings as GqlAddonCreditsSettings;
@@ -49,8 +48,8 @@ use warp_graphql::{
     billing::{
         AiAutonomyPolicy as GqlAiAutonomyPolicy, AmbientAgentsPolicy as GqlAmbientAgentsPolicy,
         BillingMetadata as GqlBillingMetadata, BonusGrant as GqlBonusGrant,
-        ByoApiKeyPolicy as GqlByoApiKeyPolicy, CodebaseContextPolicy as GqlCodebaseContextPolicy,
-        CustomerType as GqlCustomerType, DelinquencyStatus as GqlDelinquencyStatus,
+        ByoApiKeyPolicy as GqlByoApiKeyPolicy, CustomerType as GqlCustomerType,
+        DelinquencyStatus as GqlDelinquencyStatus,
         EnterpriseCreditsAutoReloadPolicy as GqlEnterpriseCreditsAutoReloadPolicy,
         EnterprisePayAsYouGoPolicy as GqlEnterprisePayAsYouGoPolicy,
         InstanceShape as GqlInstanceShape, MultiAdminPolicy as GqlMultiAdminPolicy,
@@ -64,10 +63,7 @@ use warp_graphql::{
         UsageBasedPricingPolicy as GqlUsageBasedPricingPolicy, WarpAiPolicy as GqlWarpAiPolicy,
     },
     object::CloudObjectWithDescendants,
-    queries::{
-        get_conversation_usage as gql_usage, get_workspaces_metadata_for_user::User as GqlUser,
-    },
-    subscriptions::get_warp_drive_updates::WarpDriveUpdate,
+    queries::get_workspaces_metadata_for_user::User as GqlUser,
     user::{DiscoverableTeamData as GqlDiscoverableTeamData, PublicUserProfile},
     workspace::{
         AdminEnablementSetting as GqlAdminEnablementSetting, AiAutonomyValue as GqlAiAutonomyValue,
@@ -245,28 +241,10 @@ impl From<GqlUgcCollectionEnablementSetting> for UgcCollectionEnablementSetting 
     }
 }
 
-impl From<&gql_usage::ConversationUsage> for ConversationUsageInfo {
-    fn from(gql: &gql_usage::ConversationUsage) -> Self {
-        let persistence::model::ConversationUsageMetadata {
-            credits_spent,
-            token_usage: models,
-            tool_usage_metadata: tool,
-            context_window_usage,
-            ..
-        } = (&gql.usage_metadata).into();
-        ConversationUsageInfo {
-            credits_spent,
-            credits_spent_for_last_block: None,
-            tool_calls: tool.total_tool_calls(),
-            models,
-            context_window_usage,
-            files_changed: tool.apply_file_diff_stats.files_changed,
-            lines_added: tool.apply_file_diff_stats.lines_added,
-            lines_removed: tool.apply_file_diff_stats.lines_removed,
-            commands_executed: tool.run_command_stats.commands_executed,
-        }
-    }
-}
+// OpenWarp Wave 3-1:`impl From<&gql_usage::ConversationUsage> for ConversationUsageInfo`
+// 随 `get_conversation_usage` query 与 `AuthClient::get_conversation_usage_history`
+// 一同物理删除。OpenWarp 本地化后 会话用量元数据只从本地 SQLite +
+// chat_stream 被动送达,不再有从云端 GraphQL 抓 `ConversationUsage` 的路径。
 
 impl From<GqlAdminEnablementSetting> for AdminEnablementSetting {
     fn from(gql_admin_enablement_setting: GqlAdminEnablementSetting) -> AdminEnablementSetting {
@@ -365,20 +343,6 @@ impl From<GqlAddonCreditsSettings> for AddonCreditsSettings {
     }
 }
 
-impl From<GqlCodebaseContextPolicy> for CodebaseContextPolicy {
-    fn from(gql_codebase_context_policy: GqlCodebaseContextPolicy) -> CodebaseContextPolicy {
-        Self {
-            toggleable: gql_codebase_context_policy.toggleable,
-            index_limit: if gql_codebase_context_policy.is_unlimited_indices {
-                None
-            } else {
-                Some(gql_codebase_context_policy.max_indices as u32)
-            },
-            max_files_per_repo: gql_codebase_context_policy.max_files_per_repo as u32,
-        }
-    }
-}
-
 impl From<GqlByoApiKeyPolicy> for ByoApiKeyPolicy {
     fn from(gql_byo_api_key_policy: GqlByoApiKeyPolicy) -> ByoApiKeyPolicy {
         Self {
@@ -455,7 +419,6 @@ impl From<GqlTier> for Tier {
                 .map(From::from),
             ugc_data_collection_policy: gql_tier.ugc_data_collection_policy.map(From::from),
             usage_based_pricing_policy: gql_tier.usage_based_pricing_policy.map(From::from),
-            codebase_context_policy: gql_tier.codebase_context_policy.map(From::from),
             byo_api_key_policy: gql_tier.byo_api_key_policy.map(From::from),
             purchase_add_on_credits_policy: gql_tier.purchase_add_on_credits_policy.map(From::from),
             enterprise_pay_as_you_go_policy: gql_tier
@@ -814,12 +777,6 @@ impl From<GqlWorkspaceSettings> for WorkspaceSettings {
                     }),
             },
             addon_credits_settings: gql_workspace_settings.addon_credits_settings.into(),
-            codebase_context_settings: CodebaseContextSettings {
-                setting: gql_workspace_settings
-                    .codebase_context_settings
-                    .setting
-                    .into(),
-            },
             sandboxed_agent_settings: gql_workspace_settings.sandboxed_agent_settings.map(|s| {
                 SandboxedAgentSettings {
                     execute_commands_denylist: s
@@ -988,57 +945,9 @@ impl From<PublicUserProfile> for UserProfileWithUID {
     }
 }
 
-impl TryFrom<WarpDriveUpdate> for ObjectUpdateMessage {
-    type Error = anyhow::Error;
-
-    fn try_from(value: WarpDriveUpdate) -> Result<Self, Self::Error> {
-        match value {
-            WarpDriveUpdate::ObjectActionOccurred(message) => {
-                Ok(ObjectUpdateMessage::ObjectActionOccurred {
-                    history: message.history.try_into()?,
-                })
-            }
-            WarpDriveUpdate::ObjectContentUpdated(message) => {
-                let server_object = message.object.try_into()?;
-                let last_editor = message.last_editor.map(|e| e.into());
-                Ok(ObjectUpdateMessage::ObjectContentChanged {
-                    server_object: Box::new(server_object),
-                    last_editor,
-                })
-            }
-            WarpDriveUpdate::ObjectDeleted(message) => Ok(ObjectUpdateMessage::ObjectDeleted {
-                object_uid: ServerId::from_string_lossy(message.object_uid.inner()),
-            }),
-            WarpDriveUpdate::ObjectMetadataUpdated(message) => {
-                Ok(ObjectUpdateMessage::ObjectMetadataChanged {
-                    metadata: message.metadata.try_into()?,
-                })
-            }
-            WarpDriveUpdate::ObjectPermissionsUpdated(message) => {
-                Ok(ObjectUpdateMessage::ObjectPermissionsChangedV2 {
-                    object_uid: ServerId::from_string_lossy(message.object_uid.inner()),
-                    user_profiles: message
-                        .user_profiles
-                        .into_iter()
-                        .flatten()
-                        .map(Into::into)
-                        .collect(),
-                    permissions: message.permissions.try_into()?,
-                })
-            }
-            WarpDriveUpdate::TeamMembershipsChanged(_) => {
-                Ok(ObjectUpdateMessage::TeamMembershipsChanged)
-            }
-            WarpDriveUpdate::AmbientTaskUpdated(message) => {
-                Ok(ObjectUpdateMessage::AmbientTaskUpdated {
-                    task_id: message.task_id.inner().to_string(),
-                    timestamp: message.task_updated_ts.utc(),
-                })
-            }
-            WarpDriveUpdate::Unknown => bail!("Unexpected WarpDriveUpdate variant"),
-        }
-    }
-}
+// OpenWarp(本地化,Phase 2d-4a-1):原 `TryFrom<WarpDriveUpdate> for ObjectUpdateMessage` 是
+// GraphQL Drive Subscription 拼装到 RTC 消息的转换,随 Listener / ObjectUpdateMessage
+// 一起物理删除。其云端订阅调用端已同步删除。
 
 impl TryFrom<warp_graphql::folder::Folder> for ServerFolder {
     type Error = anyhow::Error;
@@ -1206,38 +1115,6 @@ impl TryFrom<warp_graphql::generic_string_object::GenericStringObject>
     }
 }
 
-impl TryFrom<warp_graphql::generic_string_object::GenericStringObject>
-    for ServerScheduledAmbientAgent
-{
-    type Error = anyhow::Error;
-
-    fn try_from(
-        gso: warp_graphql::generic_string_object::GenericStringObject,
-    ) -> Result<Self, Self::Error> {
-        ServerScheduledAmbientAgent::try_from_graphql_fields(
-            ServerId::from_string_lossy(gso.metadata.uid.inner()),
-            Some(gso.serialized_model),
-            gso.metadata.try_into()?,
-            gso.permissions.try_into()?,
-        )
-    }
-}
-
-impl TryFrom<warp_graphql::generic_string_object::GenericStringObject> for ServerCloudAgentConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(
-        gso: warp_graphql::generic_string_object::GenericStringObject,
-    ) -> Result<Self, Self::Error> {
-        ServerCloudAgentConfig::try_from_graphql_fields(
-            ServerId::from_string_lossy(gso.metadata.uid.inner()),
-            Some(gso.serialized_model),
-            gso.metadata.try_into()?,
-            gso.permissions.try_into()?,
-        )
-    }
-}
-
 impl TryFrom<warp_graphql::object::CloudObject> for ServerCloudObject {
     type Error = anyhow::Error;
 
@@ -1274,9 +1151,6 @@ impl TryFrom<warp_graphql::object::CloudObject> for ServerCloudObject {
                     }
                     warp_graphql::generic_string_object::GenericStringObjectFormat::JsonCloudEnvironment => {
                         Ok(ServerCloudObject::AmbientAgentEnvironment(gso.try_into()?))
-                    }
-                    warp_graphql::generic_string_object::GenericStringObjectFormat::JsonScheduledAmbientAgent => {
-                        Ok(ServerCloudObject::ScheduledAmbientAgent(gso.try_into()?))
                     }
                 }
             }
@@ -1328,9 +1202,6 @@ impl TryFrom<CloudObjectWithDescendants> for ServerCloudObject {
                 }
                 warp_graphql::generic_string_object::GenericStringObjectFormat::JsonCloudEnvironment => {
                     Ok(ServerCloudObject::AmbientAgentEnvironment(gso.try_into()?))
-                }
-                warp_graphql::generic_string_object::GenericStringObjectFormat::JsonScheduledAmbientAgent => {
-                    Ok(ServerCloudObject::ScheduledAmbientAgent(gso.try_into()?))
                 }
             }
             CloudObjectWithDescendants::Notebook(notebook) => Ok(ServerCloudObject::Notebook(notebook.try_into()?)),

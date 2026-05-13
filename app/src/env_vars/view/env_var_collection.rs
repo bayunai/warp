@@ -602,9 +602,9 @@ impl EnvVarCollectionView {
         window_id: WindowId,
         ctx: &mut ViewContext<Self>,
     ) {
-        let initial_load_complete = UpdateManager::handle(ctx).update(ctx, |update_manager, _| {
-            update_manager.initial_load_complete()
-        });
+        let initial_load_complete =
+            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+                .initial_load_complete();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
             let env_var_collection = CloudModel::as_ref(ctx)
                 .get_env_var_collection(&env_var_collection_id)
@@ -965,13 +965,6 @@ impl EnvVarCollectionView {
             ActiveEnvVarCollectionDataEvent::BreadcrumbsChanged => {
                 self.update_breadcrumbs(ctx);
                 ctx.notify()
-            }
-            ActiveEnvVarCollectionDataEvent::CreatedOnServer(server_id) => {
-                self.update_breadcrumbs(ctx);
-                // TODO(openwarp-cloud-removal Phase 5): 同上,sharing UI 已退役,
-                // 不再回灌 ShareableObject;server_id 仅由 cloud_object 创建路径
-                // 触发,Phase 5 一并退役。
-                let _ = server_id;
             }
             ActiveEnvVarCollectionDataEvent::TrashStatusChanged => {
                 self.pane_configuration.update(ctx, |pane_config, ctx| {

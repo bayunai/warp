@@ -14,7 +14,7 @@ use crate::ai::agent_sdk::mcp_config::build_mcp_servers_from_specs;
 #[cfg(not(target_family = "wasm"))]
 use crate::ai::aws_credentials::refresh_aws_credentials;
 use crate::ai::llms::LLMId;
-use crate::auth::auth_manager::{AuthManager, AuthManagerEvent};
+use crate::auth::{AuthManager, AuthManagerEvent};
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::server::server_api::ai::AIClient;
 use crate::workflows::workflow::Workflow;
@@ -23,14 +23,12 @@ use anyhow::Context;
 use warp_cli::{
     agent::{AgentCommand, AgentProfileCommand, OutputFormat},
     artifact::ArtifactCommand,
-    environment::{EnvironmentCommand, ImageCommand},
     federate::FederateCommand,
     harness_support::{HarnessSupportCommand, ReportArtifactCommand, TaskStatus},
     integration::IntegrationCommand,
     mcp::MCPCommand,
     model::ModelCommand,
     provider::ProviderCommand,
-    schedule::ScheduleSubcommand,
     secret::SecretCommand,
     share::ShareRequest,
     task::{MessageCommand, TaskCommand},
@@ -46,18 +44,13 @@ use warpui::{platform::TerminationMode, AppContext, SingletonEntity};
 
 use crate::{
     ai::ambient_agents::{task::HarnessConfig, AmbientAgentTaskId},
-    ai::cloud_environments::CloudAmbientAgentEnvironment,
     auth::AuthStateProvider,
     send_telemetry_sync_from_app_ctx,
-    server::{
-        ids::{ServerId, SyncId},
-        server_api::{ai::AgentConfigSnapshot, ServerApiProvider},
-    },
+    server::server_api::{ai::AgentConfigSnapshot, ServerApiProvider},
 };
 use driver::AgentDriverError;
 use warp_graphql::object_permissions::OwnerType;
 
-use crate::ai::attachment_utils::attachments_download_dir;
 use crate::ai::skills::{
     clone_repo_for_skill, resolve_skill_spec, ResolveSkillError, ResolvedSkill,
 };
@@ -74,17 +67,11 @@ mod admin;
 mod agent_config;
 mod ambient;
 mod artifact;
-pub(crate) mod artifact_upload;
 mod common;
 mod config_file;
 pub(crate) mod driver;
-mod environment;
 mod federate;
 mod harness_support;
-#[cfg(not(target_family = "wasm"))]
-mod integration;
-#[cfg(not(target_family = "wasm"))]
-mod integration_output;
 mod mcp;
 mod mcp_config;
 mod model;
@@ -93,7 +80,6 @@ pub mod output;
 mod profiles;
 mod provider;
 pub(crate) mod retry;
-mod schedule;
 mod secret;
 mod telemetry;
 #[cfg(test)]
@@ -134,17 +120,10 @@ fn dispatch_command(
 ) -> anyhow::Result<()> {
     match command {
         CliCommand::Agent(agent_cmd) => run_agent(ctx, global_options, agent_cmd),
-        CliCommand::Environment(environment_cmd) => {
-            if !FeatureFlag::CloudEnvironments.is_enabled() {
-                return Err(anyhow::anyhow!("invalid value 'environment'"));
-            }
-            environment::run(ctx, global_options, environment_cmd)
-        }
         CliCommand::MCP(mcp_cmd) => mcp::run(ctx, global_options, mcp_cmd),
         CliCommand::Run(task_cmd) => run_task(ctx, global_options, task_cmd),
         CliCommand::Model(model_cmd) => model::run(ctx, global_options, model_cmd),
         CliCommand::Login => admin::login(ctx),
-        CliCommand::Logout => admin::logout(ctx),
         CliCommand::Whoami => admin::whoami(ctx, global_options.output_format),
         CliCommand::Provider(provider_cmd) => {
             if !FeatureFlag::ProviderCommand.is_enabled() {
@@ -153,21 +132,13 @@ fn dispatch_command(
             provider::run(ctx, global_options, provider_cmd)
         }
         #[cfg(not(target_family = "wasm"))]
-        CliCommand::Integration(integration_cmd) => {
-            if !FeatureFlag::IntegrationCommand.is_enabled() {
-                return Err(anyhow::anyhow!("invalid value 'integration'"));
-            }
-            integration::run(ctx, global_options, integration_cmd)
+        CliCommand::Integration(_integration_cmd) => {
+            // OpenWarp:云端 Simple Integration CRUD 已下线,CLI 子命令直接报错。
+            return Err(anyhow::anyhow!("Cloud integrations disabled in OpenWarp"));
         }
         #[cfg(target_family = "wasm")]
         CliCommand::Integration(_) => {
             return Err(anyhow::anyhow!("invalid value 'integration'"));
-        }
-        CliCommand::Schedule(schedule_cmd) => {
-            if !FeatureFlag::ScheduledAmbientAgents.is_enabled() {
-                return Err(anyhow::anyhow!("invalid value 'schedule'"));
-            }
-            schedule::run(ctx, global_options, schedule_cmd)
         }
         CliCommand::Secret(secret_cmd) => {
             if !FeatureFlag::WarpManagedSecrets.is_enabled() {
@@ -237,9 +208,6 @@ fn run_agent(
 ) -> anyhow::Result<()> {
     match command {
         AgentCommand::Run(args) => {
-            if args.environment.is_some() && !FeatureFlag::CloudEnvironments.is_enabled() {
-                return Err(anyhow::anyhow!("unexpected argument '--environment' found"));
-            }
             if args.conversation.is_some() {
                 return Err(anyhow::anyhow!(
                     "unexpected argument '--conversation' found"
@@ -282,11 +250,6 @@ fn run_agent(
             Ok(())
         }
         AgentCommand::RunCloud(args) => {
-            if args.environment.environment.is_some()
-                && !FeatureFlag::CloudEnvironments.is_enabled()
-            {
-                return Err(anyhow::anyhow!("unexpected argument '--environment' found"));
-            }
             if args.conversation.is_some() {
                 return Err(anyhow::anyhow!(
                     "unexpected argument '--conversation' found"
@@ -345,7 +308,7 @@ fn build_merged_config_and_task(
     let mut merged_config = AgentConfigSnapshot {
         // CLI name > skill name > file name
         name: args.name.clone().or(skill_name).or(file_merged.name),
-        environment_id: args.environment.clone().or(file_merged.environment_id),
+        environment_id: file_merged.environment_id,
         model_id: args.model.model.clone().or(file_merged.model_id),
         // Skill base_prompt takes precedence over file base_prompt
         base_prompt: runtime_base_prompt.clone().or(file_merged.base_prompt),
@@ -429,11 +392,9 @@ fn build_server_side_task(
     let skill_name = resolved_skill.as_ref().map(|s| s.name.clone());
     let model_id_string = model_override.as_ref().map(|id| id.to_string());
     let profile = args.profile.clone();
-    let environment = args.environment.clone();
-
     let config = AgentConfigSnapshot {
         name: args.name.clone().or(skill_name),
-        environment_id: environment.clone(),
+        environment_id: None,
         model_id: model_id_string,
         base_prompt: None,
         mcp_servers: cli_mcp_servers,
@@ -486,30 +447,7 @@ fn run_task(
 ) -> anyhow::Result<()> {
     match command {
         TaskCommand::List(args) => ambient::list_ambient_agent_tasks(ctx, global_options, args),
-        TaskCommand::Get(args) => {
-            if args.conversation {
-                if !FeatureFlag::ConversationApi.is_enabled() {
-                    return Err(anyhow::anyhow!(
-                        "The --conversation flag is not available in this build"
-                    ));
-                }
-                ambient::get_run_conversation(ctx, args.task_id)
-            } else {
-                ambient::get_ambient_agent_task_status(ctx, global_options, args)
-            }
-        }
-        TaskCommand::Conversation(conv_cmd) => {
-            if !FeatureFlag::ConversationApi.is_enabled() {
-                return Err(anyhow::anyhow!(
-                    "The 'conversation' subcommand is not available in this build"
-                ));
-            }
-            match conv_cmd {
-                warp_cli::task::ConversationCommand::Get(args) => {
-                    ambient::get_conversation(ctx, args.conversation_id)
-                }
-            }
-        }
+        TaskCommand::Get(args) => ambient::get_ambient_agent_task_status(ctx, global_options, args),
         TaskCommand::Message(message_cmd) => {
             if !FeatureFlag::OrchestrationV2.is_enabled() {
                 return Err(anyhow::anyhow!(
@@ -543,8 +481,7 @@ impl AgentDriverRunner {
         Self::refresh_team_metadata(&foreground).await?;
 
         // Wait for Warp Drive to sync before building the task config, since
-        // prompt resolution (SavedPrompt -> workflow lookup) and environment
-        // resolution (CloudAmbientAgentEnvironment lookup) depend on it.
+        // prompt resolution (SavedPrompt -> workflow lookup) depends on it.
         if foreground
             .spawn(|_, ctx| common::refresh_warp_drive(ctx))
             .await?
@@ -770,7 +707,7 @@ impl AgentDriverRunner {
 
         // Build the AgentConfigSnapshot, Task, and AgentDriverOptions
         let prompt_clone = prompt.clone();
-        let (merged_config, mut task, mut driver_options) = foreground
+        let (merged_config, task, mut driver_options) = foreground
             .spawn(move |_, ctx| -> anyhow::Result<_> {
                 let (merged_config, task) =
                     build_merged_config_and_task(&args, &resolved_skill, &prompt_clone, ctx)?;
@@ -787,8 +724,6 @@ impl AgentDriverRunner {
                     idle_on_complete: args.idle_on_complete.map(|d| d.into()),
                     secrets: Default::default(),
                     resume: None,
-                    cloud_providers: Vec::new(),
-                    environment: None,
                     selected_harness: args.harness,
                     snapshot_disabled: args.snapshot.no_snapshot.then_some(true),
                     snapshot_upload_timeout: args
@@ -806,19 +741,12 @@ impl AgentDriverRunner {
             .await?
             .map_err(AgentDriverError::ConfigBuildFailed)?;
 
-        let environment_id = merged_config.environment_id.clone();
-
-        // Handle secrets/attachments fetch (existing task) or task creation (new run).
-        // The existing-task branch also surfaces the task's `conversation_id` (if any) so
-        // the caller can wire up resume without a separate `--conversation` arg.
+        // 既有 task 拉取 secrets / task metadata,新 run 走本地 task 初始化。
+        // 既有 task 分支还会返回 task 的 `conversation_id`,让调用方不需要额外
+        // `--conversation` 参数也能接上恢复逻辑。
         let task_conversation_id = if let Some(task_id_str) = task_id_str {
-            Self::fetch_secrets_and_attachments(
-                foreground,
-                task_id_str,
-                &mut driver_options,
-                &mut task,
-            )
-            .await?
+            Self::fetch_secrets_and_task_metadata(foreground, task_id_str, &mut driver_options)
+                .await?
         } else {
             // Extract the prompt text that we'll pass up to the server when we create the task.
             let prompt_for_task_creation = match &prompt {
@@ -843,74 +771,51 @@ impl AgentDriverRunner {
             None
         };
 
-        // Resolve environment and cloud providers.
-        Self::resolve_environment(foreground, environment_id, &mut driver_options).await?;
-
         Ok((driver_options, task, task_conversation_id))
     }
 
     /// Creates a new task on the server for this agent run, sets the task ID on the driver
     /// options, and updates the Server API provider so that all subsequent requests to warp-server
     /// contain this new task ID.
+    ///
+    /// OpenWarp(本地化,Phase 3b-2):原实现调 `server_api.create_agent_task` 在云端创建
+    /// ambient agent task,获取服务端 task_id 后在后续请求中携带。本地化后:
+    ///   - 不发 GraphQL `create_agent_task` mutation
+    ///   - `driver_options.task_id` 保持 `None`
+    ///   - `ServerApiProvider::set_ambient_agent_task_id(None)` 以清除可能的遗留
+    /// 下游所有 `if let Some(task_id) = driver_options.task_id` 分支自动跳过。
+    /// BYOP 本地 harness 运行不依赖该 task_id,根据 `harness/` 代码路径仅在服务端
+    /// 汇报状态时使用。
     async fn initialize_new_task(
         foreground: &ModelSpawner<Self>,
-        server_api: &Arc<dyn AIClient>,
-        prompt: String,
-        merged_config: AgentConfigSnapshot,
+        _server_api: &Arc<dyn AIClient>,
+        _prompt: String,
+        _merged_config: AgentConfigSnapshot,
         driver_options: &mut AgentDriverOptions,
     ) -> Result<(), AgentDriverError> {
-        let environment = merged_config.environment_id.clone();
-        let task_config = if merged_config.is_empty() {
-            None
-        } else {
-            let mut config = merged_config;
-            // We don't set a worker, since this is a local run.
-            config.worker_host = None;
-            Some(config)
-        };
-
-        let task_id = match server_api
-            .create_agent_task(prompt, environment, None, task_config)
-            .await
-        {
-            Ok(id) => {
-                log::info!("Created task: {id}");
-                Some(id)
-            }
-            Err(e) => {
-                log::error!("Failed to create task: {e}");
-                // Continue without a task_id rather than failing entirely
-                None
-            }
-        };
-
+        driver_options.task_id = None;
         foreground
             .spawn(move |_, ctx| {
-                // Set the task ID on the ServerApi so it's sent with all subsequent requests.
                 ServerApiProvider::handle(ctx)
                     .as_ref(ctx)
-                    .get()
-                    .set_ambient_agent_task_id(task_id);
+                    .get_local_client()
+                    .set_ambient_agent_task_id(None);
             })
             .await?;
-        driver_options.task_id = task_id;
-
         Ok(())
     }
 
-    /// When starting an agent run from an existing task_id, fetch secrets, task metadata,
-    /// and task attachments (images and files) from the server and update the driver options.
+    /// 从既有 task_id 启动 agent run 时,拉取 secrets 和 task metadata 并更新
+    /// driver options。
     ///
-    /// Returns the task's `conversation_id` when the server has linked the task to an existing
-    /// AI conversation (e.g. a `run-cloud --conversation` spawn). The caller uses this to drive
-    /// transcript rehydration without a separate `--conversation` CLI arg.
-    async fn fetch_secrets_and_attachments(
+    /// 如果服务端 task 已关联既有 AI conversation,返回它的 `conversation_id`。
+    /// 调用方用它恢复 transcript,无需额外 `--conversation` CLI 参数。
+    async fn fetch_secrets_and_task_metadata(
         foreground: &ModelSpawner<Self>,
         task_id_str: String,
         driver_options: &mut AgentDriverOptions,
-        task: &mut Task,
     ) -> Result<Option<String>, AgentDriverError> {
-        let (task_secrets, ai_client, server_api) = foreground
+        let (task_secrets, ai_client) = foreground
             .spawn({
                 let task_id_str = task_id_str.clone();
                 move |_, ctx| {
@@ -921,8 +826,7 @@ impl AgentDriverRunner {
                         .as_ref(ctx)
                         .get_ai_client()
                         .clone();
-                    let server_api = ServerApiProvider::handle(ctx).as_ref(ctx).get();
-                    (task_secrets, ai_client, server_api)
+                    (task_secrets, ai_client)
                 }
             })
             .await?;
@@ -935,10 +839,6 @@ impl AgentDriverRunner {
             }
         };
 
-        // Fetch secrets, task metadata, regular attachments, and handoff snapshot
-        // attachments in parallel. The handoff snapshot fetch is independent of the
-        // other three calls and only shares the download dir (a cloned PathBuf).
-        let attachments_download_dir = attachments_download_dir(&driver_options.working_dir);
         let task_ai_client = ai_client.clone();
         let task_metadata = async {
             match parsed_task_id {
@@ -950,61 +850,8 @@ impl AgentDriverRunner {
             }
         };
 
-        // Handoff snapshot attachments for follow-up executions are written to
-        // {attachments_dir}/handoff/{uuid} so the server-side rehydration prompt
-        // references resolve to real files.
-        let handoff_snapshot_ai_client = ai_client.clone();
-        let handoff_snapshot_server_api = server_api.clone();
-        let handoff_snapshot_download_dir = attachments_download_dir.clone();
-        let handoff_snapshot = async move {
-            if !FeatureFlag::OzHandoff.is_enabled() {
-                return Ok(None);
-            }
-            let Some(task_id_parsed) = parsed_task_id else {
-                return Ok(None);
-            };
-            driver::attachments::fetch_and_download_handoff_snapshot_attachments(
-                handoff_snapshot_ai_client,
-                handoff_snapshot_server_api.http_client(),
-                task_id_parsed,
-                handoff_snapshot_download_dir,
-            )
-            .await
-        };
-        let (secrets_result, attachments_result, task_metadata_result, handoff_snapshot_result) =
-            futures::future::join4(
-                task_secrets,
-                driver::attachments::fetch_and_download_attachments(
-                    ai_client.clone(),
-                    server_api.clone(),
-                    task_id_str.clone(),
-                    attachments_download_dir.clone(),
-                ),
-                task_metadata,
-                handoff_snapshot,
-            )
-            .await;
-
-        // Extract attachments_dir from successful result, log errors
-        let mut attachments_dir = match attachments_result {
-            Ok(dir) => dir,
-            Err(e) => {
-                log::warn!("Failed to fetch and download attachments: {e:#}");
-                None
-            }
-        };
-
-        match handoff_snapshot_result {
-            Ok(Some(dir)) => {
-                // Ensure attachments_dir is set so it's passed to the server even when
-                // there were no regular task attachments.
-                attachments_dir.get_or_insert(dir);
-            }
-            Ok(None) => {}
-            Err(e) => {
-                log::warn!("Failed to fetch handoff snapshot attachments: {e:#}");
-            }
-        }
+        let (secrets_result, task_metadata_result) =
+            futures::future::join(task_secrets, task_metadata).await;
         let secrets = match secrets_result {
             Ok(secrets) => secrets,
             Err(err) => {
@@ -1064,7 +911,7 @@ impl AgentDriverRunner {
             .spawn(move |_, ctx| {
                 ServerApiProvider::handle(ctx)
                     .as_ref(ctx)
-                    .get()
+                    .get_local_client()
                     .set_ambient_agent_task_id(parsed_task_id);
             })
             .await?;
@@ -1072,15 +919,6 @@ impl AgentDriverRunner {
         driver_options.task_id = parsed_task_id;
         driver_options.parent_run_id = parent_run_id;
         driver_options.secrets = secrets;
-
-        // Update the task prompt to include the downloaded attachments dir
-        if let AgentRunPrompt::ServerSide {
-            attachments_dir: ref mut dir,
-            ..
-        } = task.prompt
-        {
-            *dir = attachments_dir;
-        }
 
         Ok(task_conversation_id)
     }
@@ -1112,7 +950,12 @@ impl AgentDriverRunner {
             }
             HarnessKind::ThirdParty(h) => {
                 let harness_support_client = foreground
-                    .spawn(|_, ctx| ServerApiProvider::as_ref(ctx).get_harness_support_client())
+                    .spawn(|_, ctx| {
+                        let harness_support_client: std::sync::Arc<
+                            dyn crate::server::server_api::harness_support::HarnessSupportClient,
+                        > = ServerApiProvider::as_ref(ctx).get_harness_support_client();
+                        harness_support_client
+                    })
                     .await?;
                 let resume_conversation_id = AIConversationId::try_from(conversation_id.clone())
                     .map_err(|err| AgentDriverError::ConversationLoadFailed(format!("{err:#}")))?;
@@ -1129,49 +972,6 @@ impl AgentDriverRunner {
                 ),
             }),
         }
-    }
-
-    /// Resolve the environment and store into `driver_options`.
-    async fn resolve_environment(
-        foreground: &ModelSpawner<Self>,
-        environment_id: Option<String>,
-        driver_options: &mut AgentDriverOptions,
-    ) -> Result<(), AgentDriverError> {
-        let Some(environment_id) = environment_id else {
-            return Ok(());
-        };
-
-        let environment = foreground
-            .spawn(move |_, ctx| -> Result<_, AgentDriverError> {
-                let server_id = ServerId::try_from(environment_id.as_str()).map_err(|_| {
-                    log::error!("Invalid environment ID: {environment_id}");
-                    AgentDriver::log_valid_environments(ctx);
-                    AgentDriverError::EnvironmentNotFound(environment_id.clone())
-                })?;
-                let sync_id = SyncId::ServerId(server_id);
-
-                CloudAmbientAgentEnvironment::get_by_id(&sync_id, ctx)
-                    .ok_or_else(|| {
-                        log::error!("Environment not found with ID: {environment_id}");
-                        AgentDriver::log_valid_environments(ctx);
-                        AgentDriverError::EnvironmentNotFound(environment_id)
-                    })
-                    .map(|env| env.model().string_model.clone())
-            })
-            .await??;
-
-        if FeatureFlag::OzIdentityFederation.is_enabled() {
-            let run_id = driver_options
-                .task_id
-                .map(|id| id.to_string())
-                .unwrap_or_else(|| "local".to_string());
-            driver_options.cloud_providers =
-                driver::cloud_provider::load_providers(&environment.providers, &run_id)
-                    .map_err(AgentDriverError::CloudProviderSetupFailed)?;
-        }
-
-        driver_options.environment = Some(environment);
-        Ok(())
     }
 
     /// Create the AgentDriver and start running the task.
@@ -1220,36 +1020,29 @@ fn command_requires_auth(command: &CliCommand) -> bool {
             },
             AgentCommand::List(_) => true,
         },
-        CliCommand::Environment(environment_cmd) => match environment_cmd {
-            EnvironmentCommand::List => true,
-            EnvironmentCommand::Create { .. } => true,
-            EnvironmentCommand::Delete { .. } => true,
-            EnvironmentCommand::Update { .. } => true,
-            EnvironmentCommand::Get { .. } => true,
-            EnvironmentCommand::Image(ImageCommand::List) => true,
-        },
         CliCommand::MCP(mcp_cmd) => match mcp_cmd {
             MCPCommand::List => true,
         },
         CliCommand::Run(task_cmd) => match task_cmd {
             TaskCommand::List { .. } => true,
             TaskCommand::Get { .. } => true,
-            TaskCommand::Conversation { .. } => true,
             TaskCommand::Message { .. } => true,
         },
         CliCommand::Model(model_cmd) => match model_cmd {
             ModelCommand::List => true,
         },
         CliCommand::Login => false,
-        CliCommand::Logout => false,
         CliCommand::Whoami => true,
         CliCommand::Provider(_) => true,
         CliCommand::Integration(_) => true,
-        CliCommand::Schedule(_) => true,
         CliCommand::Secret(_) => true,
         CliCommand::Federate(_) => true,
         CliCommand::HarnessSupport(_) => true,
-        CliCommand::Artifact(_) => true,
+        CliCommand::Artifact(artifact_cmd) => match artifact_cmd {
+            ArtifactCommand::Upload(_) | ArtifactCommand::Get(_) | ArtifactCommand::Download(_) => {
+                false
+            }
+        },
     }
 }
 
@@ -1367,7 +1160,7 @@ fn command_to_telemetry_event(command: &CliCommand) -> CliTelemetryEvent {
         CliCommand::Agent(AgentCommand::Run(args)) => CliTelemetryEvent::AgentRun {
             gui: args.gui,
             requested_mcp_servers: args.mcp_specs.len() + args.mcp_servers.len(),
-            has_environment: args.environment.is_some(),
+            has_environment: false,
             task_id: args.task_id.clone(),
             harness: args.harness.to_string(),
         },
@@ -1376,32 +1169,9 @@ fn command_to_telemetry_event(command: &CliCommand) -> CliTelemetryEvent {
             AgentProfileCommand::List => CliTelemetryEvent::AgentProfileList,
         },
         CliCommand::Agent(AgentCommand::List(_)) => CliTelemetryEvent::AgentList,
-        CliCommand::Environment(EnvironmentCommand::List) => CliTelemetryEvent::EnvironmentList,
-        CliCommand::Environment(EnvironmentCommand::Create { .. }) => {
-            CliTelemetryEvent::EnvironmentCreate
-        }
-        CliCommand::Environment(EnvironmentCommand::Delete { .. }) => {
-            CliTelemetryEvent::EnvironmentDelete
-        }
-        CliCommand::Environment(EnvironmentCommand::Update { .. }) => {
-            CliTelemetryEvent::EnvironmentUpdate
-        }
-        CliCommand::Environment(EnvironmentCommand::Get { .. }) => {
-            CliTelemetryEvent::EnvironmentGet
-        }
-        CliCommand::Environment(EnvironmentCommand::Image(ImageCommand::List)) => {
-            CliTelemetryEvent::EnvironmentImageList
-        }
         CliCommand::MCP(MCPCommand::List) => CliTelemetryEvent::MCPList,
         CliCommand::Run(TaskCommand::List(_)) => CliTelemetryEvent::TaskList,
-        CliCommand::Run(TaskCommand::Get(args)) => {
-            if args.conversation {
-                CliTelemetryEvent::RunConversationGet
-            } else {
-                CliTelemetryEvent::TaskGet
-            }
-        }
-        CliCommand::Run(TaskCommand::Conversation(_)) => CliTelemetryEvent::ConversationGet,
+        CliCommand::Run(TaskCommand::Get(_)) => CliTelemetryEvent::TaskGet,
         CliCommand::Run(TaskCommand::Message(message_cmd)) => match message_cmd {
             MessageCommand::Watch(_) => CliTelemetryEvent::RunMessageWatch {
                 harness: resolve_orchestration_harness_label(),
@@ -1421,7 +1191,6 @@ fn command_to_telemetry_event(command: &CliCommand) -> CliTelemetryEvent {
         },
         CliCommand::Model(ModelCommand::List) => CliTelemetryEvent::ModelList,
         CliCommand::Login => CliTelemetryEvent::Login,
-        CliCommand::Logout => CliTelemetryEvent::Logout,
         CliCommand::Whoami => CliTelemetryEvent::Whoami,
         CliCommand::Provider(ProviderCommand::Setup(_)) => CliTelemetryEvent::ProviderSetup,
         CliCommand::Provider(ProviderCommand::List) => CliTelemetryEvent::ProviderList,
@@ -1429,15 +1198,6 @@ fn command_to_telemetry_event(command: &CliCommand) -> CliTelemetryEvent {
             IntegrationCommand::Create(_) => CliTelemetryEvent::IntegrationCreate,
             IntegrationCommand::Update(_) => CliTelemetryEvent::IntegrationUpdate,
             IntegrationCommand::List => CliTelemetryEvent::IntegrationList,
-        },
-        CliCommand::Schedule(c) => match c.subcommand() {
-            None | Some(ScheduleSubcommand::Create(_)) => CliTelemetryEvent::ScheduleCreate,
-            Some(ScheduleSubcommand::List) => CliTelemetryEvent::ScheduleList,
-            Some(ScheduleSubcommand::Get(_)) => CliTelemetryEvent::ScheduleGet,
-            Some(ScheduleSubcommand::Pause(_)) => CliTelemetryEvent::SchedulePause,
-            Some(ScheduleSubcommand::Unpause(_)) => CliTelemetryEvent::ScheduleUnpause,
-            Some(ScheduleSubcommand::Update(_)) => CliTelemetryEvent::ScheduleUpdate,
-            Some(ScheduleSubcommand::Delete(_)) => CliTelemetryEvent::ScheduleDelete,
         },
         CliCommand::Secret(secret_cmd) => match secret_cmd {
             SecretCommand::Create(_) => CliTelemetryEvent::SecretCreate,

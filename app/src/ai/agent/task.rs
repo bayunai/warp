@@ -208,10 +208,7 @@ impl Task {
     /// `tool_call_id` 用新 uuid,实际上 root.messages 里没有对应 ToolCall,所以
     /// `is_subagent_task_finished` 会一直返回 `Ok(false)`(未完成)—— LRC 在跑期间
     /// 语义上确实是"未完成",`BlockCompleted` 钩子会在 LRC 真结束时清理。
-    pub(super) fn new_byop_silent_cli_subtask(
-        block_id: BlockId,
-        parent_task_id: String,
-    ) -> Self {
+    pub(super) fn new_byop_silent_cli_subtask(block_id: BlockId, parent_task_id: String) -> Self {
         let task_id_str = Uuid::new_v4().to_string();
         let subagent_call = api::message::tool_call::Subagent {
             task_id: task_id_str.clone(),
@@ -226,9 +223,7 @@ impl Task {
         let api_task = api::Task {
             id: task_id_str.clone(),
             description: String::new(),
-            dependencies: Some(api::task::Dependencies {
-                parent_task_id,
-            }),
+            dependencies: Some(api::task::Dependencies { parent_task_id }),
             messages: vec![],
             summary: String::new(),
             server_data: String::new(),

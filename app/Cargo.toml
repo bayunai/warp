@@ -100,7 +100,6 @@ enclose = "1.1.8"
 enum-iterator.workspace = true
 event-listener = "5.4.0"
 field_mask.workspace = true
-firebase.workspace = true
 flate2 = "1.0.17"
 float-cmp.workspace = true
 futures-lite.workspace = true
@@ -125,7 +124,6 @@ jaq-all.workspace = true
 jemalloc_pprof = { version = "0.8.1", optional = true, features = [
     "symbolize",
 ] }
-lsp-types = "0.97.0"
 indexmap = { version = "2.0.2", features = ["serde"] }
 input_classifier.workspace = true
 instant.workspace = true
@@ -139,7 +137,6 @@ libc.workspace = true
 line-ending.workspace = true
 log.workspace = true
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
-lsp.workspace = true
 warp_logging.workspace = true
 sentry = { workspace = true, optional = true }
 lz4_flex = "0.11"
@@ -449,7 +446,6 @@ ask_user_question = []
 changelog = []
 clear_autosuggestion_on_escape = []
 cloud_object_initial_load = ["enforce_revisions_to_cloud_objects"]
-codebase_index_speedbump = []
 cocoa_sentry = ["crash_reporting"]
 command_predictor = []
 context_line_review_comments = []
@@ -467,8 +463,6 @@ crash_reporting = [
     "ai/crash_reporting",
 ]
 creating_shared_sessions = []
-cross_repo_context = []
-codebase_index_persistence = ["full_source_code_embedding"]
 default = [
     "agent_mode",
     "viewing_shared_sessions",
@@ -524,7 +518,6 @@ default = [
     "agent_decides_command_execution",
     "linked_code_blocks",
     "drive_objects_as_context",
-    "search_codebase_ui",
     "profiles_design_revamp",
     "multi_profile",
     "tabbed_editor_view",
@@ -557,7 +550,7 @@ default = [
     "agent_shared_sessions",
     "integration_command",
     "artifact_command",
-    "cloud_environments",
+    # OpenWarp Wave 7-2:`cloud_environments` feature 随 cloud ambient agent 主体物理删。
     "create_environment_slash_command",
     "code_review_find",
     "shared_session_long_running_commands",
@@ -632,6 +625,7 @@ default = [
     "open_warp_new_settings_modes",
     "skip_firebase_anonymous_user",
     "settings_file",
+    "ssh_tmux_wrapper",
 ]
 # Enable this feature to automatically perform heap profiling.  NOTE: This will
 # substantially slow down program execution.
@@ -671,8 +665,6 @@ github_pr_prompt_chip = []
 create_project_flow = []
 agent_mode_evals = [
     "integration_tests",
-    "full_source_code_embedding",
-    "cross_repo_context",
     "rust-embed/debug-embed",
     "warpui/log_named_telemetry_events",
     "warp_logging/agent_mode_evals",
@@ -713,7 +705,6 @@ local_computer_use = []
 # environments.
 local_fs = [
     "ai/local_fs",
-    "lsp/local_fs",
     "persistence/local_fs",
     "repo_metadata/local_fs",
     "warp_core/local_fs",
@@ -810,7 +801,6 @@ autoupdate_ui_revamp = []
 warp_packs = []
 suggested_rules = []
 command_correction_key = []
-full_source_code_embedding = []
 use_tantivy_search = []
 agent_management_popup = []
 simulate_github_unauthed = []
@@ -833,7 +823,6 @@ ai_context_menu_code = []
 expand_edit_to_pane = []
 fallback_model_load_output_messaging = []
 profiles_design_revamp = []
-search_codebase_ui = []
 changed_lines_only_apply_diff_result = []
 linked_code_blocks = []
 tabbed_editor_view = []
@@ -866,7 +855,7 @@ auto_open_code_review_pane = []
 inline_code_review = []
 integration_command = []
 artifact_command = []
-cloud_environments = []
+# OpenWarp Wave 7-2:`cloud_environments` feature 随 cloud ambient agent 主体物理删。
 create_environment_slash_command = []
 summarize_conversation_command = []
 mcp_grouped_server_context = []
@@ -888,15 +877,13 @@ agent_view_prompt_chip = ["agent_view"]
 ambient_agents_rtc = []
 team_api_keys = []
 classic_completions = []
-cloud_mode = []
-cloud_mode_from_local_session = []
-cloud_mode_image_context = []
+# OpenWarp Wave 7-2:`cloud_mode` / `cloud_mode_from_local_session` / `cloud_mode_image_context`
+# features 随 cloud ambient agent 主体子系统物理删。
 force_classic_completions = []
 agent_view_conversation_list_view = ["agent_view"]
 inline_history_menu = ["agent_view"]
 inline_repo_menu = ["agent_view"]
 summarization_via_message_replacement = []
-lsp_as_a_tool = []
 inline_model_selector = ["agent_view"]
 inline_profile_selector = ["agent_view"]
 oz_platform_skills = []
@@ -932,13 +919,13 @@ hoa_onboarding_flow = []
 git_operations_in_code_review = []
 hoa_remote_control = []
 codex_notifications = []
-cloud_mode_setup_v2 = ["cloud_mode"]
-cloud_mode_input_v2 = ["cloud_mode"]
+# OpenWarp Wave 7-2:`cloud_mode_setup_v2` / `cloud_mode_input_v2` features 随 cloud ambient agent
+# 主体物理删。
 configurable_context_window = []
 
 [package.metadata.bundle.bin.warp-oss]
 category = "public.app-category.developer-tools"
-copyright = "© 2025, Denver Technologies, Inc"
+copyright = "© 2025-2026, OpenWarp"
 identifier = "dev.openwarp.OpenWarp"
 name = "OpenWarp"
 resources = ["assets/onboarding"]

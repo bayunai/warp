@@ -3,8 +3,8 @@ use std::{fmt, path::PathBuf};
 use clap::{Args, Subcommand, ValueEnum};
 
 use crate::{
-    config_file::ConfigFileArgs, environment::EnvironmentCreateArgs, mcp::MCPSpec,
-    model::ModelArgs, scope::ObjectScope, share::ShareArgs, skill::SkillSpec,
+    config_file::ConfigFileArgs, mcp::MCPSpec, model::ModelArgs, scope::ObjectScope,
+    share::ShareArgs, skill::SkillSpec,
 };
 
 /// Output format for agent results.
@@ -257,10 +257,7 @@ pub struct RunAgentArgs {
     /// LEGACY: MCP servers to start before executing the agent, identified by UUID.
     #[arg(long = "mcp-server", value_name = "UUID", hide = true)]
     pub mcp_servers: Vec<uuid::Uuid>,
-    /// Cloud environment to use, identified by ID.
-    #[arg(long = "environment", short = 'e', value_name = "ID")]
-    pub environment: Option<String>,
-
+    // OpenWarp Wave 7-2:`--environment` 参数 随 cloud ambient agent 主体子系统物理删。
     /// Keep the agent's session open after the conversation completes.
     ///
     /// This is useful when you want to keep the session alive for follow-up interactions.
@@ -381,9 +378,7 @@ pub struct RunCloudArgs {
     #[arg(long = "mcp", value_name = "SPEC")]
     pub mcp_specs: Vec<MCPSpec>,
 
-    /// The environment to run this ambient agent in.
-    #[command(flatten)]
-    pub environment: EnvironmentCreateArgs,
+    // OpenWarp Wave 7-2:`environment` 嵌套参数组 随 cloud ambient agent 主体子系统物理删。
     /// Open the agent's session in Warp once it's available.
     #[arg(long = "open")]
     pub open: bool,

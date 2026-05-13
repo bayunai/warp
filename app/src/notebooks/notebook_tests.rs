@@ -12,11 +12,7 @@ use warpui::{
 };
 
 use crate::{
-    auth::{
-        auth_manager::AuthManager,
-        user::{TEST_USER_EMAIL, TEST_USER_UID},
-        AuthStateProvider, UserUid,
-    },
+    auth::{AuthManager, AuthStateProvider, UserUid, TEST_USER_EMAIL, TEST_USER_UID},
     cloud_object::{
         model::{
             actions::ObjectActions,
@@ -42,7 +38,6 @@ use crate::{
         cloud_objects::update_manager::{InitialLoadResponse, UpdateManager},
         ids::{ClientId, SyncId::ServerId},
         server_api::ServerApiProvider,
-        sync_queue::SyncQueue,
         telemetry::context_provider::AppTelemetryContextProvider,
     },
     settings_view::keybindings::KeybindingChangedNotifier,
@@ -77,7 +72,6 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(TerminalKeybindings::new);
     app.add_singleton_model(PrivacySettings::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);
     app.add_singleton_model(CloudViewModel::mock);
@@ -206,9 +200,11 @@ async fn initial_load(app: &mut App, updated_notebooks: impl Into<Vec<ServerNote
         mcp_gallery: Default::default(),
     };
 
-    let load_complete = UpdateManager::handle(app).update(app, |update_manager, ctx| {
+    UpdateManager::handle(app).update(app, |update_manager, ctx| {
         update_manager.mock_initial_load(response, ctx);
-        update_manager.initial_load_complete()
+    });
+    let load_complete = app.read(|ctx| {
+        crate::cloud_object::model::persistence::CloudModel::as_ref(ctx).initial_load_complete()
     });
     load_complete.await
 }
@@ -687,11 +683,7 @@ fn test_close_unmodified() {
         initialize_app(&mut app);
         initial_load(&mut app, vec![]).await;
 
-        // Stop dequeueing, so that we can verify the queue contents.
-        SyncQueue::handle(&app).update(&mut app, |sync_queue, _ctx| {
-            sync_queue.stop_dequeueing();
-            assert_eq!(sync_queue.queue().len(), 0);
-        });
+        // OpenWarp(Wave 4):SyncQueue 整删,原 stop_dequeueing + assert queue 长度不适用。
 
         // Create a notebook with a server ID, so it can be synced.
         let cloud_notebook =
@@ -715,8 +707,7 @@ fn test_close_unmodified() {
                 .expect("Notebook should exist");
             assert!(!object.metadata().has_pending_content_changes());
 
-            let sync_queue = SyncQueue::as_ref(ctx).queue();
-            assert!(sync_queue.is_empty());
+            // OpenWarp(Wave 4):SyncQueue 整删,原 `sync_queue.is_empty()` 断言不适用。
         })
     });
 }

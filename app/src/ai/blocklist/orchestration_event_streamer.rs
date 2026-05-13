@@ -22,9 +22,6 @@ use warp_multi_agent_api as api;
 use warpui::r#async::Timer;
 use warpui::{Entity, ModelContext, SingletonEntity};
 
-/// Backoff schedule (seconds) reused for the post-restore
-/// `get_ambient_agent_task` retry: 1s, 2s, 5s, then 10s max.
-const RESTORE_FETCH_BACKOFF_STEPS: &[u64] = &[1, 2, 5, 10];
 /// How often (milliseconds) the drain timer checks for SSE events.
 const SSE_DRAIN_INTERVAL_MS: u64 = 500;
 
@@ -93,9 +90,6 @@ pub struct OrchestrationEventStreamer {
     /// Monotonic counter for SSE connection generations. Ensures stale
     /// callbacks from replaced connections are discarded.
     next_sse_generation: u64,
-    /// Consecutive failure count for the post-restore `get_ambient_agent_task`
-    /// fetch (resets on success). Drives exponential backoff for retries.
-    restore_fetch_failures: HashMap<AIConversationId, usize>,
 }
 
 pub enum OrchestrationEventStreamerEvent {
@@ -120,7 +114,6 @@ impl OrchestrationEventStreamer {
             conversation_statuses: HashMap::new(),
             sse_connections: HashMap::new(),
             next_sse_generation: 0,
-            restore_fetch_failures: HashMap::new(),
         }
     }
 
@@ -146,7 +139,6 @@ impl OrchestrationEventStreamer {
             conversation_statuses: HashMap::new(),
             sse_connections: HashMap::new(),
             next_sse_generation: 0,
-            restore_fetch_failures: HashMap::new(),
         }
     }
 
@@ -206,7 +198,6 @@ impl OrchestrationEventStreamer {
                 self.event_cursor.remove(conversation_id);
                 self.pending_delivery.remove(conversation_id);
                 self.conversation_statuses.remove(conversation_id);
-                self.restore_fetch_failures.remove(conversation_id);
                 // Dropping the SSE connection state closes the channel,
                 // causing the task's next send to fail and terminate.
                 self.sse_connections.remove(conversation_id);
@@ -251,7 +242,7 @@ impl OrchestrationEventStreamer {
         }
 
         for conv_id in conversation_ids {
-            let (run_id, cursor, status, is_viewer) = {
+            let (run_id, cursor, status, is_viewer, child_run_ids) = {
                 let history_model = BlocklistAIHistoryModel::as_ref(ctx);
                 let Some(conversation) = history_model.conversation(&conv_id) else {
                     continue;
@@ -260,7 +251,13 @@ impl OrchestrationEventStreamer {
                 let run_id = conversation.run_id();
                 let cursor = conversation.last_event_sequence().unwrap_or(0);
                 let status = conversation.status().clone();
-                (run_id, cursor, status, is_viewer)
+                let child_run_ids = history_model
+                    .child_conversations_of(conv_id)
+                    .into_iter()
+                    .filter(|child| !child.is_viewing_shared_session())
+                    .filter_map(|child| child.run_id())
+                    .collect::<Vec<_>>();
+                (run_id, cursor, status, is_viewer, child_run_ids)
             };
 
             // Shared-session viewers receive updates through session sharing;
@@ -270,21 +267,11 @@ impl OrchestrationEventStreamer {
                 continue;
             }
 
-            // Initialize the in-memory cursor from the persisted SQLite value.
-            // A later server `GET /agent/runs/{run_id}` response may advance
-            // it to `max(SQLite, server)` before delivery starts.
-            //
-            // Note: a status transition arriving in the window before
-            // finish_restore_fetch completes may trigger
-            // start_event_delivery with only the SQLite cursor. This is
-            // acceptable — worst case is one extra batch of duplicate
-            // events.
+            // OpenWarp:恢复后只使用本地 SQLite 持久化的 cursor,不再补取云端 task。
             self.event_cursor.insert(conv_id, cursor);
             self.conversation_statuses.insert(conv_id, status.clone());
 
-            // Register the conversation's own run_id so lifecycle events for
-            // self are correctly filtered and the SSE loop has a set
-            // of run_ids to open against.
+            // 登记自身 run_id,用于过滤 self lifecycle events,并作为 SSE 订阅集合的基础。
             if let Some(ref own) = run_id {
                 self.watched_run_ids
                     .entry(conv_id)
@@ -292,146 +279,16 @@ impl OrchestrationEventStreamer {
                     .insert(own.clone());
             }
 
-            // No run_id means we can't query the server for children or for
-            // the canonical cursor. There's nothing more to do here; if a
-            // run_id gets assigned later the standard self-registration path
-            // will pick it up.
-            let Some(run_id) = run_id else {
-                self.maybe_start_delivery_after_restore(conv_id, &status, ctx);
-                continue;
-            };
-
-            let Ok(task_id) = run_id.parse::<crate::ai::ambient_agents::AmbientAgentTaskId>()
-            else {
-                log::warn!("could not parse run_id {run_id:?} for {conv_id:?}");
-                self.maybe_start_delivery_after_restore(conv_id, &status, ctx);
-                continue;
-            };
-
-            self.spawn_restore_fetch(conv_id, task_id, cursor, ctx);
-        }
-    }
-
-    /// Issues `GET /agent/runs/{task_id}` and routes the result through
-    /// `finish_restore_fetch`. Used both for the initial post-restore fetch
-    /// and for backoff-driven retries.
-    fn spawn_restore_fetch(
-        &mut self,
-        conv_id: AIConversationId,
-        task_id: crate::ai::ambient_agents::AmbientAgentTaskId,
-        sqlite_cursor: i64,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        let ai_client = self.ai_client.clone();
-        ctx.spawn(
-            async move { ai_client.get_ambient_agent_task(&task_id).await },
-            move |me, run_result, ctx| {
-                me.finish_restore_fetch(conv_id, task_id, sqlite_cursor, run_result, ctx);
-            },
-        );
-    }
-
-    /// Completes the post-restore async fetch by merging the server cursor,
-    /// installing the server-reported child run_ids, and — if the parent is
-    /// `Success` — starting event delivery. On a server-fetch failure,
-    /// schedules a retry with exponential backoff: V2 children always have a
-    /// server-side `ai_tasks` row, so the server is the authoritative source
-    /// for the watched run_id set, and any local fallback would be incomplete
-    /// anyway. Without network connectivity event delivery wouldn't function,
-    /// so retrying is the right behavior.
-    fn finish_restore_fetch(
-        &mut self,
-        conv_id: AIConversationId,
-        task_id: crate::ai::ambient_agents::AmbientAgentTaskId,
-        sqlite_cursor: i64,
-        run_result: anyhow::Result<crate::ai::ambient_agents::task::AmbientAgentTask>,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        match run_result {
-            Ok(task) => {
-                // If the conversation was removed while the fetch was in-flight,
-                // the removal handler already cleaned up all streamer state. Return
-                // early to avoid recreating watched_run_ids for a deleted conversation.
-                if !self.event_cursor.contains_key(&conv_id) {
-                    self.restore_fetch_failures.remove(&conv_id);
-                    return;
-                }
-
-                // Reset the retry counter on success.
-                self.restore_fetch_failures.remove(&conv_id);
-
-                // Merge the server cursor: use the max of SQLite and server
-                // values so we don't re-deliver events the client already
-                // acknowledged locally.
-                let server_seq = task.last_event_sequence.unwrap_or(0);
-                let merged = sqlite_cursor.max(server_seq);
-                self.event_cursor.insert(conv_id, merged);
-
-                // The server response includes `children` inline on
-                // `AmbientAgentTask`; this is the authoritative set of
-                // direct child run_ids for the parent.
-                //
-                // Insert children and reconnect SSE once if any new run_ids
-                // were added and a connection is already open (e.g. because a
-                // status transition raced with this fetch and opened SSE with
-                // only the parent's own run_id).
-                let had_sse = self.sse_connections.contains_key(&conv_id);
+            // 本地恢复已维护 parent→child 索引,从已恢复的 child conversation 收集 run_id。
+            if !child_run_ids.is_empty() {
                 let watched = self.watched_run_ids.entry(conv_id).or_default();
-                let mut any_new_children = false;
-                for child in task.children {
-                    if watched.insert(child) {
-                        any_new_children = true;
-                    }
+                for child_run_id in child_run_ids {
+                    watched.insert(child_run_id);
                 }
-                if any_new_children && had_sse {
-                    self.reconnect_sse(conv_id, ctx);
-                }
+            }
 
-                let status = BlocklistAIHistoryModel::as_ref(ctx)
-                    .conversation(&conv_id)
-                    .map(|c| c.status().clone())
-                    .unwrap_or(ConversationStatus::Success);
-                self.maybe_start_delivery_after_restore(conv_id, &status, ctx);
-            }
-            Err(err) => {
-                log::warn!("Restore: get_agent_run failed for {conv_id:?}: {err:#}; will retry");
-                self.start_restore_fetch_retry_timer(conv_id, task_id, sqlite_cursor, ctx);
-            }
+            self.maybe_start_delivery_after_restore(conv_id, &status, ctx);
         }
-    }
-
-    /// Schedules a retry of the post-restore `get_ambient_agent_task` fetch
-    /// after an exponential backoff. The backoff schedule reuses
-    /// `RESTORE_FETCH_BACKOFF_STEPS` (1s, 2s, 5s, 10s capped) keyed on a
-    /// per-conversation failure counter. The counter resets on success.
-    fn start_restore_fetch_retry_timer(
-        &mut self,
-        conv_id: AIConversationId,
-        task_id: crate::ai::ambient_agents::AmbientAgentTaskId,
-        sqlite_cursor: i64,
-        ctx: &mut ModelContext<Self>,
-    ) {
-        let failures = self
-            .restore_fetch_failures
-            .entry(conv_id)
-            .and_modify(|c| *c += 1)
-            .or_insert(1);
-        let step_index = failures
-            .saturating_sub(1)
-            .min(RESTORE_FETCH_BACKOFF_STEPS.len() - 1);
-        let backoff = Duration::from_secs(RESTORE_FETCH_BACKOFF_STEPS[step_index]);
-        ctx.spawn(
-            async move { Timer::after(backoff).await },
-            move |me, _, ctx| {
-                // The conversation may have been removed in the meantime;
-                // if so, drop the retry. Otherwise re-issue the fetch.
-                if !me.event_cursor.contains_key(&conv_id) {
-                    me.restore_fetch_failures.remove(&conv_id);
-                    return;
-                }
-                me.spawn_restore_fetch(conv_id, task_id, sqlite_cursor, ctx);
-            },
-        );
     }
 
     /// Starts event delivery for a restored conversation if the parent is
@@ -794,7 +651,7 @@ impl OrchestrationEventStreamer {
         let mut events = Vec::new();
         let mut messages = Vec::new();
 
-        while let Ok(Some(item)) = sse.event_receiver.try_next() {
+        while let Ok(item) = sse.event_receiver.try_recv() {
             // Deduplicate: discard events at or below the cursor.
             if item.event.sequence > cursor {
                 if let Some(msg) = item.fetched_message {

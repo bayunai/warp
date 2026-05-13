@@ -20,7 +20,7 @@ pub mod skill;
 pub mod agent;
 pub mod completions;
 pub mod config_file;
-pub mod environment;
+// OpenWarp Wave 7-2:`environment` CLI 随 cloud ambient agent 主体子系统物理删。
 pub mod federate;
 pub mod harness_support;
 pub mod integration;
@@ -28,7 +28,6 @@ pub mod json_filter;
 pub mod mcp;
 pub mod model;
 pub mod provider;
-pub mod schedule;
 pub mod secret;
 pub mod share;
 pub mod task;
@@ -98,7 +97,6 @@ pub struct GlobalOptions {
 The Oz CLI is a tool for running, managing, and orchestrating coding agents at scale.
 Use the CLI to:
 * Launch and inspect cloud agents
-* Schedule cloud agents to run in the future
 * Manage the environments that cloud agents run in
 * Upload secrets to Oz's secure storage"#
 )]
@@ -178,16 +176,9 @@ impl Args {
             } else {
                 use clap::FromArgMatches as _;
 
-                // Check for disabled commands before parsing to prevent help from showing (e.g.
-                // `warp environment` should not return help text)
-                if !FeatureFlag::CloudEnvironments.is_enabled() {
-                    let args: Vec<String> = env::args().collect();
-                    if args.len() > 1 && args[1] == "environment" {
-                        eprintln!("error: unrecognized subcommand 'environment'\n");
-                        eprintln!("For more information, try '--help'");
-                        std::process::exit(2);
-                    }
-                }
+                // OpenWarp Wave 7-2:`warp environment` 子命令 随 cloud ambient agent 主体物理删 ——
+                // 以前这里有个反向拦截:在 clap 解析前检查并提前报错。
+                // 现在 enum variant 已删，clap 会自然报“unrecognized subcommand”。
 
                 if !FeatureFlag::ProviderCommand.is_enabled() {
                     let args: Vec<String> = env::args().collect();
@@ -202,15 +193,6 @@ impl Args {
                     let args: Vec<String> = env::args().collect();
                     if args.len() > 1 && args[1] == "integration" {
                         eprintln!("error: unrecognized subcommand 'integration'\n");
-                        eprintln!("For more information, try '--help'");
-                        std::process::exit(2);
-                    }
-                }
-
-                if !FeatureFlag::ScheduledAmbientAgents.is_enabled() {
-                    let args: Vec<String> = env::args().collect();
-                    if args.len() > 1 && args[1] == "schedule" {
-                        eprintln!("error: unrecognized subcommand 'schedule'\n");
                         eprintln!("For more information, try '--help'");
                         std::process::exit(2);
                     }
@@ -264,19 +246,9 @@ impl Args {
     pub fn clap_command() -> clap::Command {
         let mut command = <Args as CommandFactory>::command();
 
-        // Hide the environment subcommands and --environment flags from help text
-        if !FeatureFlag::CloudEnvironments.is_enabled() {
-            command = command.mut_subcommand("environment", |c| c.hide(true));
-            command = command.mut_subcommand("agent", |agent_cmd| {
-                agent_cmd
-                    .mut_subcommand("run", |run_cmd| {
-                        run_cmd.mut_arg("environment", |arg| arg.hide(true))
-                    })
-                    .mut_subcommand("run-cloud", |cloud_cmd| {
-                        cloud_cmd.mut_arg("environment", |arg| arg.hide(true))
-                    })
-            });
-        }
+        // OpenWarp Wave 7-2:`environment` 子命令与 `--environment` 参数随 cloud ambient agent
+        // 主体物理删 —— enum variant 已从 `CliCommand` 和 `RunAgentArgs` / `RunCloudArgs`
+        // 移除,无需 `mut_subcommand` 隐藏。
 
         // CloudConversations was removed in OpenWarp; the --conversation flag is
         // always hidden from help text.
@@ -306,11 +278,6 @@ impl Args {
             command = command.mut_subcommand("integration", |c| c.hide(true));
         }
 
-        // Hide the schedule subcommand from help text.
-        if !FeatureFlag::ScheduledAmbientAgents.is_enabled() {
-            command = command.mut_subcommand("schedule", |c| c.hide(true));
-        }
-
         // Hide the secret subcommand from help text.
         if !FeatureFlag::WarpManagedSecrets.is_enabled() {
             command = command.mut_subcommand("secret", |c| c.hide(true));
@@ -326,16 +293,6 @@ impl Args {
             command = command.mut_subcommand("harness-support", |c| c.hide(true));
         }
 
-        // Hide the conversation subcommand and --conversation flag from help text.
-        if !FeatureFlag::ConversationApi.is_enabled() {
-            command = command.mut_subcommand("run", |run_cmd| {
-                run_cmd
-                    .mut_subcommand("conversation", |c| c.hide(true))
-                    .mut_subcommand("get", |get_cmd| {
-                        get_cmd.mut_arg("conversation", |arg| arg.hide(true))
-                    })
-            });
-        }
         // Hide the message subcommand from help text.
         if !FeatureFlag::OrchestrationV2.is_enabled() {
             command = command.mut_subcommand("run", |run_cmd| {
@@ -483,10 +440,7 @@ pub enum CliCommand {
     #[command(subcommand)]
     Agent(crate::agent::AgentCommand),
 
-    /// Manage cloud environments.
-    #[command(subcommand)]
-    Environment(crate::environment::EnvironmentCommand),
-
+    // OpenWarp Wave 7-2:`Environment` variant 随 cloud ambient agent 主体子系统物理删。
     /// Manage MCP servers.
     #[command(subcommand)]
     MCP(crate::mcp::MCPCommand),
@@ -501,8 +455,6 @@ pub enum CliCommand {
 
     /// Log in to Warp.
     Login,
-    /// Log out of Warp.
-    Logout,
     /// Print information about the logged-in user.
     Whoami,
 
@@ -513,11 +465,6 @@ pub enum CliCommand {
     /// Manage integrations.
     #[command(subcommand)]
     Integration(crate::integration::IntegrationCommand),
-
-    /// Create and manage scheduled Oz agents. Scheduled agents run a user-defined task periodically, according to a cron schedule.
-    ///
-    /// As a shorthand, the `schedule` command behaves identically to `schedule create`.
-    Schedule(crate::schedule::ScheduleCommand),
 
     /// Manage secrets.
     #[command(subcommand)]

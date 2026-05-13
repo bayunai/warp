@@ -1,4 +1,3 @@
-use super::admin_actions::AdminActions;
 use super::settings_page::{render_customer_type_badge, MatchData, PageType, SettingsWidget};
 use super::transfer_ownership_confirmation_modal::{
     TransferOwnershipConfirmationEvent, TransferOwnershipConfirmationModal,
@@ -12,9 +11,9 @@ use super::{
 };
 
 use crate::ai::AIRequestUsageModel;
-use crate::auth::auth_manager::{AuthManager, LoginGatedFeature};
-use crate::auth::auth_state::AuthState;
-use crate::auth::auth_view_modal::AuthViewVariant;
+use crate::auth::AuthState;
+use crate::auth::AuthViewVariant;
+use crate::auth::{AuthManager, LoginGatedFeature};
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::menu::{self, Menu, MenuItem, MenuItemFields};
 use crate::modal::{Modal, ModalEvent, ModalViewState};
@@ -32,9 +31,7 @@ use crate::{
     editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions},
     network::NetworkStatus,
     send_telemetry_from_ctx,
-    server::{
-        cloud_objects::update_manager::UpdateManager, ids::ServerId, telemetry::TelemetryEvent,
-    },
+    server::{ids::ServerId, telemetry::TelemetryEvent},
     themes::{self, theme::Blend},
     ui_components::icons::Icon,
     view_components::{ClickableTextInput, ClickableTextInputAction, ClickableTextInputEvent},
@@ -525,10 +522,11 @@ impl TypedActionView for TeamsPageView {
                 self.generate_stripe_billing_portal_link(*team_uid, ctx)
             }
             TeamsPageAction::OpenAdminPanel { team_uid } => {
-                AdminActions::open_admin_panel(*team_uid, ctx);
+                let _ = team_uid;
+                self.show_error("OpenWarp 本地版不支持团队管理后台入口。", None, ctx);
             }
             TeamsPageAction::ContactSupport => {
-                AdminActions::contact_support(ctx);
+                self.show_error("OpenWarp 本地版不支持团队支持外链。", None, ctx);
             }
             TeamsPageAction::ToggleTeamDiscoverability {
                 team_uid,
@@ -926,16 +924,16 @@ impl TeamsPageView {
                 Some(err),
                 ctx,
             ),
-            UserWorkspacesEvent::GenerateUpgradeLink(upgrade_link) => {
-                ctx.open_url(upgrade_link);
+            UserWorkspacesEvent::GenerateUpgradeLink(_upgrade_link) => {
+                self.show_error("OpenWarp 本地版不支持团队升级链接。", None, ctx)
             }
             UserWorkspacesEvent::GenerateUpgradeLinkRejected(err) => self.show_error(
                 crate::t!("settings-teams-error-upgrade-link"),
                 Some(err),
                 ctx,
             ),
-            UserWorkspacesEvent::GenerateStripeBillingPortalLink(billing_session_link) => {
-                ctx.open_url(billing_session_link);
+            UserWorkspacesEvent::GenerateStripeBillingPortalLink(_billing_session_link) => {
+                self.show_error("OpenWarp 本地版不支持账单门户链接。", None, ctx);
             }
             UserWorkspacesEvent::GenerateStripeBillingPortalLinkRejected(err) => self.show_error(
                 crate::t!("settings-teams-error-billing-link"),
@@ -957,11 +955,6 @@ impl TeamsPageView {
                 );
             }
             UserWorkspacesEvent::JoinTeamWithTeamDiscoverySuccess => {
-                // Force refresh of Warp Drive objects after joining a team
-                UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
-                    update_manager.refresh_updated_objects(ctx);
-                });
-
                 let message = self.user_workspaces.as_ref(ctx).current_team().map_or(
                     crate::t!("settings-teams-toast-joined-team"),
                     |team| {
@@ -1025,7 +1018,6 @@ impl TeamsPageView {
             UserWorkspacesEvent::PurchaseAddonCreditsRejected(_) => {
                 // Addon credits purchase rejection is handled in billing_and_usage_page
             }
-            UserWorkspacesEvent::CodebaseContextEnablementChanged => {}
             UserWorkspacesEvent::SunsettedToBuildDataUpdated => {
                 // Build plan migration modal is handled by OneTimeModalModel
             }

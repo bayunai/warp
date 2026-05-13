@@ -7,7 +7,6 @@ use warpui::{App, EntityId, ModelHandle};
 
 use warp_core::execution_mode::ExecutionMode;
 
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
 use crate::{
     ai::{
@@ -29,14 +28,14 @@ use crate::{
     auth::AuthStateProvider,
     cloud_object::model::persistence::CloudModel,
     network::NetworkStatus,
-    server::{cloud_objects::update_manager::UpdateManager, sync_queue::SyncQueue},
+    server::cloud_objects::update_manager::UpdateManager,
     settings::{AgentModeCommandExecutionPredicate, PrivacySettings},
     test_util::settings::initialize_settings_for_tests_with_mode,
     workspaces::{
         team_tester::TeamTesterStatus, user_workspaces::UserWorkspaces,
         workspace::SandboxedAgentSettings,
     },
-    AgentNotificationsModel, GlobalResourceHandles, GlobalResourceHandlesProvider, LaunchMode,
+    GlobalResourceHandles, GlobalResourceHandlesProvider, LaunchMode,
 };
 
 use super::{BlocklistAIHistoryModel, BlocklistAIPermissions};
@@ -73,12 +72,9 @@ fn initialize_permissions_test_with_mode(
     app.add_singleton_model(|_| GlobalResourceHandlesProvider::new(global_resource_handles));
     let history = app.add_singleton_model(|_| BlocklistAIHistoryModel::new(vec![], &[]));
     app.add_singleton_model(|_| CLIAgentSessionsModel::new());
-    app.add_singleton_model(|_| ActiveAgentViewsModel::new());
-    app.add_singleton_model(AgentNotificationsModel::new);
     let permissions = app.add_singleton_model(BlocklistAIPermissions::new);
     let terminal_view_id = EntityId::new();
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);

@@ -16,7 +16,7 @@ use crate::code::editor_management::CodeSource;
 use crate::drive::OpenWarpDriveObjectSettings;
 use crate::root_view::quake_mode_window_id;
 use crate::server::ids::SyncId;
-use crate::settings_view::{environments_page::EnvironmentsPage, SettingsSection};
+use crate::settings_view::SettingsSection;
 use crate::tab::SelectedTabColor;
 use crate::terminal::ShellLaunchData;
 use crate::themes::theme::AnsiColorIdentifier;
@@ -123,16 +123,14 @@ pub enum LeafContents {
     AIDocument(AIDocumentPaneSnapshot),
     Code(CodePaneSnapShot),
     EnvVarCollection(EnvVarCollectionPaneSnapshot),
-    EnvironmentManagement(EnvironmentManagementPaneSnapshot),
+    // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents variant 随 Cloud Mode UI
+    // 子系统物理删。
     Workflow(WorkflowPaneSnapshot),
     Settings(SettingsPaneSnapshot),
     AIFact(AIFactPaneSnapshot),
     ExecutionProfileEditor,
     CodeReview(CodeReviewPaneSnapshot),
     AmbientAgent(AmbientAgentPaneSnapshot),
-    /// The in-app network log pane. Not persisted across restarts because the
-    /// backing log is an in-memory ring buffer that starts empty on launch.
-    NetworkLog,
     /// An entrypoint pane type to launch other pane types from a search palette. The default view
     /// when creating a tab.
     Welcome {
@@ -160,16 +158,10 @@ impl LeafContents {
     /// restoration to fail and the whole tab to disappear on restart.
     pub(crate) fn is_persisted(&self) -> bool {
         match self {
-            // Network log: the backing log is an in-memory ring buffer that
-            // starts empty on launch; persisting would also regress back to
-            // an on-disk log via the app-state database.
-            LeafContents::NetworkLog
-            // Environment management panes are opened on-demand via workspace
-            // actions and have no persistable state.
-            | LeafContents::EnvironmentManagement(_)
+            // OpenWarp Wave 7-3:`EnvironmentManagement` arm 随 variant 一同物理删。
             // SSH server editor:数据(host/user/...)持久化在 ssh_servers 表里,
             // pane 本身只是 view,关掉再打开没差别。
-            | LeafContents::SshServer { .. } => false,
+            LeafContents::SshServer { .. } => false,
             LeafContents::Terminal(_)
             | LeafContents::Notebook(_)
             | LeafContents::AIDocument(_)
@@ -277,10 +269,7 @@ pub enum EnvVarCollectionPaneSnapshot {
     },
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct EnvironmentManagementPaneSnapshot {
-    pub mode: EnvironmentsPage,
-}
+// OpenWarp Wave 7-3:`EnvironmentManagementPaneSnapshot` 随 LeafContents variant 一同物理删。
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SettingsPaneSnapshot {
@@ -310,6 +299,7 @@ pub enum LeftPanelDisplayedTab {
     WarpDrive,
     ConversationListView,
     SshManager,
+    SkillManager,
 }
 
 impl From<ToolPanelView> for LeftPanelDisplayedTab {
@@ -320,6 +310,7 @@ impl From<ToolPanelView> for LeftPanelDisplayedTab {
             ToolPanelView::WarpDrive => LeftPanelDisplayedTab::WarpDrive,
             ToolPanelView::ConversationListView => LeftPanelDisplayedTab::ConversationListView,
             ToolPanelView::SshManager => LeftPanelDisplayedTab::SshManager,
+            ToolPanelView::SkillManager => LeftPanelDisplayedTab::SkillManager,
         }
     }
 }

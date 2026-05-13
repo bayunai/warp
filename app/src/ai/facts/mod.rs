@@ -1,6 +1,6 @@
 use crate::ai::agent::SuggestedLoggingId;
 use crate::drive::items::{ai_fact::WarpDriveAIFact, WarpDriveItem};
-use crate::server::{ids::SyncId, sync_queue::QueueItem};
+use crate::server::ids::SyncId;
 use crate::{
     cloud_object::{
         model::{
@@ -8,7 +8,7 @@ use crate::{
             json_model::{JsonModel, JsonSerializer},
         },
         GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, Revision, ServerCloudObject,
+        JsonObjectType, ServerCloudObject,
     },
     drive::CloudObjectTypeAndId,
 };
@@ -76,18 +76,6 @@ impl StringModel for AIFact {
         match self {
             AIFact::Memory(memory) => memory.content.clone(),
         }
-    }
-
-    fn update_object_queue_item(
-        &self,
-        revision_ts: Option<Revision>,
-        object: &Self::CloudObjectType,
-    ) -> Option<QueueItem> {
-        Some(QueueItem::UpdateAIFact {
-            model: object.model().clone().into(),
-            id: object.id,
-            revision: revision_ts.or_else(|| object.metadata.revision.clone()),
-        })
     }
 
     fn new_from_server_update(&self, server_cloud_object: &ServerCloudObject) -> Option<Self> {

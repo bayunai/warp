@@ -189,8 +189,8 @@ impl Workspace {
             // If we have an ambient agent task ID, try to populate from task data
             if let Some(task_id) = task_id {
                 let conversations_model_handle = AgentConversationsModel::handle(ctx);
-                let task = conversations_model_handle.update(ctx, |conversations_model, ctx| {
-                    conversations_model.get_or_async_fetch_task_data(&task_id, ctx)
+                let task = conversations_model_handle.update(ctx, |conversations_model, _| {
+                    conversations_model.get_or_async_fetch_task_data(&task_id)
                 });
                 if let Some(task) = task {
                     let details = ConversationDetailsData::from_task(&task, None, None, ctx);

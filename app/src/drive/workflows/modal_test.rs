@@ -1,15 +1,11 @@
 use warp_core::ui::appearance::Appearance;
 use warpui::{platform::WindowStyle, App, SingletonEntity, ViewHandle};
 
-use std::sync::Arc;
-
 use super::WorkflowModal;
 use crate::auth::AuthStateProvider;
 use crate::{
     cloud_object::model::persistence::CloudModel,
     editor::PlainTextEditorViewAction as EditorAction,
-    server::server_api::team::MockTeamClient,
-    server::server_api::workspace::MockWorkspaceClient,
     server::server_api::ServerApiProvider,
     settings_view::keybindings::KeybindingChangedNotifier,
     test_util::settings::initialize_settings_for_tests,
@@ -29,23 +25,14 @@ fn initialize_app(app: &mut App) {
     #[cfg(feature = "voice_input")]
     app.add_singleton_model(voice_input::VoiceInput::new);
 
-    let team_client_mock = Arc::new(MockTeamClient::new());
-    let workspace_client_mock = Arc::new(MockWorkspaceClient::new());
-    app.add_singleton_model(|ctx| {
-        UserWorkspaces::mock(
-            team_client_mock.clone(),
-            workspace_client_mock.clone(),
-            vec![],
-            ctx,
-        )
-    });
+    app.add_singleton_model(|ctx| UserWorkspaces::mock(vec![], ctx));
 }
 
 fn create_modal(app: &mut App) -> ViewHandle<WorkflowModal> {
     initialize_app(app);
     let (_, modal_view) = app.add_window(WindowStyle::NotStealFocus, |ctx| {
-        let server_api = ServerApiProvider::as_ref(ctx).get();
-        WorkflowModal::new(server_api.clone(), ctx)
+        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
+        WorkflowModal::new(ai_client, ctx)
     });
 
     modal_view

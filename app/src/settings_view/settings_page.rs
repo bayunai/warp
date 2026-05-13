@@ -10,14 +10,11 @@ use super::{
     ai_page::{AISettingsPageAction, AISettingsPageView},
     appearance_page::AppearanceSettingsPageView,
     code_page::CodeSettingsPageView,
-    environments_page::EnvironmentsPageView,
     features_page::FeaturesPageView,
     keybindings::KeybindingsView,
     main_page::MainSettingsPageView,
     mcp_servers_page::MCPServersSettingsPageView,
     privacy_page::PrivacyPageView,
-    referrals_page::ReferralsPageView,
-    show_blocks_view::ShowBlocksView,
     teams_page::TeamsPageView,
     warp_drive_page::WarpDriveSettingsPageView,
     warpify_page::WarpifyPageView,
@@ -105,17 +102,18 @@ pub enum SettingsPageViewHandle {
     Main(ViewHandle<MainSettingsPageView>),
     Appearance(ViewHandle<AppearanceSettingsPageView>),
     Features(ViewHandle<FeaturesPageView>),
-    SharedBlocks(ViewHandle<ShowBlocksView>),
     Keybindings(ViewHandle<KeybindingsView>),
     About(ViewHandle<AboutPageView>),
     Code(ViewHandle<CodeSettingsPageView>),
     Teams(ViewHandle<TeamsPageView>),
-    OzCloudAPIKeys(ViewHandle<super::platform_page::PlatformPageView>),
+    // OpenWarp Wave 3-1:`OzCloudAPIKeys` variant 随 `platform_page` 一同物理删。
+    // 云端 API key 管理 UI 完全代表 Warp Inc 云端账号,与 BYOP 无关。
+    // OpenWarp Wave 6-8:`SharedBlocks` / `Referrals` variant 随 `ShowBlocksView` /
+    // `ReferralsPageView` 与对应 ServerApi client trait 物理删。
+    // OpenWarp Wave 7-3:`CloudEnvironments` variant 随 Cloud Mode UI 子系统物理删。
     Privacy(ViewHandle<PrivacyPageView>),
     Warpify(ViewHandle<WarpifyPageView>),
-    Referrals(ViewHandle<ReferralsPageView>),
     AI(ViewHandle<AISettingsPageView>),
-    CloudEnvironments(ViewHandle<EnvironmentsPageView>),
     MCPServers(ViewHandle<MCPServersSettingsPageView>),
     WarpDrive(ViewHandle<WarpDriveSettingsPageView>),
 }
@@ -127,17 +125,16 @@ impl SettingsPageViewHandle {
             Main(view_handle) => ChildView::new(view_handle).finish(),
             Appearance(view_handle) => ChildView::new(view_handle).finish(),
             Features(view_handle) => ChildView::new(view_handle).finish(),
-            SharedBlocks(view_handle) => ChildView::new(view_handle).finish(),
             Keybindings(view_handle) => ChildView::new(view_handle).finish(),
             About(view_handle) => ChildView::new(view_handle).finish(),
             Code(view_handle) => ChildView::new(view_handle).finish(),
             Teams(view_handle) => ChildView::new(view_handle).finish(),
-            OzCloudAPIKeys(view_handle) => ChildView::new(view_handle).finish(),
+            // OpenWarp Wave 3-1:`OzCloudAPIKeys` arm 随 `platform_page` 一同物理删。
+            // OpenWarp Wave 6-8:`SharedBlocks` / `Referrals` arm 随 variant 物理删。
+            // OpenWarp Wave 7-3:`CloudEnvironments` arm 随 Cloud Mode UI 一同物理删。
             Privacy(view_handle) => ChildView::new(view_handle).finish(),
             Warpify(view_handle) => ChildView::new(view_handle).finish(),
-            Referrals(view_handle) => ChildView::new(view_handle).finish(),
             AI(view_handle) => ChildView::new(view_handle).finish(),
-            CloudEnvironments(view_handle) => ChildView::new(view_handle).finish(),
             MCPServers(view_handle) => ChildView::new(view_handle).finish(),
             WarpDrive(view_handle) => ChildView::new(view_handle).finish(),
         }
@@ -194,8 +191,8 @@ impl SettingsPage {
 pub enum SettingsPageEvent {
     FocusModal,
     Pane(PaneEventWrapper),
-    EnvironmentSetupModeSelectorToggled { is_open: bool },
-    AgentAssistedEnvironmentModalToggled { is_open: bool },
+    // OpenWarp Wave 7-3:`EnvironmentSetupModeSelectorToggled` /
+    // `AgentAssistedEnvironmentModalToggled` 随 Cloud Mode UI 子系统物理删。
 }
 
 /// Wrapper for pane events to avoid circular dependency with pane module.

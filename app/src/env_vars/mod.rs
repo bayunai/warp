@@ -15,11 +15,11 @@ use crate::{
             json_model::{JsonModel, JsonSerializer},
         },
         GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, Revision, ServerCloudObject,
+        JsonObjectType, ServerCloudObject,
     },
     drive::items::{env_var_collection::WarpDriveEnvVarCollection, WarpDriveItem},
     external_secrets::ExternalSecret,
-    server::{ids::SyncId, sync_queue::QueueItem},
+    server::ids::SyncId,
     terminal::shell::ShellType,
     Appearance, CloudObjectTypeAndId,
 };
@@ -170,18 +170,6 @@ impl StringModel for EnvVarCollection {
         } else {
             Some(name.to_owned())
         }
-    }
-
-    fn update_object_queue_item(
-        &self,
-        revision_ts: Option<Revision>,
-        object: &CloudEnvVarCollection,
-    ) -> Option<QueueItem> {
-        Some(QueueItem::UpdateEnvVarCollection {
-            model: object.model().clone().into(),
-            id: object.id,
-            revision: revision_ts.or_else(|| object.metadata.revision.clone()),
-        })
     }
 
     fn uniqueness_key(&self) -> Option<GenericStringObjectUniqueKey> {

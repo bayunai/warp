@@ -1,6 +1,6 @@
 pub(super) mod chips;
 pub mod editor;
-mod environment_selector;
+// OpenWarp Wave 7-3:`environment_selector` 随 Cloud Mode UI 子系统物理删。
 mod reasoning_depth_selector;
 pub mod toolbar_item;
 
@@ -57,7 +57,7 @@ use crate::{
     workspaces::user_workspaces::UserWorkspaces,
 };
 use toolbar_item::AgentToolbarItemKind;
-use warp_cli::agent::Harness;
+// OpenWarp Wave 7-3:`warp_cli::agent::Harness` import 随 `render_cloud_mode_v2_footer` 物理删。
 
 use std::sync::Arc;
 
@@ -109,7 +109,8 @@ use warpui::{
 #[cfg(not(target_family = "wasm"))]
 use warpui::r#async::Timer;
 
-pub(crate) use self::environment_selector::{EnvironmentSelector, EnvironmentSelectorEvent};
+// OpenWarp Wave 7-3:`EnvironmentSelector` / `EnvironmentSelectorEvent` re-export 随
+// Cloud Mode UI 子系统物理删。
 pub(crate) use self::reasoning_depth_selector::{
     ReasoningDepthSelector, ReasoningDepthSelectorEvent,
 };
@@ -125,7 +126,8 @@ use crate::view_components::ToastLink;
 #[cfg(not(target_family = "wasm"))]
 use crate::workspace::WorkspaceAction;
 
-const CLOUD_MODE_V2_FOOTER_GAP: f32 = 4.;
+// OpenWarp Wave 7-3:`CLOUD_MODE_V2_FOOTER_GAP` 随 `render_cloud_mode_v2_footer` /
+// Cloud Mode UI 子系统物理删。
 
 /// Voice input state for the CLI agent footer. Unlike the editor-based voice
 /// flow (which goes through Input → EditorView), this state is self-contained
@@ -189,7 +191,7 @@ pub struct AgentInputFooter {
     context_window_button: ViewHandle<ActionButton>,
     model_selector: ViewHandle<ProfileModelSelector>,
     ftu_callout_close_button: ViewHandle<ActionButton>,
-    environment_selector: ViewHandle<EnvironmentSelector>,
+    // OpenWarp Wave 7-3:`environment_selector` field 随 Cloud Mode UI 子系统物理删。
     reasoning_depth_selector: ViewHandle<ReasoningDepthSelector>,
     prompt_alert: ViewHandle<PromptAlertView>,
     ambient_agent_view_model: ModelHandle<AmbientAgentViewModel>,
@@ -600,27 +602,8 @@ impl AgentInputFooter {
             me.handle_profile_model_selector_event(event, ctx);
         });
 
-        let environment_selector = ctx.add_typed_action_view(|ctx| {
-            EnvironmentSelector::new(
-                menu_positioning_provider.clone(),
-                ambient_agent_view_model.clone(),
-                ctx,
-            )
-        });
-
-        ctx.subscribe_to_view(&environment_selector, |_, _, event, ctx| match event {
-            EnvironmentSelectorEvent::MenuVisibilityChanged { open } => {
-                ctx.emit(AgentInputFooterEvent::ToggledChipMenu { open: *open });
-            }
-            EnvironmentSelectorEvent::OpenEnvironmentManagementPane => {
-                ctx.emit(AgentInputFooterEvent::OpenEnvironmentManagementPane);
-            }
-        });
-
-        // Show/hide the environment footer when the ambient agent state changes.
-        ctx.subscribe_to_model(&ambient_agent_view_model, |_, _, _, ctx| {
-            ctx.notify();
-        });
+        // OpenWarp Wave 7-3:`EnvironmentSelector` 初始化 + 订阅 + ambient_agent
+        // 状态重渲染订阅随 Cloud Mode UI 子系统物理删。
 
         let reasoning_depth_selector = ctx.add_typed_action_view(|ctx| {
             ReasoningDepthSelector::new(menu_positioning_provider.clone(), terminal_view_id, ctx)
@@ -751,7 +734,8 @@ impl AgentInputFooter {
             plugin_chip_ready: false,
             context_window_button,
             model_selector: profile_model_selector_full,
-            environment_selector,
+            // OpenWarp Wave 7-3:`environment_selector` field init 随 Cloud Mode UI
+            // 子系统物理删。
             reasoning_depth_selector,
             prompt_alert,
             terminal_model,
@@ -800,54 +784,9 @@ impl AgentInputFooter {
             .is_some_and(|s| s.as_ref(app).is_menu_open())
     }
 
-    fn should_render_cloud_mode_v2(&self, app: &AppContext) -> bool {
-        FeatureFlag::CloudModeInputV2.is_enabled()
-            && FeatureFlag::CloudMode.is_enabled()
-            && self
-                .ambient_agent_view_model
-                .as_ref(app)
-                .is_configuring_ambient_agent()
-    }
-
-    fn render_cloud_mode_v2_footer(&self, app: &AppContext) -> Box<dyn Element> {
-        let left = Flex::row()
-            .with_main_axis_size(MainAxisSize::Min)
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_spacing(CLOUD_MODE_V2_FOOTER_GAP)
-            .with_child(ChildView::new(&self.environment_selector).finish())
-            .finish();
-
-        let mut right = Flex::row()
-            .with_main_axis_size(MainAxisSize::Min)
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_spacing(CLOUD_MODE_V2_FOOTER_GAP);
-
-        // Only show the mic button when voice input is compiled in *and* the
-        // user has voice input enabled in settings, matching V1's behavior.
-        #[cfg(feature = "voice_input")]
-        if AISettings::as_ref(app).is_voice_input_enabled(app) {
-            right = right.with_child(ChildView::new(&self.mic_button).finish());
-        }
-
-        right = right.with_child(ChildView::new(&self.file_button).finish());
-
-        // The V2 model selector is Oz-specific; hide it for other harnesses
-        // until they support model selection.
-        let selected_harness = self.ambient_agent_view_model.as_ref(app).selected_harness();
-        if selected_harness == Harness::Oz {
-            if let Some(model_selector) = self.v2_model_selector.as_ref() {
-                right = right.with_child(ChildView::new(model_selector).finish());
-            }
-        }
-
-        Flex::row()
-            .with_main_axis_size(MainAxisSize::Max)
-            .with_main_axis_alignment(MainAxisAlignment::SpaceBetween)
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_child(left)
-            .with_child(right.finish())
-            .finish()
-    }
+    // OpenWarp Wave 7-3:`should_render_cloud_mode_v2` / `render_cloud_mode_v2_footer` 随
+    // Cloud Mode UI 子系统物理删 (CloudModeInputV2 / CloudMode flag 在 OpenWarp
+    // 中强制返回 false,上游源 if branch 不可达)。
 
     fn all_display_chips(&self) -> impl Iterator<Item = &ViewHandle<DisplayChip>> {
         self.left_display_chips
@@ -1450,13 +1389,10 @@ impl AgentInputFooter {
     }
 
     pub fn has_open_chip_menu(&self, app: &AppContext) -> bool {
-        let has_open_display_chip = self
-            .all_display_chips()
-            .any(|chip| chip.as_ref(app).display_chip_kind().has_open_menu());
-
-        let has_open_env_selector = self.environment_selector.as_ref(app).is_menu_open();
-
-        has_open_display_chip || has_open_env_selector
+        // OpenWarp Wave 7-3:`environment_selector` is_menu_open() 检查随 Cloud Mode UI
+        // 子系统物理删。
+        self.all_display_chips()
+            .any(|chip| chip.as_ref(app).display_chip_kind().has_open_menu())
     }
 
     pub fn is_model_selector_open(&self, app: &AppContext) -> bool {
@@ -1594,10 +1530,8 @@ impl AgentInputFooter {
 
         match &self.cli_voice_input_state {
             CLIVoiceInputState::Stopped => {
-                if !crate::ai::AIRequestUsageModel::as_ref(ctx).can_request_voice() {
-                    self.show_cli_voice_error_toast(crate::t!("voice-input-limit-reached"), ctx);
-                    return;
-                }
+                // OpenWarp(Phase 3c A1):删除 `AIRequestUsageModel::can_request_voice`
+                // 额度闸。本地化后语音输入不受云端额度限制，统一可发送。
 
                 let session_result = voice_input::VoiceInput::handle(ctx)
                     .update(ctx, |voice_input, ctx| {
@@ -1963,9 +1897,8 @@ impl View for AgentInputFooter {
     }
 
     fn render(&self, app: &warpui::AppContext) -> Box<dyn warpui::Element> {
-        if self.should_render_cloud_mode_v2(app) {
-            return self.render_cloud_mode_v2_footer(app);
-        }
+        // OpenWarp Wave 7-3:`should_render_cloud_mode_v2` / `render_cloud_mode_v2_footer`
+        // 随 Cloud Mode UI 子系统物理删。
         // When a CLI agent session is active, render the CLI agent toolbar instead.
         if self.is_cli_agent_session_active(app) {
             return self.render_cli_mode_footer(app);
@@ -1982,12 +1915,8 @@ impl View for AgentInputFooter {
             .with_run_spacing(4.)
             .with_spacing(4.);
 
-        let is_ambient_agent = FeatureFlag::CloudMode.is_enabled()
-            && self.ambient_agent_view_model.as_ref(app).is_ambient_agent();
-        if is_ambient_agent {
-            left_buttons =
-                left_buttons.with_child(ChildView::new(&self.environment_selector).finish());
-        }
+        // OpenWarp Wave 7-3:`environment_selector` ambient_agent chip 注入 随 Cloud Mode UI
+        // 子系统物理删 (CloudMode flag 在 OpenWarp 中强制返回 false)。
 
         let terminal_model = self.terminal_model.lock();
         let shared_status = terminal_model.shared_session_status();
@@ -2410,7 +2339,8 @@ pub enum AgentInputFooterEvent {
     ShowContextMenu {
         position: Vector2F,
     },
-    OpenEnvironmentManagementPane,
+    // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` event 随 Cloud Mode UI 子系统
+    // 物理删。
     PluginInstalled(CLIAgent),
     #[cfg(not(target_family = "wasm"))]
     OpenPluginInstructionsPane(CLIAgent, PluginModalKind),

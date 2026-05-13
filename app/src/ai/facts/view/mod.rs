@@ -1,37 +1,27 @@
-use crate::cloud_object::{
-    CloudObject, CloudObjectSyncStatus, GenericStringObjectFormat, JsonObjectType,
-};
-use crate::drive::CloudObjectTypeAndId;
-use crate::network::NetworkStatus;
+// OpenWarp(本地化,Phase 2d-1):本文件原先承担 "offline banner / 同步状态谓词" 的角色,
+// 在云端腿(SyncQueue / NetworkStatus 在线门控)被完全下线后这些代码全部失去意义,
+// 整体移除并精简 imports。Pane 容器视图本身保留,负责在 Rules / RuleEditor 两页之间切换。
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::{pane::view, BackingView, PaneConfiguration, PaneEvent};
 use crate::server::ids::SyncId;
-use crate::server::sync_queue::SyncQueue;
 use std::path::PathBuf;
 use warp_core::ui::appearance::Appearance;
 use warpui::{
     elements::{
-        Align, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container,
-        CrossAxisAlignment, Expanded, Flex, MainAxisAlignment, MainAxisSize, ParentElement,
-        ScrollbarWidth,
+        Align, ClippedScrollStateHandle, ClippedScrollable, ConstrainedBox, Container, Flex,
+        MainAxisSize, ParentElement, ScrollbarWidth,
     },
-    ui_components::components::UiComponent,
     AppContext, Element, Entity, FocusContext, ModelHandle, TypedActionView, View, ViewContext,
 };
 
-use crate::ui_components::icons::Icon;
 use warpui::elements::ChildView;
 use warpui::{SingletonEntity, ViewHandle};
-
-use super::{AIFact, CloudAIFact, CloudAIFactModel};
 
 pub mod rule;
 pub mod rule_editor;
 mod style;
 use rule::*;
 use rule_editor::*;
-
-const OFFLINE_TEXT: &str = "You are offline. Some rules will be read only.";
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub enum AIFactPage {
@@ -185,49 +175,6 @@ impl AIFactView {
         self.focus(ctx);
         ctx.notify();
     }
-
-    fn render_offline_banner(&self, appearance: &Appearance) -> Box<dyn Element> {
-        Container::new(
-            Flex::row()
-                .with_child(
-                    ConstrainedBox::new(
-                        Icon::CloudOffline
-                            .to_warpui_icon(
-                                appearance
-                                    .theme()
-                                    .sub_text_color(appearance.theme().surface_2()),
-                            )
-                            .finish(),
-                    )
-                    .with_width(style::ICON_SIZE)
-                    .with_height(style::ICON_SIZE)
-                    .finish(),
-                )
-                .with_child(
-                    Expanded::new(
-                        1.,
-                        Container::new(
-                            appearance
-                                .ui_builder()
-                                .wrappable_text(OFFLINE_TEXT, true)
-                                .build()
-                                .finish(),
-                        )
-                        .with_margin_left(style::ICON_MARGIN)
-                        .finish(),
-                    )
-                    .finish(),
-                )
-                .with_main_axis_alignment(MainAxisAlignment::Center)
-                .with_cross_axis_alignment(CrossAxisAlignment::Center)
-                .finish(),
-        )
-        .with_background(appearance.theme().surface_2())
-        .with_vertical_padding(4.)
-        .with_horizontal_padding(style::PANE_PADDING)
-        .with_margin_bottom(style::ITEM_BOTTOM_MARGIN)
-        .finish()
-    }
 }
 
 impl Entity for AIFactView {
@@ -251,9 +198,6 @@ impl View for AIFactView {
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(app);
         let mut col = Flex::column().with_main_axis_size(MainAxisSize::Min);
-        if !is_online(app) {
-            col.add_child(self.render_offline_banner(appearance));
-        }
         match self.current_page {
             AIFactPage::Rules => col.add_child(ChildView::new(&self.rule_view).finish()),
             AIFactPage::RuleEditor { .. } => {
@@ -333,37 +277,6 @@ impl BackingView for AIFactView {
     }
 }
 
-pub fn is_online(app: &AppContext) -> bool {
-    NetworkStatus::as_ref(app).is_online()
-}
-
-pub fn is_delete_allowed(ai_fact: CloudAIFact, app: &AppContext) -> bool {
-    let cloud_object_type_and_id = CloudObjectTypeAndId::GenericStringObject {
-        object_type: GenericStringObjectFormat::Json(JsonObjectType::AIFact),
-        id: ai_fact.sync_id(),
-    };
-    is_online(app)
-        && cloud_object_type_and_id.has_server_id()
-        && !ai_fact.metadata().has_pending_online_only_change()
-}
-
-pub fn is_edit_allowed(ai_fact: CloudAIFact, app: &AppContext) -> bool {
-    let cloud_object_type_and_id = CloudObjectTypeAndId::GenericStringObject {
-        object_type: GenericStringObjectFormat::Json(JsonObjectType::AIFact),
-        id: ai_fact.sync_id(),
-    };
-    is_online(app) || !cloud_object_type_and_id.has_server_id()
-}
-
-pub fn is_syncing(ai_fact: CloudAIFact, app: &AppContext) -> bool {
-    let sync_queue_is_dequeueing = SyncQueue::as_ref(app).is_dequeueing();
-    let sync_status = &ai_fact.metadata().pending_changes_statuses;
-    let has_in_flight_requests = matches!(
-        &sync_status.content_sync_status,
-        CloudObjectSyncStatus::InFlight(reqs) if reqs.0 > 0
-    );
-    (has_in_flight_requests && sync_queue_is_dequeueing)
-        || sync_status.has_pending_metadata_change
-        || sync_status.has_pending_permissions_change
-        || sync_status.pending_untrash
-}
+// OpenWarp(本地化,Phase 2d-1):原 `is_online` / `is_delete_allowed` / `is_edit_allowed`
+// / `is_syncing` 谓词依赖云端 SyncQueue 与网络在线状态。本地化后规则一律可编辑、
+// 可删除、永不在 "同步中" 状态,谓词直接消除,调用点亦同步删除。

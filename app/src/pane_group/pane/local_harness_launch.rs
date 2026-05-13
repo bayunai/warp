@@ -126,20 +126,12 @@ pub(super) async fn prepare_local_harness_child_launch(
         Harness::Gemini => unreachable!("normalize_local_child_harness filters out Gemini"),
     };
 
-    let task_id = ai_client
-        .create_agent_task(
-            prompt.clone(),
-            None,
-            parent_run_id.clone(),
-            local_child_task_config(harness),
-        )
-        .await
-        .map_err(|error| {
-            format!(
-                "Failed to create local {} child task: {error}",
-                harness.display_name()
-            )
-        })?;
+    // OpenWarp(本地化,Phase 3b-4):本地 harness 启动子 task 不再走云端
+    // `create_agent_task` mutation,直接本地生成 UUID v4 作为 task_id。
+    // `ai_client` 与 `local_child_task_config(harness)` 参数不再使用。
+    let _ = ai_client;
+    let _ = local_child_task_config(harness);
+    let task_id = AmbientAgentTaskId::new_local();
 
     Ok(PreparedLocalHarnessLaunch {
         command,

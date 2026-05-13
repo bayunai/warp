@@ -16,7 +16,6 @@ use crate::ai::agent::{
     AIAgentExchangeId, AIAgentOutputStatus, FinishedAIAgentOutput, RenderableAIError,
 };
 use crate::ai::blocklist::agent_view::shortcuts::AgentShortcutViewModel;
-use crate::ai::blocklist::agent_view::zero_state_block::render_ambient_credits_banner;
 use crate::ai::blocklist::agent_view::{
     agent_view_bg_fill, AgentViewController, AgentViewControllerEvent,
 };
@@ -339,35 +338,23 @@ impl View for AgentMessageBar {
             return Empty::new().finish();
         };
 
-        // Show credits banner when user has ambient credits remaining.
-        use crate::ai::request_usage_model::AMBIENT_AGENT_TRIAL_CREDIT_THRESHOLD;
-        let right_element = if cfg!(target_family = "wasm") {
-            None
-        } else if let Some(credits) =
-            AIRequestUsageModel::as_ref(app).ambient_only_credits_remaining()
-        {
-            if credits >= AMBIENT_AGENT_TRIAL_CREDIT_THRESHOLD {
-                Some(render_ambient_credits_banner(credits, app))
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        // OpenWarp(Phase 3c A1):删除 ambient credits banner UI。
+        // 本地化后 `ambient_only_credits_remaining` 恒为 None，原分支只会走 None。
+        let right_element: Option<Box<dyn warpui::Element>> = None;
 
         // Append a Figma MCP chip to the message if applicable.
         match self.figma_button_status(app) {
             Some(FigmaMcpStatus::NotInstalled) => {
                 message.items.push(figma_chip(
                     self.mouse_states.figma_install_button.clone(),
-                    "Get Figma MCP",
+                    crate::t!("agent-message-bar-get-figma-mcp"),
                     Some(InputAction::FigmaAddButtonClicked),
                 ));
             }
             Some(FigmaMcpStatus::Installed) => {
                 message.items.push(figma_chip(
                     self.mouse_states.figma_enable_button.clone(),
-                    "Enable Figma MCP",
+                    crate::t!("agent-message-bar-enable-figma-mcp"),
                     Some(InputAction::FigmaEnableButtonClicked),
                 ));
             }
@@ -375,7 +362,7 @@ impl View for AgentMessageBar {
                 message.items.push(
                     figma_chip(
                         self.mouse_states.figma_enable_button.clone(),
-                        "Enabling...",
+                        crate::t!("agent-message-bar-enabling"),
                         None,
                     )
                     .with_is_disabled(true),
@@ -896,7 +883,7 @@ impl MessageProvider<AgentMessageArgs<'_>> for ExitBashModeMessageProducer {
 /// When `action` is `None`, the chip is returned without an action (caller should disable it).
 fn figma_chip(
     mouse_state: MouseStateHandle,
-    label: &'static str,
+    label: String,
     action: Option<InputAction>,
 ) -> MessageItem {
     let items = vec![

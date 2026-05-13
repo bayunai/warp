@@ -185,10 +185,7 @@ fn theme_chooser_items(theme_config: &WarpThemeConfig) -> Vec<ThemeChooserItem> 
 }
 
 impl ThemeChooser {
-    pub fn new(
-        ctx: &mut ViewContext<Self>,
-        tips_completed: ModelHandle<TipsCompleted>,
-    ) -> Self {
+    pub fn new(ctx: &mut ViewContext<Self>, tips_completed: ModelHandle<TipsCompleted>) -> Self {
         let search_editor = {
             ctx.add_typed_action_view(|ctx| {
                 let appearance = Appearance::as_ref(ctx);

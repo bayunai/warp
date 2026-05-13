@@ -3,6 +3,7 @@ app/frameworks/default/Carthage
 app/frameworks/dev/Carthage
 app/frameworks/**/*.xcframework
 /target
+/Cargo.lock
 /app/target
 /lib/*
 !/lib/rust-genai/
@@ -15,6 +16,7 @@ app/src/server/graphql/schema/generated
 crates/command-signatures-v2/js/build
 crates/command-signatures-v2/js/node_modules
 .worktree
+/docs
 .worktrees
 /target-check
 # For testing changes to the channel versions file

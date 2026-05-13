@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use crate::cloud_object::UniquePer;
-use crate::server::sync_queue::QueueItem;
 use crate::settings::AISettings;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{
@@ -11,7 +10,7 @@ use crate::{
             json_model::{JsonModel, JsonSerializer},
         },
         GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, Revision, ServerCloudObject,
+        JsonObjectType, ServerCloudObject,
     },
     settings::{
         AgentModeCommandExecutionPredicate, DEFAULT_COMMAND_EXECUTION_ALLOWLIST,
@@ -468,18 +467,6 @@ impl StringModel for AIExecutionProfile {
         } else {
             self.name.clone()
         }
-    }
-
-    fn update_object_queue_item(
-        &self,
-        revision_ts: Option<Revision>,
-        object: &Self::CloudObjectType,
-    ) -> Option<QueueItem> {
-        Some(QueueItem::UpdateAIExecutionProfile {
-            model: object.model().clone().into(),
-            id: object.id,
-            revision: revision_ts.or_else(|| object.metadata.revision.clone()),
-        })
     }
 
     fn new_from_server_update(&self, server_cloud_object: &ServerCloudObject) -> Option<Self> {

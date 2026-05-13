@@ -1,4 +1,4 @@
-use crate::auth::auth_state::AuthStateProvider;
+﻿use crate::auth::AuthStateProvider;
 use crate::remote_server::auth_context::server_api_auth_context;
 use instant::Instant;
 use remote_server::auth::RemoteServerAuthContext;
@@ -12,7 +12,8 @@ use crate::terminal::warpify::settings::SshExtensionInstallMode;
 
 use crate::remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
 use crate::remote_server::ssh_transport::SshTransport;
-use crate::server::server_api::ServerApiProvider;
+// OpenWarp Wave 3-1:`ServerApiProvider` 不再被本文件使用 — `auth_client`
+// 调用点随 AuthClient 一同物理删。
 use crate::terminal::model::session::{IsLegacySSHSession, SessionInfo};
 use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
 use crate::terminal::warpify::settings::WarpifySettings;
@@ -94,7 +95,6 @@ impl<T: EventLoopSender> RemoteServerController<T> {
     ) -> Self {
         let auth_context = Arc::new(server_api_auth_context(
             AuthStateProvider::as_ref(ctx).get().clone(),
-            ServerApiProvider::as_ref(ctx).get_auth_client(),
         ));
         ctx.subscribe_to_model(&model_event_dispatcher, |me, event, ctx| {
             if let ModelEvent::SshInitShell {

@@ -1,8 +1,8 @@
-use warp_core::user_preferences::GetUserPreferences as _;
+﻿use warp_core::user_preferences::GetUserPreferences as _;
 use warpui::{App, SingletonEntity};
 
 use super::{has_completed_local_onboarding, RootView, HAS_COMPLETED_ONBOARDING_KEY};
-use crate::auth::auth_manager::AuthManager;
+use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
 use crate::server::server_api::ServerApiProvider;
 
@@ -25,7 +25,7 @@ fn set_local_onboarding_completed(app: &mut App, completed: bool) {
 }
 
 /// Regression test for the bug fixed by introducing
-/// `RootView::sync_local_onboarding_to_server`: when a user completed onboarding
+/// `RootView::finalize_local_onboarding_after_auth`: when a user completed onboarding
 /// pre-login and later authenticated via a non-login-slide entrypoint (i.e. while
 /// already in `Terminal` state), the server-side `is_onboarded` flag was never
 /// flipped. The helper runs unconditionally on `AuthComplete` and must flip the
@@ -50,7 +50,7 @@ fn test_sync_flips_server_is_onboarded_when_local_onboarding_completed() {
 
         app.update(|ctx| {
             let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
-            RootView::sync_local_onboarding_to_server(&auth_state, ctx);
+            RootView::finalize_local_onboarding_after_auth(&auth_state, ctx);
         });
 
         app.read(|ctx| {
@@ -77,7 +77,7 @@ fn test_sync_noop_when_local_onboarding_not_completed() {
 
         app.update(|ctx| {
             let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
-            RootView::sync_local_onboarding_to_server(&auth_state, ctx);
+            RootView::finalize_local_onboarding_after_auth(&auth_state, ctx);
         });
 
         app.read(|ctx| {
@@ -109,7 +109,7 @@ fn test_sync_noop_when_already_onboarded_on_server() {
 
         app.update(|ctx| {
             let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
-            RootView::sync_local_onboarding_to_server(&auth_state, ctx);
+            RootView::finalize_local_onboarding_after_auth(&auth_state, ctx);
         });
 
         app.read(|ctx| {

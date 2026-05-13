@@ -9,15 +9,16 @@ use warp_core::user_preferences::GetUserPreferences as _;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity, UpdateModel};
 
 use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
-use crate::auth::auth_state::AuthState;
+use crate::auth::AuthState;
 use crate::auth::AuthStateProvider;
+use crate::auth::SyncedUserSettings;
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::report_error;
-use crate::server::cloud_objects::update_manager::UpdateManager;
-#[cfg(test)]
-use crate::server::server_api::auth::MockAuthClient;
-use crate::server::server_api::auth::{AuthClient, SyncedUserSettings};
-use crate::server::server_api::ServerApiProvider;
+// OpenWarp Wave 3-1:`AuthClient` trait + `MockAuthClient` 随 server_api/auth.rs
+// 整件物理删,`SyncedUserSettings` 迁到 `crate::auth`。
+// OpenWarp Wave 3-1:`ServerApiProvider` 不再被本文件使用 ——
+// `auth_client = ServerApiProvider::as_ref(ctx).get_auth_client()` 的所有调用点
+// 随 AuthClient trait 一同物理删。
 use crate::terminal::safe_mode_settings::SafeModeSettings;
 
 use settings::{
@@ -27,7 +28,7 @@ use settings::{
 
 use serde::{Deserialize, Serialize};
 
-use super::cloud_preferences_syncer::CloudPreferencesSyncer;
+// OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。
 use crate::workspaces::workspace::EnterpriseSecretRegex;
 
 pub trait RegexDisplayInfo {
@@ -140,7 +141,9 @@ maybe_define_setting!(HasInitializedDefaultSecretRegexes, group: PrivacySettings
 /// reporting and/or telemetry).
 pub struct PrivacySettings {
     auth_state: Arc<AuthState>,
-    auth_client: Arc<dyn AuthClient>,
+    // OpenWarp Wave 3-1:`auth_client: Arc<dyn AuthClient>` 字段随 AuthClient trait
+    // 一同物理删。原用于在 telemetry / crash reporting 设置变动时向服务端
+    // 同步,OpenWarp 已不再同步任何服务端设置。
     pub is_telemetry_enabled: bool,
     pub is_crash_reporting_enabled: bool,
     pub has_initialized_default_secret_regexes: HasInitializedDefaultSecretRegexes,
@@ -228,7 +231,6 @@ impl PrivacySettings {
     /// `on_user_fetched` after the user's auth state is established.
     fn new(ctx: &mut ModelContext<Self>) -> Self {
         let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
-        let auth_client = ServerApiProvider::as_ref(ctx).get_auth_client();
 
         // openWarp 闭源遥测剥离:user_preferences 缺值时也默认 false,与 setting macro 默认一致。
         let is_telemetry_enabled: bool = ctx
@@ -284,7 +286,6 @@ impl PrivacySettings {
 
         Self {
             auth_state,
-            auth_client,
             is_crash_reporting_enabled,
             is_telemetry_enabled,
             user_secret_regex_list,
@@ -361,12 +362,9 @@ impl PrivacySettings {
     }
 
     /// Fetch the user's privacy settings from the server if any or update the server settings.
-    pub fn fetch_or_update_settings(&self, ctx: &mut ModelContext<Self>) {
-        let auth_client_clone = self.auth_client.clone();
-        let _ = ctx.spawn(
-            async move { auth_client_clone.get_user_settings().await },
-            Self::initialize_from_fetched_settings_or_update_settings,
-        );
+    pub fn fetch_or_update_settings(&self, _ctx: &mut ModelContext<Self>) {
+        // OpenWarp Wave 3-1:原调 `auth_client.get_user_settings().await` 随 AuthClient
+        // 整 trait 物理删。OpenWarp 本地化后隱私设置仅本地保存,入口 no-op。
     }
 
     /// Initializes state from the [`SyncedUserSettings`] fetched from the server, if any.
@@ -432,7 +430,6 @@ impl PrivacySettings {
     pub fn mock(_ctx: &mut ModelContext<Self>) -> Self {
         Self {
             auth_state: Arc::new(AuthState::new_for_test()),
-            auth_client: Arc::new(MockAuthClient::new()),
             is_crash_reporting_enabled: true,
             is_telemetry_enabled: true,
             user_secret_regex_list: CustomSecretRegexList::new(None),
@@ -481,10 +478,10 @@ impl PrivacySettings {
             });
 
             if self.auth_state.is_logged_in() {
-                let auth_client = self.auth_client.clone();
-                let _ = ctx.spawn(
-                    async move { auth_client.set_is_crash_reporting_enabled(new_value).await },
-                    |_, _, _| (),
+                // OpenWarp Wave 3-1:原调 `auth_client.set_is_crash_reporting_enabled(new_value)`
+                // 随 AuthClient 一同物理删。OpenWarp 本地仅更新本地状态。
+                log::debug!(
+                    "set_is_crash_reporting_enabled 远端同步已本地化,new_value={new_value}"
                 );
             }
             ctx.emit(PrivacySettingsChangedEvent::UpdateIsCrashReportingEnabled {
@@ -515,11 +512,8 @@ impl PrivacySettings {
             });
 
             if self.auth_state.is_logged_in() {
-                let auth_client = self.auth_client.clone();
-                let _ = ctx.spawn(
-                    async move { auth_client.set_is_telemetry_enabled(new_value).await },
-                    |_, _, _| (),
-                );
+                // OpenWarp Wave 3-1:同上。
+                log::debug!("set_is_telemetry_enabled 远端同步已本地化,new_value={new_value}");
             }
             ctx.emit(PrivacySettingsChangedEvent::UpdateIsTelemetryEnabled {
                 old_value,
@@ -623,9 +617,8 @@ impl PrivacySettings {
     pub fn maybe_sync_with_warp_drive_prefs(&mut self, ctx: &mut ModelContext<Self>) {
         // Wait for cloud objects to load, and, if telemetry & crash reporting are synced to warp drive
         // initialize from the warp drive values.
-        let update_manager = UpdateManager::as_ref(ctx);
         ctx.spawn(
-            update_manager.initial_load_complete(),
+            CloudModel::as_ref(ctx).initial_load_complete(),
             Self::handle_warp_drive_objects_loaded,
         );
     }
@@ -681,15 +674,8 @@ impl PrivacySettings {
                         .is_crash_reporting_enabled
                         .set_value(self.is_crash_reporting_enabled, ctx));
                 });
-                CloudPreferencesSyncer::handle(ctx).update(ctx, |syncer, ctx| {
-                    syncer.maybe_sync_local_prefs_to_cloud(
-                        vec![
-                            IsTelemetryEnabled::storage_key().to_string(),
-                            IsCrashReportingEnabled::storage_key().to_string(),
-                        ],
-                        ctx,
-                    );
-                });
+                // OpenWarp(本地化,Phase 5):原 `CloudPreferencesSyncer::maybe_sync_local_prefs_to_cloud`
+                // 同步本地隐私设置到云端,随同步器物理删除。本地设置仅写入 sqlite。
             }
         }
     }

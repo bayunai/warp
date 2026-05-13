@@ -11,8 +11,7 @@ use warpui::{AppContext, Entity, EntityId, ModelContext, SingletonEntity};
 
 use crate::{
     auth::{
-        auth_manager::{AuthManager, AuthManagerEvent},
-        AuthStateProvider,
+        AuthStateProvider, {AuthManager, AuthManagerEvent},
     },
     network::{NetworkStatus, NetworkStatusEvent, NetworkStatusKind},
     workspaces::user_workspaces::{UserWorkspaces, UserWorkspacesEvent},

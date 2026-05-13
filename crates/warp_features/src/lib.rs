@@ -266,9 +266,6 @@ pub enum FeatureFlag {
     /// Enables prediction of Agent Mode queries.
     PredictAMQueries,
 
-    /// Enables full source code embedding of repos when using codebase context.
-    FullSourceCodeEmbedding,
-
     /// If enabled, command palette searches will use Tantivy search instead of the default fuzzy search.
     UseTantivySearch,
 
@@ -301,12 +298,6 @@ pub enum FeatureFlag {
 
     UsageBasedPricing,
 
-    /// Enables cross-repo codebase context.
-    CrossRepoContext,
-
-    /// Persist codebase indices to disk.
-    CodebaseIndexPersistence,
-
     /// Enables the AI context menu, or at-menu.
     AIContextMenuEnabled,
 
@@ -318,9 +309,6 @@ pub enum FeatureFlag {
 
     /// Enables the agent to decide whether to execute a command.
     AgentDecidesCommandExecution,
-
-    /// Show speed bump when enabling codebase indexing.
-    CodebaseIndexSpeedbump,
 
     /// Enables inline review comments on specific lines of code.
     ContextLineReviewComments,
@@ -366,9 +354,6 @@ pub enum FeatureFlag {
     /// setting in [`SessionSettings`] (defined in `app/src/terminal/session_settings.rs`),
     /// as model selectors are always shown when this flag is enabled.
     ProfilesDesignRevamp,
-
-    /// Enables new Search Codebase UI
-    SearchCodebaseUI,
 
     /// Enables return changed lines on apply diff result
     ChangedLinesOnlyApplyDiffResult,
@@ -640,9 +625,6 @@ pub enum FeatureFlag {
     /// If disabled, the server will send None as the SkillsContext.
     ListSkills,
 
-    /// When enabled, we expose LSP as a tool to the agent
-    LSPAsATool,
-
     /// Enables conversation artifacts.
     ConversationArtifacts,
 
@@ -798,9 +780,6 @@ pub enum FeatureFlag {
     /// Replaces the in-block warpification banner with a warpify footer.
     WarpifyFooter,
 
-    /// Enables conversation retrieval via the CLI (oz run conversation get, oz run get --conversation).
-    ConversationApi,
-
     /// Guided onboarding flow for existing users introducing HOA features
     /// (vertical tabs, agent inbox, tab configs).
     HOAOnboardingFlow,
@@ -888,12 +867,6 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::OzChangelogUpdates,
     FeatureFlag::PendingUserQueryIndicator,
     FeatureFlag::QueueSlashCommand,
-    // These are enabled via 100% experiment on prod warp-server,
-    // but we need to enable here for dogfood builds.
-    FeatureFlag::CrossRepoContext,
-    FeatureFlag::CodebaseIndexPersistence,
-    FeatureFlag::FullSourceCodeEmbedding,
-    FeatureFlag::CodebaseIndexSpeedbump,
     // End manually enabled Code features.
     FeatureFlag::DirectoryTabColors,
     FeatureFlag::EditableMarkdownMermaid,
@@ -901,14 +874,13 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::OzIdentityFederation,
     FeatureFlag::AgentHarness,
     FeatureFlag::OzHandoff,
-    FeatureFlag::ConversationApi,
     FeatureFlag::RememberFastForwardState,
     FeatureFlag::HOANotifications,
     FeatureFlag::OrchestrationV2,
     FeatureFlag::GeminiNotifications,
     FeatureFlag::LocalDockerSandbox,
     FeatureFlag::VerticalTabsSummaryMode,
-    FeatureFlag::CloudModeSetupV2,
+    // OpenWarp Wave 7-2:`CloudModeSetupV2` 随 cloud ambient agent 主体物理删。
     FeatureFlag::ConfigurableContextWindow,
     FeatureFlag::DragTabsToWindows,
 ];
@@ -930,8 +902,10 @@ pub const RELEASE_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::Autoupdate,
     FeatureFlag::Changelog,
     FeatureFlag::CrashReporting,
-    // Marked text is currently only supported on MacOS.
-    #[cfg(target_os = "macos")]
+    // winit 的 IME 路径在 macOS 和 Windows 都已支持 marked text。
+    // Windows 必须开启该 flag 才能渲染 IME preedit / 输入合成文本,
+    // 否则只能看到 OS 的候选窗,Warp 会把 marked text 更新整体丢弃。
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     FeatureFlag::ImeMarkedText,
     // Remote server binary is not yet supported on Windows.
     #[cfg(not(windows))]

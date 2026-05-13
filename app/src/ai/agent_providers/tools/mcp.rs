@@ -69,6 +69,13 @@ pub fn is_mcp_function(name: &str) -> bool {
 /// 同时,如果至少有一个 server 暴露了 resources,会附加一个统一的 `mcp_read_resource`
 /// tool 定义,供模型读资源用。
 /// 返回三元组 `(name, description, parameters_value)` — 调用方包成 ToolDef。
+///
+/// **P0-3 prompt cache 优化**:输出**字典序稳定**。
+/// 原因:Anthropic 明确警告任何 tools 字段改动 → 所有缓存层全失效。
+/// `ctx.servers` 上游依赖(`MCPContext.servers: Vec<MCPServer>`)本身不保证顺序
+/// (从 HashMap iterate / 进程启动顺序 / 并发连接都会让跨请求顺序漂移)。
+/// 这里按 `function_name`(包含 server.name 与 tool.name)字典序排序以该锁,
+/// 最后追加 `mcp_read_resource`(固定名不参与排序)。
 pub fn build_mcp_tool_defs(ctx: &MCPContext) -> Vec<(String, String, Value)> {
     let mut out = Vec::new();
     for server in &ctx.servers {
@@ -88,6 +95,10 @@ pub fn build_mcp_tool_defs(ctx: &MCPContext) -> Vec<(String, String, Value)> {
             out.push((function_name(server, &tool.name), prefixed_desc, schema));
         }
     }
+    // P0-3:按 function_name 字典序排序,保证跨请求同一静态上下文产出顺序
+    // 一致。function_name 全局唯一(`mcp__<server_safe>__<tool>`),作为排序键
+    // 不会有冲突。
+    out.sort_by(|a, b| a.0.cmp(&b.0));
 
     // 仅在有任意 server 暴露 resources 时才注入 read_resource tool,避免
     // 模型空发(可读列表是 server 决定的)。
@@ -99,6 +110,9 @@ pub fn build_mcp_tool_defs(ctx: &MCPContext) -> Vec<(String, String, Value)> {
                 available_uris.push(format!("[{}] {} ({})", s.name, r.name, r.uri));
             }
         }
+        // P0-3:available_uris 依赖 ctx.servers 顺序 × server.resources 顺序,
+        // 同样需要跨请求稳定。按字面字典序排序,避免 HashMap iterate 顺序漂移。
+        available_uris.sort();
         let desc = format!(
             "读取 MCP server 暴露的资源(文件 / 数据库 / API 等)。\
              可用资源:\n- {}",
@@ -330,3 +344,7 @@ pub fn serialize_result(result: &api::message::tool_call_result::Result) -> Opti
     }
     None
 }
+
+#[cfg(test)]
+#[path = "mcp_tests.rs"]
+mod tests;

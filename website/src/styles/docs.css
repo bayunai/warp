@@ -27,7 +27,8 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-html, body { overflow-x: hidden; max-width: 100%; }
+html, body { overflow-x: clip; max-width: 100%; }
+html { scroll-behavior: smooth; }
 body {
   font-family: "Geist", "Inter Tight", ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   background: var(--bg);
@@ -232,15 +233,19 @@ aside.sidebar {
 }
 .sb-search {
   margin-top: 10px;
+  width: 100%;
   display: flex; align-items: center; gap: 8px;
   padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
   color: var(--muted);
+  font: inherit;
   font-size: 13px;
-  cursor: text;
+  text-align: left;
+  cursor: pointer;
 }
+.sb-search:hover { border-color: var(--ink-2); }
 .sb-search svg { width: 14px; height: 14px; }
 .sb-search .kbd {
   margin-left: auto;
@@ -677,3 +682,37 @@ body[data-locale="zh"] [data-lang="en"] { display: none; }
   background-clip: padding-box;
 }
 .code-card, .tabs-card { scrollbar-color: rgba(255,255,255,0.18) transparent; }
+
+/* ── Pagefind search modal ─────────────────────────────────────────── */
+.search-modal { position: fixed; inset: 0; z-index: 200; display: flex; align-items: flex-start; justify-content: center; padding-top: 96px; }
+.search-modal[hidden] { display: none; }
+.search-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 17, 22, 0.55); backdrop-filter: blur(2px); }
+.search-modal-panel {
+  position: relative;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 160px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 30px 60px rgba(15, 17, 22, 0.25);
+  padding: 14px;
+}
+.search-fallback { padding: 8px 4px; font-size: 14px; color: var(--ink); }
+.search-fallback .t { font-weight: 500; margin-bottom: 6px; }
+.search-fallback .d { color: var(--muted); font-size: 13px; line-height: 1.55; }
+.search-fallback code { background: var(--bg-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+:root {
+  --pagefind-ui-scale: 0.9;
+  --pagefind-ui-primary: var(--accent, #2c6cf6);
+  --pagefind-ui-text: var(--ink, #15171c);
+  --pagefind-ui-background: #fff;
+  --pagefind-ui-border: var(--line, #e6e8ec);
+  --pagefind-ui-tag: var(--bg-2, #f4f5f7);
+  --pagefind-ui-border-width: 1px;
+  --pagefind-ui-border-radius: 8px;
+  --pagefind-ui-image-border-radius: 6px;
+  --pagefind-ui-image-box-ratio: 3 / 2;
+  --pagefind-ui-font: "Geist", system-ui, sans-serif;
+}

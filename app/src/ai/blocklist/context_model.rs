@@ -3,7 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    path::PathBuf,
     str::FromStr,
     sync::Arc,
 };
@@ -29,7 +29,6 @@ use crate::{
         },
         document::ai_document_model::AIDocumentId,
         llms::{LLMPreferences, LLMPreferencesEvent},
-        outline::RepoOutlines,
     },
     terminal::{
         event::{BlockCompletedEvent, BlockType},
@@ -657,20 +656,21 @@ impl BlocklistAIContextModel {
     /// If false, excludes these user-specific contexts but includes everything else.
     pub fn pending_context(&self, app: &AppContext, is_user_query: bool) -> Vec<AIAgentContext> {
         let pwd = self.current_pwd();
-        let is_pwd_indexed = if cfg!(feature = "agent_mode_evals") {
-            // In evals, we want to disable file outline based search.
-            false
-        } else {
-            pwd.as_ref()
-                .is_some_and(|pwd| RepoOutlines::as_ref(app).is_directory_indexed(Path::new(&pwd)))
-        };
+        // OpenWarp:原会查 RepoOutlines 判断当前 pwd 下仓库是否已建索引,以便
+        // 可选择“使用代码库语义搜索”作为上下文。现 outline 已下线,总是为 false。
+        let is_pwd_indexed = false;
 
         let project_rules = if let Some(pwd) = pwd.clone().and_then(|path| {
             PathBuf::from_str(&path)
                 .ok()
                 .and_then(|s| s.canonicalize().ok())
         }) {
-            ProjectContextModel::as_ref(app).find_applicable_rules(&pwd)
+            // 优先走正常路径(零 IO,异步索引完成后从 HashMap 拿结果);
+            // 未就绪时同步 fast-path stat + 读 cwd/祖先目录的规则文件。
+            // 对齐 opencode `findUp` 模式,保证 cd 后立即发问也能拿到 AGENTS.md 。
+            // fast-path 内部有 cache + 时间预算,UI 绝不阻塞。详见
+            // `crates/ai/src/project_context/model.rs::find_rules_with_fast_path`。
+            ProjectContextModel::as_ref(app).find_rules_with_fast_path(&pwd)
         } else {
             None
         };

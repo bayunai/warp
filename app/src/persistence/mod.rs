@@ -1,4 +1,4 @@
-#![cfg_attr(not(feature = "local_fs"), allow(dead_code))]
+﻿#![cfg_attr(not(feature = "local_fs"), allow(dead_code))]
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
@@ -24,10 +24,8 @@ use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use crate::ai::persisted_workspace::EnablementState;
 use ai::project_context::model::ProjectRulePath;
 use chrono::{DateTime, Local, Utc};
-use lsp::supported_servers::LSPServerType;
 use uuid::Uuid;
 use warp_core::command::ExitCode;
 use warp_graphql::scalars::time::ServerTimestamp;
@@ -37,7 +35,7 @@ use warpui::{AppContext, Entity, SingletonEntity};
 use crate::ai::blocklist::PersistedAIInput;
 use crate::ai::mcp::TemplatableMCPServerInstallation;
 use crate::app_state::AppState;
-use crate::auth::auth_manager::PersistedCurrentUserInformation;
+use crate::auth::PersistedCurrentUserInformation;
 use crate::cloud_object::model::actions::ObjectAction;
 use crate::cloud_object::model::generic_string_model::CloudStringObject;
 
@@ -55,7 +53,6 @@ use crate::terminal::model::session::SessionId;
 use crate::workflows::CloudWorkflow;
 use crate::workspaces::user_profiles::UserProfileWithUID;
 use crate::workspaces::workspace::{Workspace as WorkspaceMetadata, WorkspaceUid};
-use ai::workspace::WorkspaceMetadata as CodeWorkspaceMetadata;
 
 use self::model::{AgentConversation, AgentConversationData, Project};
 
@@ -76,6 +73,18 @@ pub fn initialize(ctx: &mut AppContext) -> (Option<PersistedData>, Option<Writer
             sqlite::initialize(ctx)
         } else {
             (None, None)
+        }
+    }
+}
+
+/// 在后台线程预热 SQLite 连接 + 跑 migration。应该在 `app_builder.run`
+/// 之前调用,这样 SQLite 初始化可以与 winit / wgpu 初始化并发进行,
+/// 冷启动上可省 ~70–90ms。多次调用幂等。未调用会 fallback 到同步路径。
+#[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
+pub fn prewarm_db_in_background() {
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "local_fs")] {
+            sqlite::prewarm_db_in_background();
         }
     }
 }
@@ -190,8 +199,6 @@ pub struct PersistedData {
     pub object_actions: Vec<ObjectAction>,
     pub experiments: Vec<ServerExperiment>,
     pub ai_queries: Vec<PersistedAIInput>,
-    pub codebase_indices: Vec<CodeWorkspaceMetadata>,
-    pub workspace_language_servers: HashMap<PathBuf, HashMap<LSPServerType, EnablementState>>,
     pub multi_agent_conversations: Vec<AgentConversation>,
     pub projects: Vec<Project>,
     pub project_rules: Vec<ProjectRulePath>,
@@ -327,12 +334,6 @@ pub enum ModelEvent {
     UpsertCurrentUserInformation {
         user_information: PersistedCurrentUserInformation,
     },
-    UpsertCodebaseIndexMetadata {
-        index_metadata: Box<CodeWorkspaceMetadata>,
-    },
-    DeleteCodebaseIndexMetadata {
-        repo_path: PathBuf,
-    },
     UpsertProject {
         project: Project,
     },
@@ -369,11 +370,6 @@ pub enum ModelEvent {
     UpdateMCPInstallationRunning {
         installation_uuid: Uuid,
         running: bool,
-    },
-    UpsertWorkspaceLanguageServer {
-        workspace_path: PathBuf,
-        lsp_type: LSPServerType,
-        enabled: EnablementState,
     },
     UpdateBlockAgentViewVisibility {
         block_id: String,

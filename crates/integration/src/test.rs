@@ -30,7 +30,6 @@ mod subshell;
 mod sync_inputs;
 mod typeahead;
 mod video_recording;
-mod websockets;
 mod workflows;
 mod workspace;
 
@@ -63,7 +62,6 @@ pub use subshell::*;
 pub use sync_inputs::*;
 pub use typeahead::*;
 pub use video_recording::*;
-pub use websockets::*;
 pub use workflows::*;
 pub use workspace::*;
 

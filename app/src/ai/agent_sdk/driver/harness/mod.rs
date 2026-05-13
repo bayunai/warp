@@ -15,8 +15,9 @@ use warpui::{ModelHandle, ModelSpawner, SingletonEntity};
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::server::server_api::ai::AIClient;
 use crate::server::server_api::harness_support::{upload_to_target, HarnessSupportClient};
-use crate::server::server_api::ServerApi;
+use crate::server::server_api::AgentEventStreamClient;
 use crate::terminal::cli_agent_sessions::{CLIAgentSessionStatus, CLIAgentSessionsModel};
 use crate::terminal::model::block::{BlockId, SerializedBlock};
 use crate::terminal::CLIAgent;
@@ -123,7 +124,9 @@ pub(crate) trait ThirdPartyHarness: Send + Sync {
         resumption_prompt: Option<&str>,
         working_dir: &Path,
         task_id: Option<AmbientAgentTaskId>,
-        server_api: Arc<ServerApi>,
+        harness_support_client: Arc<dyn HarnessSupportClient>,
+        ai_client: Arc<dyn AIClient>,
+        agent_event_stream_client: Arc<dyn AgentEventStreamClient>,
         terminal_driver: ModelHandle<TerminalDriver>,
         resume: Option<ResumePayload>,
     ) -> Result<Box<dyn HarnessRunner>, AgentDriverError>;

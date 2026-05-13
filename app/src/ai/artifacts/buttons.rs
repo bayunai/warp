@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
+use ai::document::AIDocumentId;
 use warp_core::ui::icons::Icon;
 use warp_core::ui::theme::AnsiColorIdentifier;
 use warpui::elements::{ChildView, Element, Empty, ParentElement, Wrap};
 use warpui::{AppContext, Entity, TypedActionView, View, ViewContext, ViewHandle};
 
-use crate::notebooks::NotebookId;
 use crate::terminal::input::MenuPositioning;
 
 use super::file_button_label;
@@ -54,16 +54,27 @@ impl ArtifactButtonsRow {
 }
 
 pub enum ArtifactButtonsRowEvent {
-    OpenPlan { notebook_uid: NotebookId },
-    CopyBranch { branch: String },
-    OpenPullRequest { url: String },
-    ViewScreenshots { artifact_uids: Vec<String> },
-    DownloadFile { artifact_uid: String },
+    /// openWarp 本地化:点击 plan 按钮走本地 AIDocumentId,不再依赖云 notebook 镜像。
+    OpenPlan {
+        document_uid: AIDocumentId,
+    },
+    CopyBranch {
+        branch: String,
+    },
+    OpenPullRequest {
+        url: String,
+    },
+    ViewScreenshots {
+        artifact_uids: Vec<String>,
+    },
+    DownloadFile {
+        artifact_uid: String,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum ArtifactButtonAction {
-    OpenPlan { notebook_uid: NotebookId },
+    OpenPlan { document_uid: AIDocumentId },
     CopyBranch { branch: String },
     OpenPullRequest { url: String },
     ViewScreenshots { artifact_uids: Vec<String> },
@@ -101,8 +112,8 @@ impl TypedActionView for ArtifactButtonsRow {
 
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         let event = match action {
-            ArtifactButtonAction::OpenPlan { notebook_uid } => ArtifactButtonsRowEvent::OpenPlan {
-                notebook_uid: *notebook_uid,
+            ArtifactButtonAction::OpenPlan { document_uid } => ArtifactButtonsRowEvent::OpenPlan {
+                document_uid: *document_uid,
             },
             ArtifactButtonAction::CopyBranch { branch } => ArtifactButtonsRowEvent::CopyBranch {
                 branch: branch.clone(),
@@ -138,15 +149,16 @@ fn collect_buttons(
         match artifact {
             Artifact::Plan {
                 title,
-                notebook_uid,
-                document_uid: _,
+                notebook_uid: _, // openWarp 不再依赖云 notebook_uid;本地走 document_uid
+                document_uid,
             } => {
-                // Only show plan button if synced to Warp Drive (has notebook_uid)
-                if let Some(notebook_uid) = notebook_uid {
+                // openWarp 本地化:只要能解析出本地 AIDocumentId 就显示按钮,
+                // 点击打开本地 AIDocument pane;不再依赖云 notebook 镜像。
+                if let Ok(document_uid) = AIDocumentId::try_from(document_uid.as_str()) {
                     let button_text = title.clone().unwrap_or("Untitled Plan".to_string());
                     let theme = theme.clone();
                     buttons.push(ctx.add_typed_action_view(move |_| {
-                        make_plan_button(button_text, *notebook_uid, theme)
+                        make_plan_button(button_text, document_uid, theme)
                     }));
                 }
             }
@@ -206,7 +218,7 @@ fn collect_buttons(
 
 fn make_plan_button(
     title: String,
-    notebook_uid: NotebookId,
+    document_uid: AIDocumentId,
     theme: Arc<dyn ActionButtonTheme>,
 ) -> ActionButton {
     make_artifact_button(
@@ -214,7 +226,7 @@ fn make_plan_button(
         Icon::Compass,
         "Open plan",
         None,
-        ArtifactButtonAction::OpenPlan { notebook_uid },
+        ArtifactButtonAction::OpenPlan { document_uid },
         theme,
     )
 }

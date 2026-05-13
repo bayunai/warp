@@ -15,8 +15,9 @@ use warpui::{ModelHandle, ModelSpawner};
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::server::server_api::ai::AIClient;
 use crate::server::server_api::harness_support::{upload_to_target, HarnessSupportClient};
-use crate::server::server_api::ServerApi;
+use crate::server::server_api::AgentEventStreamClient;
 use crate::terminal::model::block::BlockId;
 use crate::terminal::model::session::ExecuteCommandOptions;
 use crate::terminal::CLIAgent;
@@ -123,7 +124,9 @@ impl ThirdPartyHarness for ClaudeHarness {
         resumption_prompt: Option<&str>,
         working_dir: &Path,
         task_id: Option<AmbientAgentTaskId>,
-        server_api: Arc<ServerApi>,
+        harness_support_client: Arc<dyn HarnessSupportClient>,
+        ai_client: Arc<dyn AIClient>,
+        agent_event_stream_client: Arc<dyn AgentEventStreamClient>,
         terminal_driver: ModelHandle<TerminalDriver>,
         resume: Option<ResumePayload>,
     ) -> Result<Box<dyn HarnessRunner>, AgentDriverError> {
@@ -145,7 +148,9 @@ impl ThirdPartyHarness for ClaudeHarness {
             system_prompt,
             working_dir,
             task_id,
-            server_api,
+            harness_support_client,
+            ai_client,
+            agent_event_stream_client,
             terminal_driver,
             claude_resume,
         )?))
@@ -199,7 +204,8 @@ struct ClaudeHarnessRunner {
     /// Held so the system prompt temp file is cleaned up when the runner is dropped.
     _temp_system_prompt_file: Option<NamedTempFile>,
     client: Arc<dyn HarnessSupportClient>,
-    server_api: Arc<ServerApi>,
+    ai_client: Arc<dyn AIClient>,
+    agent_event_stream_client: Arc<dyn AgentEventStreamClient>,
     terminal_driver: ModelHandle<TerminalDriver>,
     state: Mutex<ClaudeRunnerState>,
     session_id: Uuid,
@@ -221,7 +227,9 @@ impl ClaudeHarnessRunner {
         system_prompt: Option<&str>,
         working_dir: &Path,
         task_id: Option<AmbientAgentTaskId>,
-        server_api: Arc<ServerApi>,
+        harness_support_client: Arc<dyn HarnessSupportClient>,
+        ai_client: Arc<dyn AIClient>,
+        agent_event_stream_client: Arc<dyn AgentEventStreamClient>,
         terminal_driver: ModelHandle<TerminalDriver>,
         resume: Option<ClaudeResumeInfo>,
     ) -> Result<Self, AgentDriverError> {
@@ -271,7 +279,6 @@ impl ClaudeHarnessRunner {
             .map(|task_id| MessageBridge::new(task_id.to_string(), session_id))
             .transpose()
             .map_err(AgentDriverError::ConfigBuildFailed)?;
-        let client: Arc<dyn HarnessSupportClient> = server_api.clone();
 
         Ok(Self {
             command: claude_command(
@@ -284,8 +291,9 @@ impl ClaudeHarnessRunner {
             cli_name: cli_command.to_string(),
             _temp_prompt_file: temp_file,
             _temp_system_prompt_file: temp_system_prompt_file,
-            client,
-            server_api,
+            client: harness_support_client,
+            ai_client,
+            agent_event_stream_client,
             terminal_driver,
             state: Mutex::new(ClaudeRunnerState::Preexec),
             session_id,
@@ -303,7 +311,7 @@ impl ClaudeHarnessRunner {
             return Ok(());
         };
         parent_bridge
-            .handle_session_update(self.server_api.clone())
+            .handle_session_update(self.ai_client.clone())
             .await
     }
 
@@ -311,7 +319,7 @@ impl ClaudeHarnessRunner {
         let Some(parent_bridge) = self.parent_bridge.as_ref() else {
             return Ok(());
         };
-        parent_bridge.flush_acks(self.server_api.clone()).await
+        parent_bridge.flush_acks(self.ai_client.clone()).await
     }
     /// Return the cached Claude Code version, or resolve it by running
     /// `<cli_name> --version`.
@@ -358,7 +366,7 @@ impl ClaudeHarnessRunner {
             return Ok(());
         };
         parent_bridge
-            .start(foreground, self.server_api.clone())
+            .start(foreground, self.agent_event_stream_client.clone())
             .await
     }
 

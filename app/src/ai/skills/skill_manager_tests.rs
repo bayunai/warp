@@ -4,6 +4,10 @@ use ai::skills::{ParsedSkill, SkillProvider, SkillScope};
 use repo_metadata::{repositories::DetectedRepositories, DirectoryWatcher, RepoMetadataModel};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use tempfile::TempDir;
 use warp_core::channel::ChannelState;
 use warpui::App;
@@ -12,6 +16,93 @@ use watcher::HomeDirectoryWatcher;
 // ============================================================================
 // Tests for get_skills_for_working_directory subdirectory scoping
 // ============================================================================
+
+#[test]
+fn list_skill_inventory_groups_same_name_skills_and_marks_default() {
+    App::test((), |mut app| async move {
+        app.add_singleton_model(DirectoryWatcher::new);
+        app.add_singleton_model(|_| DetectedRepositories::default());
+        app.add_singleton_model(RepoMetadataModel::new);
+        app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
+        app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
+        let handle = app.add_singleton_model(SkillManager::new);
+
+        let repo = PathBuf::from("/repo");
+        let agents_path = repo.join(".agents/skills/deploy/SKILL.md");
+        let codex_path = repo.join(".codex/skills/deploy/SKILL.md");
+
+        let agents_skill = ParsedSkill {
+            name: "deploy".to_string(),
+            description: "Agents copy".to_string(),
+            path: agents_path.clone(),
+            content: "# Deploy".to_string(),
+            line_range: None,
+            provider: SkillProvider::Agents,
+            scope: SkillScope::Project,
+        };
+        let codex_skill = ParsedSkill {
+            name: "deploy".to_string(),
+            description: "Codex copy".to_string(),
+            path: codex_path,
+            content: "# Deploy".to_string(),
+            line_range: None,
+            provider: SkillProvider::Codex,
+            scope: SkillScope::Project,
+        };
+
+        handle.update(&mut app, |manager, ctx| {
+            manager.handle_skills_added(vec![agents_skill, codex_skill], ctx);
+        });
+
+        let inventory = handle.read(&app, |manager, ctx| manager.list_skill_inventory(ctx));
+
+        assert_eq!(inventory.len(), 1);
+        assert_eq!(inventory[0].name, "deploy");
+        assert_eq!(inventory[0].duplicates.len(), 2);
+        assert_eq!(inventory[0].default_skill.path, agents_path);
+        assert_eq!(inventory[0].default_skill.content, "# Deploy");
+        assert!(inventory[0].has_duplicates());
+    });
+}
+
+#[test]
+fn skill_manager_emits_inventory_changed_when_skills_change() {
+    App::test((), |mut app| async move {
+        app.add_singleton_model(DirectoryWatcher::new);
+        app.add_singleton_model(|_| DetectedRepositories::default());
+        app.add_singleton_model(RepoMetadataModel::new);
+        app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
+        app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
+        let handle = app.add_singleton_model(SkillManager::new);
+        let saw_inventory_changed = Arc::new(AtomicBool::new(false));
+
+        app.update(|ctx| {
+            let saw_inventory_changed = saw_inventory_changed.clone();
+            ctx.subscribe_to_model(&handle, move |_, event, _| {
+                if matches!(event, SkillManagerEvent::InventoryChanged) {
+                    saw_inventory_changed.store(true, Ordering::SeqCst);
+                }
+            });
+        });
+
+        let skill_path = PathBuf::from("/repo/.agents/skills/deploy/SKILL.md");
+        let skill = ParsedSkill {
+            name: "deploy".to_string(),
+            description: "Deploy skill".to_string(),
+            path: skill_path,
+            content: "# Deploy".to_string(),
+            line_range: None,
+            provider: SkillProvider::Agents,
+            scope: SkillScope::Project,
+        };
+
+        handle.update(&mut app, |manager, ctx| {
+            manager.handle_skills_added(vec![skill], ctx);
+        });
+
+        assert!(saw_inventory_changed.load(Ordering::SeqCst));
+    });
+}
 
 #[test]
 fn get_skills_for_working_directory_scopes_subdirectory_skills() {

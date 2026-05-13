@@ -8,14 +8,12 @@ use std::str::FromStr;
 use uuid::{NonNilUuid, Uuid};
 
 pub mod github_auth_notifier;
-pub mod scheduled;
 pub mod spawn;
 pub mod task;
 pub mod telemetry;
 
 pub use task::{
-    cancel_task_with_toast, AgentConfigSnapshot, AgentSource, AmbientAgentTask,
-    AmbientAgentTaskState, TaskStatusMessage,
+    AgentConfigSnapshot, AgentSource, AmbientAgentTask, AmbientAgentTaskState, TaskStatusMessage,
 };
 pub const OUT_OF_CREDITS_TASK_FAILURE_MESSAGE: &str =
     "Cloud agent usage limit reached. Please try again later.";
@@ -48,6 +46,18 @@ impl FromStr for AmbientAgentTaskId {
 impl From<AmbientAgentTaskId> for cynic::Id {
     fn from(id: AmbientAgentTaskId) -> Self {
         Self::new(id.to_string())
+    }
+}
+
+impl AmbientAgentTaskId {
+    /// OpenWarp(本地化,Phase 3b-4):本地生成一个 UUID v4 作为 task_id,避免本地
+    /// harness 启动子 task 时向云端发 `create_agent_task` GraphQL mutation。
+    pub fn new_local() -> Self {
+        let uuid = Uuid::new_v4();
+        // UUID v4 几乎不可能产生 nil(概率 ~ 1/2^122),采用 expect 表示逻辑不可达。
+        let non_nil =
+            NonNilUuid::try_from(uuid).expect("freshly generated UUID v4 must be non-nil");
+        Self(non_nil)
     }
 }
 

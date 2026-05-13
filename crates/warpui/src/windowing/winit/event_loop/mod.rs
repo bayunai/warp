@@ -750,9 +750,17 @@ impl EventLoop {
                 });
             }
             Event::UserEvent(CustomEvent::ActiveCursorPositionUpdated) => {
-                if self.ime_enabled {
-                    self.update_ime_position();
-                }
+                // 关键:不要用 `self.ime_enabled` 守卫这个调用。
+                //
+                // 在 Windows 上,winit 仅在收到 `WM_IME_STARTCOMPOSITION` 时才派发 `Ime::Enabled`,
+                // 此时 IMM 已经在同一条消息处理中读取过 COMPOSITIONFORM/CANDIDATEFORM,
+                // 异步等到 `Ime::Enabled` 才第一次 `ImmSetCompositionWindow` 已经赶不上 Win11
+                // 微软拼音渲染候选窗,导致候选窗落到屏幕右下角"输入工具箱"默认位置。
+                //
+                // 因此焦点/光标移动一旦触发 `ActiveCursorPositionUpdated`,无论 IME 是否处于
+                // composition 状态,都要把当前光标矩形推给 IMM,让下一次 composition 启动时
+                // IMM 上下文里已经有正确的位置。
+                self.update_ime_position();
             }
             Event::UserEvent(CustomEvent::AboutToSleep) => {
                 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -1534,6 +1542,12 @@ impl EventLoop {
                         .map(|cursor_position| cursor_position.0..cursor_position.1)
                         .unwrap_or(0..0),
                 });
+                drop(window_callbacks);
+
+                // composition 期间光标会因为预编辑文本插入、换行而移动,需要持续把最新的
+                // 矩形推给 IMM,否则候选窗会停留在 composition 起始位置(在某些 IME 上会
+                // 表现为候选窗与当前输入位置错位)。
+                self.update_ime_position();
             }
             winit::event::Ime::Commit(chars) => {
                 let Some(window_state) = self.state.windows.get_mut(&winit_window_id) else {

@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::mpsc::SyncSender;
-use std::sync::Once;
+use std::sync::{Mutex, Once, OnceLock};
 use std::{
     collections::{HashMap, VecDeque},
     convert::TryInto,
@@ -42,9 +42,8 @@ use super::block_list::{
 use super::model::{
     self, ActiveMCPServer, CurrentUserInformation, MCPEnvironmentVariables, NewActiveMCPServer,
     NewApp, NewCommand, NewFolder, NewNotebook, NewServerExperiment, NewTab, NewTeam, NewWindow,
-    NewWorkspace, NewWorkspaceMetadata, NewWorkspaceTeam, ObjectMetadata, ObjectPermissions,
-    Project, Tab, Window, WorkspaceMetadata as WorkspaceMetadataModel, AI_DOCUMENT_PANE_KIND,
-    AI_FACT_PANE_KIND, CODE_PANE_KIND, ENV_VAR_COLLECTION_PANE_KIND,
+    NewWorkspace, NewWorkspaceTeam, ObjectMetadata, ObjectPermissions, Project, Tab, Window,
+    AI_DOCUMENT_PANE_KIND, AI_FACT_PANE_KIND, CODE_PANE_KIND, ENV_VAR_COLLECTION_PANE_KIND,
     EXECUTION_PROFILE_EDITOR_PANE_KIND, MCP_SERVER_PANE_KIND, NOTEBOOK_PANE_KIND,
     SETTINGS_PANE_KIND, TERMINAL_PANE_KIND, WELCOME_PANE_KIND, WORKFLOW_PANE_KIND,
 };
@@ -54,9 +53,6 @@ use super::{
     WriterHandles,
 };
 use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::ambient_agents::scheduled::{
-    CloudScheduledAmbientAgent, CloudScheduledAmbientAgentModel,
-};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::cloud_environments::{
     CloudAmbientAgentEnvironment, CloudAmbientAgentEnvironmentModel,
@@ -69,14 +65,13 @@ use crate::ai::mcp::templatable_installation::VariableValue;
 use crate::ai::mcp::{
     CloudMCPServer, CloudMCPServerModel, TemplatableMCPServer, TemplatableMCPServerInstallation,
 };
-use crate::ai::persisted_workspace::EnablementState;
 use crate::app_state::{
     AIFactPaneSnapshot, AmbientAgentPaneSnapshot, CodeReviewPaneSnapshot,
     EnvVarCollectionPaneSnapshot, LeftPanelSnapshot, RightPanelSnapshot, SettingsPaneSnapshot,
     WorkflowPaneSnapshot,
 };
-use crate::auth::auth_manager::PersistedCurrentUserInformation;
-use crate::auth::auth_state::AuthStateProvider;
+use crate::auth::AuthStateProvider;
+use crate::auth::PersistedCurrentUserInformation;
 use crate::auth::UserUid;
 use crate::cloud_object::model::actions::{ObjectAction, ObjectActionSubtype};
 use crate::cloud_object::model::generic_string_model::{CloudStringObject, GenericStringObjectId};
@@ -128,7 +123,6 @@ use crate::{
     workflows::CloudWorkflowModel,
 };
 use crate::{report_error, report_if_error, safe_info, send_telemetry_from_app_ctx};
-use lsp::supported_servers::LSPServerType;
 
 diesel::define_sql_function! {
     fn json_extract(target: diesel::sql_types::Text, path: diesel::sql_types::Text) -> diesel::sql_types::Text;
@@ -142,6 +136,9 @@ const COMMANDS_COUNT_LIMIT: i64 = 10000;
 use warp_server_client::persistence::{upsert_cloud_object, CloudObjectId};
 
 const WARP_SQLITE_FILE_NAME: &str = "warp.sqlite";
+const OPENWARP_APP_GROUP_SQLITE_MIGRATION_MARKER: &str = ".openwarp-app-group-sqlite-migrated";
+#[cfg(target_os = "macos")]
+const WARP_APP_GROUP_ID: &str = "2BBY89MBSN.dev.warp";
 
 /// When delete a cloud object, this callback is used to delete the cloud
 /// object. It takes the id of the cloud object to delete as a parameter.
@@ -152,13 +149,156 @@ type DeleteCloudObjectFn =
 /// Runs any migrations and creates the Sqlite database if it doesn't exist.
 /// Reads from the sqlite database to get the app state for session restoration.
 /// Starts a writer thread that listens for ModelEvents and processes them.
-pub fn initialize(ctx: &mut AppContext) -> (Option<PersistedData>, Option<WriterHandles>) {
-    unsafe {
-        // Set up logging before any SQLite calls.
-        init_logging();
+/// 后台预热出来的 SQLite 连接。在 `prewarm_db_in_background` 启动后,
+/// 后台线程会把 `init_db()` 结果存到这里;`initialize` 会从这里取走。
+///
+/// 类型说明:
+/// - 外层 `OnceLock` 表示“是否已启动预热”。
+/// - 内层 `Mutex<PrewarmState>` 用于主线程取结果 · 后台线程存结果。
+static PREWARMED_DB: OnceLock<Mutex<PrewarmState>> = OnceLock::new();
+
+/// 预热状态机。`Pending` -> (`Done` | `Joining`)。`Joining` 表示主线程
+/// 拿走了 handle 但后台线程尚未写入 Done —— 后台线程仍应该能写入。
+/// `Taken` 表示主线程已拿走结果。
+enum PrewarmState {
+    Pending(std::thread::JoinHandle<()>),
+    /// 主线程拿走 handle 去 join 了,但后台线程还没写入结果。
+    /// 后台线程会把这个状态转为 Done。
+    Joining,
+    Done(Result<SqliteConnection>),
+    Taken,
+}
+
+/// 在后台线程预热 SQLite 连接 + 执行 migration。应该在 `app_builder.run`
+/// 调用之前发起,这样 SQLite 初始化可以与后续的 winit / wgpu 初始化
+/// 并发进行,冷启动上可省 ~70–90ms。
+///
+/// 如果未调用本函数,`initialize` 会 fallback 到同步路径(原行为)。
+/// 多次调用是幂等的 —— OnceLock 保证只启动一次后台线程。
+pub fn prewarm_db_in_background() {
+    // OnceLock::get_or_init 在多个调用者下只会跳一次闭包 —— 后台线程
+    // 只会被创建一次。spawn 失败会存 Failed 状态(unlikely)。
+    PREWARMED_DB.get_or_init(|| {
+        let handle_result = std::thread::Builder::new()
+            .name("warp-sqlite-prewarm".into())
+            .spawn(|| {
+                let start = std::time::Instant::now();
+                unsafe {
+                    init_logging();
+                }
+                let result = init_db();
+                let elapsed_ms = start.elapsed().as_millis();
+                log::info!(
+                    "SQLite prewarm completed in {elapsed_ms} ms (success={})",
+                    result.is_ok()
+                );
+                if let Some(cell) = PREWARMED_DB.get() {
+                    if let Ok(mut guard) = cell.lock() {
+                        // 转换为 Done。Pending 和 Joining 两种状态都需要写入结果。
+                        // 如果主线程已 Taken(不应该发生),则丢弃连接。
+                        match *guard {
+                            PrewarmState::Pending(_) | PrewarmState::Joining => {
+                                *guard = PrewarmState::Done(result);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            });
+
+        match handle_result {
+            Ok(handle) => Mutex::new(PrewarmState::Pending(handle)),
+            Err(err) => {
+                log::warn!("Failed to spawn SQLite prewarm thread: {err:#}");
+                Mutex::new(PrewarmState::Done(Err(anyhow!(
+                    "failed to spawn prewarm thread: {err}"
+                ))))
+            }
+        }
+    });
+}
+
+/// 如果后台预热已启动,取走结果(可能要等后台线程 join)。
+/// 返回 `None` 表示从未发起预热,调用方走同步路径。
+fn take_prewarmed_db() -> Option<Result<SqliteConnection>> {
+    let cell = PREWARMED_DB.get()?;
+    let take_start = std::time::Instant::now();
+
+    // 先拿出 join handle(如果还在 Pending),转换为 Joining,join 完后再拿结果。
+    // 这个两阶段设计避免主线程拿着锁跳,同时保证后台线程能写入结果。
+    let handle = {
+        let mut guard = match cell.lock() {
+            Ok(g) => g,
+            // 锁中毒 = 之前某次 panic;走同步路径。
+            Err(_) => {
+                log::warn!("SQLite prewarm: mutex poisoned, falling back to sync");
+                return None;
+            }
+        };
+        // 先看状态:Done 直接拿结果;Pending 拿 handle 后 join。
+        match std::mem::replace(&mut *guard, PrewarmState::Taken) {
+            PrewarmState::Pending(h) => {
+                // 转为 Joining 状态(后台线程仍会写入 Done)。
+                *guard = PrewarmState::Joining;
+                Some(h)
+            }
+            PrewarmState::Done(result) => {
+                log::info!(
+                    "SQLite prewarm hit (already done): take took {} µs",
+                    take_start.elapsed().as_micros()
+                );
+                return Some(result);
+            }
+            PrewarmState::Joining | PrewarmState::Taken => {
+                // 不应该发生 —— take 只会调一次。返回 None 走同步路径。
+                log::warn!("SQLite prewarm: unexpected Joining/Taken state, sync fallback");
+                return None;
+            }
+        }
+    };
+
+    // join 后台线程。如果后台 panic,join 会返回 Err —— 这是不会死循环的关键。
+    if let Some(handle) = handle {
+        match handle.join() {
+            Ok(()) => {
+                let join_us = take_start.elapsed().as_micros();
+                log::info!("SQLite prewarm: main thread waited {join_us} µs for background");
+                // 后台线程运行完成后,结果应在 Mutex 里。
+                let mut guard = match cell.lock() {
+                    Ok(g) => g,
+                    Err(_) => return None,
+                };
+                match std::mem::replace(&mut *guard, PrewarmState::Taken) {
+                    PrewarmState::Done(result) => Some(result),
+                    // 后台线程 join 成功但 Done 未被写入 —— 不可能,防御性处理。
+                    _ => None,
+                }
+            }
+            Err(_panic) => {
+                log::warn!("SQLite prewarm thread panicked; falling back to sync init");
+                None
+            }
+        }
+    } else {
+        None
     }
+}
+
+pub fn initialize(ctx: &mut AppContext) -> (Option<PersistedData>, Option<WriterHandles>) {
     let database_path = database_file_path();
-    match init_db() {
+
+    // 优先取后台预热结果;拿不到则同步 init_db()(原行为)。
+    let init_result = match take_prewarmed_db() {
+        Some(result) => result,
+        None => {
+            unsafe {
+                init_logging();
+            }
+            init_db()
+        }
+    };
+
+    match init_result {
         Ok(mut conn) => {
             let user_uid = AuthStateProvider::as_ref(ctx).get().user_id();
             let app_state = match read_sqlite_data(&mut conn, user_uid) {
@@ -331,6 +471,18 @@ pub(super) fn init_db() -> Result<SqliteConnection> {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    if warp_core::channel::ChannelState::channel() == warp_core::channel::Channel::Oss {
+        if let Some(legacy_dir) = openwarp_legacy_app_group_sqlite_dir() {
+            if let Err(err) = migrate_openwarp_app_group_sqlite_if_needed(&db_path, &legacy_dir)
+                .context("Failed to migrate OpenWarp SQLite database out of legacy App Group")
+            {
+                report_error!(err);
+                log::warn!("Skipping legacy App Group SQLite migration and continuing startup");
+            }
+        }
+    }
+
     // Migrate old SQLite files into the secure application container.
     let old_db_path = warp_core::paths::state_dir().join(WARP_SQLITE_FILE_NAME);
     if old_db_path != db_path && old_db_path.exists() && !db_path.exists() {
@@ -373,6 +525,123 @@ pub(super) fn init_db() -> Result<SqliteConnection> {
     }
 
     setup_database(&database_file_path())
+}
+
+#[cfg(target_os = "macos")]
+fn openwarp_legacy_app_group_sqlite_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|home_dir| {
+        home_dir
+            .join("Library/Group Containers")
+            .join(WARP_APP_GROUP_ID)
+            .join("Library/Application Support")
+            .join(warp_core::channel::ChannelState::app_id().to_string())
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn migrate_openwarp_app_group_sqlite_if_needed(target_db: &Path, legacy_dir: &Path) -> Result<()> {
+    let Some(target_dir) = target_db.parent() else {
+        return Ok(());
+    };
+
+    let marker = target_dir.join(OPENWARP_APP_GROUP_SQLITE_MIGRATION_MARKER);
+    if marker.exists() {
+        return Ok(());
+    }
+
+    let legacy_db = legacy_dir.join(WARP_SQLITE_FILE_NAME);
+    if !legacy_db.exists() {
+        write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+        return Ok(());
+    }
+
+    if !should_copy_legacy_openwarp_sqlite(&legacy_db, target_db)? {
+        write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(target_dir).with_context(|| {
+        format!(
+            "Failed to create SQLite state directory `{}`",
+            target_dir.display()
+        )
+    })?;
+    copy_sqlite_file(&legacy_db, target_db)?;
+    copy_sqlite_sidecar(&legacy_db, target_db, "sqlite-wal")?;
+    copy_sqlite_sidecar(&legacy_db, target_db, "sqlite-shm")?;
+    write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+
+    safe_info!(
+        safe: ("Migrated OpenWarp SQLite database out of legacy App Group"),
+        full: ("Migrated OpenWarp SQLite database from `{}` to `{}`", legacy_db.display(), target_db.display())
+    );
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn should_copy_legacy_openwarp_sqlite(legacy_db: &Path, target_db: &Path) -> Result<bool> {
+    if !target_db.exists() {
+        return Ok(true);
+    }
+
+    let legacy_modified = latest_sqlite_modified_time(legacy_db)?;
+    let target_modified = latest_sqlite_modified_time(target_db)?;
+
+    Ok(legacy_modified > target_modified)
+}
+
+#[cfg(target_os = "macos")]
+fn latest_sqlite_modified_time(db: &Path) -> Result<std::time::SystemTime> {
+    let mut latest = std::fs::metadata(db)
+        .and_then(|metadata| metadata.modified())
+        .with_context(|| format!("Failed to read modified time for `{}`", db.display()))?;
+
+    for extension in ["sqlite-wal", "sqlite-shm"] {
+        let sidecar = db.with_extension(extension);
+        if !sidecar.exists() {
+            continue;
+        }
+
+        let modified = std::fs::metadata(&sidecar)
+            .and_then(|metadata| metadata.modified())
+            .with_context(|| {
+                format!(
+                    "Failed to read modified time for SQLite sidecar `{}`",
+                    sidecar.display()
+                )
+            })?;
+        latest = latest.max(modified);
+    }
+
+    Ok(latest)
+}
+
+#[cfg(target_os = "macos")]
+fn copy_sqlite_sidecar(legacy_db: &Path, target_db: &Path, extension: &str) -> Result<()> {
+    let legacy_path = legacy_db.with_extension(extension);
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+
+    copy_sqlite_file(&legacy_path, &target_db.with_extension(extension))
+}
+
+#[cfg(target_os = "macos")]
+fn copy_sqlite_file(source: &Path, target: &Path) -> Result<()> {
+    std::fs::copy(source, target).map(|_| ()).with_context(|| {
+        format!(
+            "Failed to copy `{}` to `{}`",
+            source.display(),
+            target.display()
+        )
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn write_openwarp_app_group_sqlite_migration_marker(marker: &Path) -> Result<()> {
+    std::fs::write(marker, b"migrated\n")
+        .with_context(|| format!("Failed to write migration marker `{}`", marker.display()))
 }
 
 /// Creates or connects to the database at `database_path` and runs any migrations.
@@ -580,14 +849,6 @@ fn handle_model_event(event: ModelEvent, connection: &mut SqliteConnection) -> a
             server_creation_info,
         } => update_object_after_server_creation(connection, client_id, server_creation_info)
             .context("error executing object creation succeeded callback"),
-        ModelEvent::UpsertCodebaseIndexMetadata { index_metadata } => {
-            save_codebase_index_metadata(connection, *index_metadata)
-                .context("error upserting codebase index metadata")
-        }
-        ModelEvent::DeleteCodebaseIndexMetadata { repo_path } => {
-            delete_codebase_index_metadata(connection, &repo_path)
-                .context("error deleting codebase index metadata")
-        }
         ModelEvent::UpsertProject { project } => {
             save_project(connection, project).context("error upserting project")
         }
@@ -701,12 +962,6 @@ fn handle_model_event(event: ModelEvent, connection: &mut SqliteConnection) -> a
             running,
         } => update_mcp_server_running(connection, installation_uuid, running)
             .context("Error updating running field for MCP installation"),
-        ModelEvent::UpsertWorkspaceLanguageServer {
-            workspace_path,
-            lsp_type,
-            enabled,
-        } => upsert_workspace_language_server(connection, &workspace_path, lsp_type, enabled)
-            .context("error upserting workspace language server"),
         ModelEvent::UpdateBlockAgentViewVisibility {
             block_id,
             agent_view_visibility,
@@ -1044,9 +1299,8 @@ fn save_pane_state(
         LeafContents::GetStarted => GET_STARTED_PANE_KIND,
         LeafContents::Welcome { .. } => WELCOME_PANE_KIND,
         LeafContents::AIDocument(_) => AI_DOCUMENT_PANE_KIND,
-        LeafContents::EnvironmentManagement(_)
-        | LeafContents::NetworkLog
-        | LeafContents::SshServer { .. } => {
+        // OpenWarp Wave 7-3:`EnvironmentManagement` arm 随 variant 一同物理删。
+        LeafContents::SshServer { .. } => {
             // These pane types are filtered out before this function is
             // called; see `LeafContents::is_persisted` and the skip in
             // `save_app_state`. Reaching this arm would mean a `pane_nodes`
@@ -1198,9 +1452,7 @@ fn save_pane_state(
                 .values(workflow)
                 .execute(conn)?;
         }
-        LeafContents::EnvironmentManagement(_) => {
-            // Unreachable: filtered by `is_persisted` in `save_app_state`.
-        }
+        // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents arm 随 variant 一同物理删。
         LeafContents::Settings(settings_pane_snapshot) => {
             let current_page = match settings_pane_snapshot {
                 SettingsPaneSnapshot::Local { current_page, .. } => current_page,
@@ -1285,9 +1537,6 @@ fn save_pane_state(
                 .values(ambient_agent_pane)
                 .execute(conn)?;
         }
-        LeafContents::NetworkLog => {
-            // Unreachable: filtered by `is_persisted` in `save_app_state`.
-        }
         LeafContents::SshServer { .. } => {
             // Unreachable: filtered by `is_persisted` in `save_app_state`.
         }
@@ -1358,126 +1607,6 @@ fn decode_path(bytes: Vec<u8>) -> PathBuf {
             OsString::from_wide(wide_char_sequence).into()
         }
     }
-}
-
-fn save_codebase_index_metadata(
-    conn: &mut SqliteConnection,
-    index_metadata: ai::workspace::WorkspaceMetadata,
-) -> Result<()> {
-    use schema::workspace_metadata::dsl::*;
-
-    let new_metadata: NewWorkspaceMetadata = index_metadata.into();
-
-    diesel::insert_into(workspace_metadata)
-        .values(new_metadata.clone())
-        .on_conflict(repo_path)
-        .do_update()
-        .set(&new_metadata)
-        .execute(conn)?;
-
-    Ok(())
-}
-
-fn get_all_codebase_index_metadata(
-    conn: &mut SqliteConnection,
-) -> Result<Vec<ai::workspace::WorkspaceMetadata>, diesel::result::Error> {
-    use schema::workspace_metadata::dsl::*;
-
-    Ok(workspace_metadata
-        .load_iter::<WorkspaceMetadataModel, DefaultLoadingMode>(conn)?
-        .filter_map(|item| item.ok().map(ai::workspace::WorkspaceMetadata::from))
-        .collect_vec())
-}
-
-fn get_all_workspace_language_servers_by_workspace(
-    conn: &mut SqliteConnection,
-) -> Result<HashMap<PathBuf, HashMap<LSPServerType, EnablementState>>, diesel::result::Error> {
-    use schema::workspace_language_server::dsl::*;
-    use schema::workspace_metadata;
-
-    let results = workspace_language_server
-        .inner_join(workspace_metadata::table)
-        .select((workspace_metadata::repo_path, language_server_name, enabled))
-        .load::<(String, String, String)>(conn)?;
-
-    let mut grouped: HashMap<PathBuf, HashMap<LSPServerType, EnablementState>> = HashMap::new();
-    for (path_str, server_name, enablement_str) in results {
-        let path = PathBuf::from(path_str);
-        let Some(server_type) = serde_json::from_str(&server_name).ok() else {
-            continue;
-        };
-
-        let Some(enablement) = serde_json::from_str(&enablement_str).ok() else {
-            continue;
-        };
-
-        grouped
-            .entry(path)
-            .or_default()
-            .insert(server_type, enablement);
-    }
-
-    Ok(grouped)
-}
-
-fn upsert_workspace_language_server(
-    conn: &mut SqliteConnection,
-    workspace_path: &Path,
-    server_type: LSPServerType,
-    enablement: EnablementState,
-) -> Result<()> {
-    use schema::workspace_language_server::dsl::*;
-    use schema::workspace_metadata::dsl::*;
-    let path_string = workspace_path.to_string_lossy().to_string();
-
-    // Try to find existing workspace
-    let metadata = workspace_metadata
-        .filter(repo_path.eq(&path_string))
-        .first::<WorkspaceMetadataModel>(conn)
-        .optional()?
-        .ok_or(anyhow::anyhow!("Can't find workspace for path"))?;
-
-    let ws_id = metadata.id;
-    let server_name = serde_json::to_string(&server_type)?;
-
-    // Now upsert the language server setting
-    // Check if record already exists
-    let existing = workspace_language_server
-        .filter(workspace_id.eq(ws_id))
-        .filter(language_server_name.eq(server_name.clone()))
-        .first::<model::WorkspaceLanguageServer>(conn)
-        .optional()?;
-
-    let enablement_str = serde_json::to_string(&enablement)?;
-
-    if let Some(existing_record) = existing {
-        // Update existing record
-        diesel::update(workspace_language_server.find(existing_record.id))
-            .set(enabled.eq(enablement_str))
-            .execute(conn)?;
-    } else {
-        // Insert new record
-        let new_language_server = model::NewWorkspaceLanguageServer {
-            workspace_id: ws_id,
-            language_server_name: server_name,
-            enabled: enablement_str.to_string(),
-        };
-
-        diesel::insert_into(workspace_language_server)
-            .values(&new_language_server)
-            .execute(conn)?;
-    }
-
-    Ok(())
-}
-
-fn delete_codebase_index_metadata(conn: &mut SqliteConnection, index_path: &Path) -> Result<()> {
-    use schema::workspace_metadata::dsl::*;
-
-    let target_path = index_path.to_string_lossy().to_string();
-    diesel::delete(workspace_metadata.filter(repo_path.eq(target_path))).execute(conn)?;
-
-    Ok(())
 }
 
 fn save_project(conn: &mut SqliteConnection, project: Project) -> Result<()> {
@@ -3056,23 +3185,6 @@ fn read_sqlite_data(
                                     boxed
                                 })
                             }
-                            JsonObjectType::ScheduledAmbientAgent => {
-                                let model = CloudScheduledAmbientAgentModel::deserialize_owned(
-                                    &object.data,
-                                );
-                                model.ok().map(|model| {
-                                    let boxed: Box<dyn CloudObject> =
-                                        Box::new(CloudScheduledAmbientAgent::new(
-                                            server_id,
-                                            model,
-                                            to_cloud_object_metadata(metadata),
-                                            cloud_object_permissions,
-                                        ));
-                                    boxed
-                                })
-                            }
-                            // TODO: Implement CloudAgentConfig model when full sync support is added
-                            JsonObjectType::CloudAgentConfig => None,
                         })
                     })
             })
@@ -3217,8 +3329,6 @@ fn read_sqlite_data(
 
     let ai_queries = read_ai_queries(conn)?;
 
-    let codebase_indices = get_all_codebase_index_metadata(conn)?;
-    let workspace_language_servers = get_all_workspace_language_servers_by_workspace(conn)?;
     let multi_agent_conversations = read_agent_conversations(conn)?;
     let projects = get_all_projects(conn)?;
     let project_rules = get_all_project_rules(conn)?;
@@ -3237,8 +3347,6 @@ fn read_sqlite_data(
         object_actions,
         experiments: server_experiments,
         ai_queries,
-        codebase_indices,
-        workspace_language_servers,
         multi_agent_conversations,
         projects,
         project_rules,

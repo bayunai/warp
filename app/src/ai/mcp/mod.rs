@@ -15,13 +15,13 @@ use crate::{
             persistence::CloudModel,
         },
         GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, Revision, ServerCloudObject,
+        JsonObjectType, ServerCloudObject,
     },
     drive::{
         items::{mcp_server::WarpDriveMCPServer, WarpDriveItem},
         CloudObjectTypeAndId,
     },
-    server::{ids::SyncId, sync_queue::QueueItem},
+    server::ids::SyncId,
 };
 #[cfg(not(target_family = "wasm"))]
 use diesel::{QueryDsl, RunQueryDsl, SqliteConnection};
@@ -314,18 +314,6 @@ impl StringModel for MCPServer {
 
     fn display_name(&self) -> String {
         self.name.clone()
-    }
-
-    fn update_object_queue_item(
-        &self,
-        revision_ts: Option<Revision>,
-        object: &Self::CloudObjectType,
-    ) -> Option<QueueItem> {
-        Some(QueueItem::UpdateMCPServer {
-            model: object.model().clone().into(),
-            id: object.id,
-            revision: revision_ts.or_else(|| object.metadata.revision.clone()),
-        })
     }
 
     fn new_from_server_update(&self, server_cloud_object: &ServerCloudObject) -> Option<Self> {

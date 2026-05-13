@@ -109,12 +109,7 @@ use crate::ai::agent::{
     ShellCommandCompletedTrigger,
 };
 use crate::ai::blocklist::block::{AIBlockAction, FinishReason};
-use crate::ai::blocklist::codebase_index_speedbump_banner::{
-    CodebaseIndexSpeedbumpBannerAction, CodebaseIndexSpeedbumpBannerState, VisibilityState,
-};
 use crate::ai::blocklist::model::AIBlockOutputStatus;
-#[cfg(feature = "local_fs")]
-use crate::ai::persisted_workspace::PersistedWorkspace;
 use crate::code_review::comments::{
     convert_insert_review_comments, AttachedReviewComment, PendingImportedReviewComment,
 };
@@ -183,11 +178,11 @@ use session_sharing_protocol::sharer::{RoleUpdateReason, SessionEndedReason, Ses
 use ssh_file_upload::{FileUpload, FileUploadEvent};
 use uuid::Uuid;
 use warp_core::channel::ChannelState;
-use warpui::elements::{shimmering_text::ShimmeringTextStateHandle, Border, ChildView};
+use warpui::elements::{shimmering_text::ShimmeringTextStateHandle, ChildView};
 use warpui::fonts::Properties;
 use warpui::{ViewHandle, WeakModelHandle};
 
-use crate::ai::agent::conversation::{AIConversation, AIConversationId};
+use crate::ai::agent::conversation::{AIConversation, AIConversationId, ConversationStatus};
 
 #[cfg(any(test, feature = "integration_tests"))]
 use crate::ai::agent::UserQueryMode;
@@ -221,11 +216,10 @@ use crate::ai::{
         PRE_REWIND_PREFIX,
     },
     execution_profiles::profiles::{AIExecutionProfilesModel, ClientProfileId},
-    get_relevant_files::controller::GetRelevantFilesController,
 };
-use crate::auth::auth_manager::AuthManager;
-use crate::auth::auth_state::AuthState;
-use crate::auth::auth_view_modal::AuthViewVariant;
+use crate::auth::AuthManager;
+use crate::auth::AuthState;
+use crate::auth::AuthViewVariant;
 use crate::auth::{AuthStateProvider, UserUid};
 use crate::autoupdate::{self, get_update_state, AutoupdateStage};
 use crate::cloud_object::model::actions::ObjectActionType;
@@ -244,7 +238,6 @@ use crate::env_vars::{
 };
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::persistence::{self, FinishedCommandMetadata};
-use crate::safe_warn;
 use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ObjectUid, SyncId};
 #[cfg(feature = "local_fs")]
@@ -333,6 +326,7 @@ use crate::workspaces::{user_workspaces::UserWorkspaces, workspace::CustomerType
 use crate::AIRequestUsageModel;
 use crate::ActiveSession as WindowActiveSession;
 use crate::{report_if_error, AIAgentActionResultType};
+use crate::{safe_error, safe_warn};
 
 use async_channel::{Receiver, Sender};
 use chrono::{DateTime, Local, NaiveDateTime};
@@ -1018,7 +1012,6 @@ pub enum InlineBannerType {
     ShellProcessTerminated,
     OpenInWarp,
     VimMode,
-    CodebaseIndexSpeedbump,
     AgentModeSetup,
     AnonymousUserAISignUp,
     AwsBedrockLogin,
@@ -1032,7 +1025,6 @@ impl InlineBannerType {
         match self {
             // Agent-related banners: visible in agent view
             Self::PromptSuggestions
-            | Self::CodebaseIndexSpeedbump
             | Self::AgentModeSetup
             | Self::AnonymousUserAISignUp
             | Self::AwsBedrockLogin
@@ -1094,8 +1086,6 @@ struct InlineBannersState {
     open_in_warp_banner: Option<OpenInWarpBannerState>,
 
     vim_banner_state: Option<VimModeBannerState>,
-
-    codebase_index_speedbump_banner: Option<CodebaseIndexSpeedbumpBannerState>,
 
     agent_setup_speedbump_banner: Option<AgentModeSetupSpeedbumpBannerState>,
 
@@ -2577,7 +2567,6 @@ pub struct TerminalView {
     ai_action_model: ModelHandle<BlocklistAIActionModel>,
     ai_input_model: ModelHandle<BlocklistAIInputModel>,
     ai_context_model: ModelHandle<BlocklistAIContextModel>,
-    get_relevant_files_controller: ModelHandle<GetRelevantFilesController>,
 
     pending_env_var_collection: Option<CloudEnvVarCollection>,
 
@@ -2711,23 +2700,8 @@ pub struct TerminalView {
 
     ambient_agent_view_model: ModelHandle<ambient_agent::AmbientAgentViewModel>,
 
-    /// Cloud mode conversation details panel (side panel showing task metadata).
-    cloud_mode_details_panel:
-        ViewHandle<crate::ai::conversation_details_panel::ConversationDetailsPanel>,
-    /// Whether the cloud mode details panel is currently open.
-    is_cloud_mode_details_panel_open: bool,
-    /// Whether we've already auto-opened the panel when the agent started running.
-    /// This prevents re-opening the panel if the user manually closes it.
-    has_auto_opened_cloud_mode_details_panel: bool,
-    /// Mouse state handle for the cloud mode details panel toggle button in the pane header.
-    /// Only available on non-WASM platforms (WASM uses a per-window button instead).
-    #[cfg(not(target_arch = "wasm32"))]
-    cloud_mode_details_panel_toggle_mouse_state: warpui::elements::MouseStateHandle,
     /// Mouse state handle for the ambient agent cancel button in the pane header.
     ambient_agent_cancel_mouse_state: warpui::elements::MouseStateHandle,
-
-    /// First-time cloud agent setup view (full-screen overlay for creating initial environment).
-    first_time_cloud_agent_setup_view: ViewHandle<ambient_agent::FirstTimeCloudAgentSetupView>,
 
     /// Environment setup mode selector modal for /create-environment command.
     environment_setup_mode_selector: ViewHandle<EnvironmentSetupModeSelector>,
@@ -3266,13 +3240,11 @@ impl TerminalView {
             model
         });
 
-        let get_relevant_files_controller = ctx.add_model(GetRelevantFilesController::new);
         let ai_action_model = ctx.add_model(|ctx| {
             BlocklistAIActionModel::new(
                 model.clone(),
                 active_session.clone(),
                 &model_events_handle,
-                get_relevant_files_controller.clone(),
                 terminal_view_id,
                 ctx,
             )
@@ -3434,15 +3406,6 @@ impl TerminalView {
 
         ctx.subscribe_to_model(&ai_controller, |me, handle, event, ctx| {
             me.handle_ai_controller_event(handle, event, ctx);
-            // Refresh cloud mode details panel when agent output completes (may include new artifacts)
-            if matches!(
-                event,
-                BlocklistAIControllerEvent::FinishedReceivingOutput { .. }
-            ) && me.is_cloud_mode_details_panel_open
-                && me.ambient_agent_view_model.as_ref(ctx).is_ambient_agent()
-            {
-                me.fetch_and_update_cloud_mode_details_panel(ctx);
-            }
         });
 
         // Subscribe to agent conversations model for task status updates
@@ -3456,21 +3419,6 @@ impl TerminalView {
                 );
                 if is_task_update {
                     me.maybe_insert_tombstone_for_non_running_shared_ambient_task(ctx);
-                }
-                let should_refresh_details_panel = matches!(
-                    event,
-                    AgentConversationsModelEvent::TasksUpdated
-                        | AgentConversationsModelEvent::NewTasksReceived
-                        | AgentConversationsModelEvent::ConversationUpdated
-                        | AgentConversationsModelEvent::ConversationArtifactsUpdated { .. }
-                );
-                // Only refresh panel if it's currently open (avoids unnecessary work)
-                if should_refresh_details_panel
-                    && me.is_cloud_mode_details_panel_open
-                    && me.ambient_agent_view_model.as_ref(ctx).is_ambient_agent()
-                {
-                    me.fetch_and_update_cloud_mode_details_panel(ctx);
-                    ctx.notify();
                 }
             },
         );
@@ -3899,13 +3847,6 @@ impl TerminalView {
             }
         });
 
-        let first_time_cloud_agent_setup_view =
-            ctx.add_typed_action_view(ambient_agent::FirstTimeCloudAgentSetupView::new);
-
-        ctx.subscribe_to_view(&first_time_cloud_agent_setup_view, |me, _, event, ctx| {
-            me.handle_first_time_cloud_agent_setup_event(event, ctx);
-        });
-
         let environment_setup_mode_selector =
             ctx.add_typed_action_view(EnvironmentSetupModeSelector::new);
 
@@ -3957,29 +3898,6 @@ impl TerminalView {
                     ),
                 )
             })
-        });
-
-        // Cloud mode conversation details panel
-        let cloud_mode_details_panel = ctx.add_typed_action_view(|ctx| {
-            crate::ai::conversation_details_panel::ConversationDetailsPanel::new(
-                false, // don't show "Open" button since we're already viewing the conversation
-                320.0, // initial width
-                ctx,
-            )
-        });
-        ctx.subscribe_to_view(&cloud_mode_details_panel, |me, _, event, ctx| {
-            use crate::ai::conversation_details_panel::ConversationDetailsPanelEvent;
-            match event {
-                ConversationDetailsPanelEvent::Close => {
-                    me.is_cloud_mode_details_panel_open = false;
-                    ctx.notify();
-                }
-                ConversationDetailsPanelEvent::OpenPlanNotebook { notebook_uid } => {
-                    // Convert NotebookId -> SyncId -> ObjectUid (String)
-                    let object_uid = SyncId::from(*notebook_uid).uid();
-                    ctx.emit(Event::OpenWarpDriveObjectInPane(object_uid));
-                }
-            }
         });
 
         let window_id = ctx.window_id();
@@ -4069,7 +3987,6 @@ impl TerminalView {
             passive_suggestions_models,
             ai_action_model,
             ai_render_context,
-            get_relevant_files_controller,
             shared_session: None,
             pending_share_source: None,
             auto_stop_sharing_on_cli_end: false,
@@ -4113,16 +4030,10 @@ impl TerminalView {
             agent_view_back_button,
             is_using_conversation_for_pane_header_title: false,
             ambient_agent_view_model,
-            cloud_mode_details_panel,
-            is_cloud_mode_details_panel_open: false,
-            has_auto_opened_cloud_mode_details_panel: false,
-            #[cfg(not(target_arch = "wasm32"))]
-            cloud_mode_details_panel_toggle_mouse_state: Default::default(),
             ambient_agent_cancel_mouse_state: Default::default(),
 
             is_pending_aws_login: false,
             manual_pty_shutdown_requested: false,
-            first_time_cloud_agent_setup_view,
             environment_setup_mode_selector,
             is_environment_setup_mode_selector_open: false,
             pane_stack: None,
@@ -5109,7 +5020,6 @@ impl TerminalView {
                             response_stream_id: response_stream_id.clone(),
                         },
                         self.ai_controller.clone(),
-                        self.get_relevant_files_controller.clone(),
                         self.pwd(),
                         self.shell_launch_data_if_local(ctx),
                         self.ai_action_model.clone(),
@@ -6178,7 +6088,7 @@ impl TerminalView {
                     .conversation_id_for_action(action_id, ctx.view_id())
                     .and_then(|id| history_model.conversation(&id))
                 else {
-                    safe_warn!(
+                    safe_error!(
                         safe: ("No conversation ID found for command with ID: {:?}", action_id),
                         full: (
                             "No conversation ID found for requested command: ID: {:?}, command: \
@@ -6358,9 +6268,6 @@ impl TerminalView {
                     }
                     AIAgentActionType::ReadFiles(..) => {
                         "Oz needs your permission to read files".to_string()
-                    }
-                    AIAgentActionType::SearchCodebase(..) => {
-                        "Oz needs your permission to search your codebase".to_string()
                     }
                     AIAgentActionType::RequestFileEdits { .. } => {
                         "Oz needs your permission to edit a file".to_string()
@@ -9135,89 +9042,6 @@ impl TerminalView {
         }
     }
 
-    fn codebase_index_speedbump_banner_action(
-        &mut self,
-        action: CodebaseIndexSpeedbumpBannerAction,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        match action {
-            CodebaseIndexSpeedbumpBannerAction::ToggleAlwaysAllow => {
-                if let Some(banner_state) =
-                    &mut self.inline_banners_state.codebase_index_speedbump_banner
-                {
-                    banner_state.toggle_always_allow_checked();
-                }
-                ctx.notify();
-            }
-            CodebaseIndexSpeedbumpBannerAction::AllowIndexing => {
-                if let Some(banner_state) =
-                    &mut self.inline_banners_state.codebase_index_speedbump_banner
-                {
-                    // Change state to indexing
-                    banner_state.show_indexing_banner();
-                }
-                ctx.notify();
-            }
-            CodebaseIndexSpeedbumpBannerAction::Close => {
-                if let Some(banner_state) = self
-                    .inline_banners_state
-                    .codebase_index_speedbump_banner
-                    .take()
-                {
-                    // If user dismissed the banner, we want to persist the dismissal (only if it's a speedbump banner).
-                    if banner_state.visibility_state == VisibilityState::Speedbump {
-                        let mut dismissed_repo_paths = AISettings::as_ref(ctx)
-                            .codebase_index_speedbump_banner_dismissed_for_repo_paths
-                            .clone();
-                        dismissed_repo_paths.push(banner_state.repo_path.clone());
-                        AISettings::handle(ctx).update(ctx, |ai_settings, ctx| {
-                            if let Err(e) = ai_settings
-                                .codebase_index_speedbump_banner_dismissed_for_repo_paths
-                                .set_value(dismissed_repo_paths, ctx) {
-                                    log::error!(
-                                        "Failed to persist 'Codebase indexing speedbump banner dismissed' setting: {e}"
-                                    );
-                                }
-                        });
-                    }
-
-                    // Remove banner
-                    self.model
-                        .lock()
-                        .block_list_mut()
-                        .remove_inline_banner(banner_state.id);
-                }
-                ctx.notify();
-            }
-            CodebaseIndexSpeedbumpBannerAction::ViewStatus => {
-                ctx.emit(Event::OpenSettings(SettingsSection::CodeIndexing));
-            }
-            CodebaseIndexSpeedbumpBannerAction::DismissForever => {
-                AISettings::handle(ctx).update(ctx, |ai_settings, ctx| {
-                    if let Err(e) = ai_settings
-                        .codebase_index_speedbump_banner_globally_dismissed
-                        .set_value(true, ctx)
-                    {
-                        log::error!(
-                            "Failed to persist 'Codebase indexing speedbump banner globally dismissed' setting: {e}"
-                        );
-                    }
-                });
-                if let Some(banner_state) = self
-                    .inline_banners_state
-                    .codebase_index_speedbump_banner
-                    .take()
-                {
-                    self.model
-                        .lock()
-                        .block_list_mut()
-                        .remove_inline_banner(banner_state.id);
-                }
-                ctx.notify();
-            }
-        }
-    }
-
     #[cfg(feature = "local_fs")]
     fn insert_agent_mode_setup_speedbump_banner(
         &mut self,
@@ -9245,50 +9069,6 @@ impl TerminalView {
         self.mark_agent_init_callout_as_shown_for_directory(&repo_path, ctx);
 
         ctx.notify();
-    }
-
-    #[cfg(feature = "local_fs")]
-    fn insert_codebase_index_speedbump_banner(
-        &mut self,
-        repo_path: PathBuf,
-        show_is_indexing: bool,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        // Create new inline banner
-        let banner_id = self.inline_banners_state.next_banner_id();
-        let mut banner_state = CodebaseIndexSpeedbumpBannerState::new(banner_id, repo_path);
-        if show_is_indexing {
-            banner_state.show_indexing_banner(); // Set to indexing state
-        }
-
-        // Insert the banner into the block list
-        self.model
-            .lock()
-            .block_list_mut()
-            .append_inline_banner_with_custom_height(
-                InlineBannerItem::new(banner_id, InlineBannerType::CodebaseIndexSpeedbump),
-                4.0,
-            );
-
-        // Store the banner state
-        self.inline_banners_state.codebase_index_speedbump_banner = Some(banner_state);
-
-        ctx.notify();
-    }
-
-    #[cfg(feature = "local_fs")]
-    fn remove_codebase_index_speedbump_banner(&mut self, ctx: &mut ViewContext<Self>) {
-        if let Some(banner_state) = self
-            .inline_banners_state
-            .codebase_index_speedbump_banner
-            .take()
-        {
-            self.model
-                .lock()
-                .block_list_mut()
-                .remove_inline_banner(banner_state.id);
-            ctx.notify();
-        }
     }
 
     #[cfg(feature = "local_fs")]
@@ -10966,10 +10746,6 @@ impl TerminalView {
                                             return;
                                         }
 
-                                        PersistedWorkspace::handle(ctx).update(ctx, |manager, _| {
-                                            manager.navigated_to_path(active_directory.as_path_buf());
-                                        });
-
                                         // Subscribe to GitRepoStatusModel if the repo changed
                                         // and git status updates are needed.
                                         if old_repo_path.as_ref() != Some(repo_path) {
@@ -10990,8 +10766,6 @@ impl TerminalView {
                                                 );
                                             });
                                         }
-
-                                        me.start_lsp_server_in_active_pwd(ctx);
 
                                         me.update_repo_banner_state(
                                             repo_path.clone(),
@@ -14041,9 +13815,14 @@ impl TerminalView {
         else {
             return;
         };
-        if conversation.is_entirely_passive()
-            || !conversation.status().should_trigger_notification()
-        {
+        let status = conversation.status();
+        let should_trigger = matches!(
+            status,
+            ConversationStatus::Success
+                | ConversationStatus::Blocked { .. }
+                | ConversationStatus::Error
+        );
+        if conversation.is_entirely_passive() || !should_trigger {
             return;
         }
 
@@ -14653,6 +14432,17 @@ impl TerminalView {
                     .write(ClipboardContent::plain_text(selected_text));
                 return;
             }
+        }
+
+        // Then check if there's selected text inside any AI block (rich content). The grid-level
+        // `selection_to_string` below ignores AI block `SelectableArea` selections, so without this
+        // branch Ctrl+Shift+C silently does nothing when the user has selected text inside an AI reply.
+        if let Some(selected_text) = self.selected_text_from_visible_ai_blocks(ctx) {
+            if !selected_text.is_empty() {
+                ctx.clipboard()
+                    .write(ClipboardContent::plain_text(selected_text));
+            }
+            return;
         }
 
         // Then check if there's selected text in the cloud mode error screen
@@ -18734,6 +18524,19 @@ impl TerminalView {
         })
     }
 
+    /// 在所有可见的 AI block 子视图层里查找已被用户选中的文本。
+    ///
+    /// AI block 的 rich content 选区由 `SelectableArea` 维护,与终端 grid 选区是两套
+    /// 互不通气的系统;`selection_to_string` 只会读 grid 选区,因此 Ctrl+Shift+C 与右键
+    /// 菜单的 `Copy` 都会漏掉 AI block 内的选区。这里集中提供一个兜底:遍历所有 AI block,
+    /// 取第一个 `selected_text(ctx).is_some()` 的结果即可。
+    fn selected_text_from_visible_ai_blocks(&self, ctx: &AppContext) -> Option<String> {
+        self.rich_content_views.iter().find_map(|rich_content| {
+            let ai_metadata = rich_content.ai_block_metadata()?;
+            ai_metadata.ai_block_handle.as_ref(ctx).selected_text(ctx)
+        })
+    }
+
     /// Returns the last block's `EnvVarCollectionBlock` if it is uncompleted, scoped to the
     /// currently visible conversation.
     fn active_env_var_collection_block(
@@ -19056,8 +18859,20 @@ impl TerminalView {
     }
 
     fn context_menu_copy_selected_text(&mut self, ctx: &mut ViewContext<Self>) {
+        send_telemetry_from_ctx!(TelemetryEvent::ContextMenuCopySelectedText, ctx);
+
+        // 优先试 AI block 内选区(详见 `selected_text_from_visible_ai_blocks` 注释)。
+        // 放在 `model.lock()` 之前,避免在终端模型锁持锁期间调用可能再次加锁的代码。
+        if let Some(selected_text) = self.selected_text_from_visible_ai_blocks(ctx) {
+            if !selected_text.is_empty() {
+                ctx.clipboard()
+                    .write(ClipboardContent::plain_text(selected_text));
+            }
+            self.close_context_menu(ctx, true);
+            return;
+        }
+
         {
-            send_telemetry_from_ctx!(TelemetryEvent::ContextMenuCopySelectedText, ctx);
             let semantic_selection = SemanticSelection::as_ref(ctx);
             let model = self.model.lock();
             if let Some(selected_text) =
@@ -19203,6 +19018,8 @@ impl TerminalView {
     fn handle_input_event(&mut self, event: &InputEvent, ctx: &mut ViewContext<Self>) {
         match event {
             InputEvent::Enter => self.clear_prompt_suggestions(ctx),
+            InputEvent::PageUp => self.page_up(ctx),
+            InputEvent::PageDown => self.page_down(ctx),
             InputEvent::ExecuteCommand(event) => {
                 self.update_scroll_position_locking(
                     ScrollPositionUpdate::AfterCommandExecutionStarted,
@@ -20530,7 +20347,6 @@ impl TerminalView {
                     response_stream_id: None,
                 },
                 self.ai_controller.clone(),
-                self.get_relevant_files_controller.clone(),
                 None,
                 None,
                 self.ai_action_model.clone(),
@@ -21391,13 +21207,6 @@ impl TerminalView {
             inline_banners.insert(
                 vim_banner_state.id,
                 render_vim_mode_banner(vim_banner_state, appearance),
-            );
-        }
-
-        if let Some(banner_state) = &self.inline_banners_state.codebase_index_speedbump_banner {
-            inline_banners.insert(
-                banner_state.id,
-                banner_state.render_codebase_index_speedbump_banner(appearance),
             );
         }
 
@@ -23520,30 +23329,6 @@ impl TerminalView {
             .set_show_bootstrap_block(true);
     }
 
-    /// Starts all enabled LSP servers for the current working directory.
-    #[cfg(feature = "local_fs")]
-    fn start_lsp_server_in_active_pwd(&self, ctx: &mut ViewContext<Self>) {
-        use crate::ai::persisted_workspace::LspTask;
-
-        let Some(cwd) = self
-            .pwd_if_local(ctx)
-            .map(PathBuf::from)
-            .and_then(|p| p.canonicalize().ok())
-        else {
-            return;
-        };
-
-        PersistedWorkspace::handle(ctx).update(ctx, |workspace, ctx| {
-            workspace.execute_lsp_task(
-                LspTask::Spawn {
-                    file_path: cwd,
-                    server_type: None,
-                },
-                ctx,
-            );
-        });
-    }
-
     pub(super) fn toggle_file_tree(
         &mut self,
         cli_agent: Option<crate::server::telemetry::CLIAgentType>,
@@ -23789,8 +23574,7 @@ impl TypedActionView for TerminalView {
             | ResumeConversation
             | ForkConversationFromLastKnownGoodState
             | ToggleAIDocumentPane
-            | ClearMarkedText
-            | StartLspServer => ActionAccessibilityContent::from_debug(),
+            | ClearMarkedText => ActionAccessibilityContent::from_debug(),
             #[cfg(feature = "local_fs")]
             OpenCodeInWarp { .. } => ActionAccessibilityContent::from_debug(),
             OpenInWarpBanner(action) => self.open_in_warp_banner_accessibility_content(*action),
@@ -23875,7 +23659,6 @@ impl TypedActionView for TerminalView {
             | OpenEditSkillPane { .. }
             | OpenAddPromptPane
             | AddProjectAtCurrentDirectory
-            | CodebaseIndexSpeedbumpBanner(_)
             | AgentModeSetupSpeedbumpBanner(_)
             | AnonymousUserAISignUpBanner(_)
             | SetupCloudEnvironment(_)
@@ -24564,9 +24347,6 @@ impl TypedActionView for TerminalView {
                 });
                 ctx.notify();
             }
-            CodebaseIndexSpeedbumpBanner(action) => {
-                self.codebase_index_speedbump_banner_action(*action, ctx);
-            }
             AgentModeSetupSpeedbumpBanner(action) => {
                 self.agent_mode_setup_speedbump_banner_action(*action, ctx)
             }
@@ -24805,10 +24585,6 @@ impl TypedActionView for TerminalView {
                 });
                 ctx.notify();
             }
-            StartLspServer => {
-                #[cfg(feature = "local_fs")]
-                self.start_lsp_server_in_active_pwd(ctx);
-            }
             OpenConversationsPalette => {
                 ctx.emit(Event::OpenConversationHistory);
             }
@@ -24865,11 +24641,6 @@ impl TypedActionView for TerminalView {
                 self.handle_aws_cli_not_installed_banner_action(*action, ctx);
             }
             ToggleCloudModeDetailsPanel => {
-                let will_open = !self.is_cloud_mode_details_panel_open;
-                self.is_cloud_mode_details_panel_open = will_open;
-                if will_open {
-                    self.fetch_and_update_cloud_mode_details_panel(ctx);
-                }
                 ctx.notify();
             }
             CancelAmbientAgentTask => {
@@ -25359,9 +25130,7 @@ impl View for TerminalView {
         }
 
         // Render first-time cloud agent setup view when in Setup status
-        if self.ambient_agent_view_model.as_ref(app).is_in_setup() {
-            stack.add_child(ChildView::new(&self.first_time_cloud_agent_setup_view).finish());
-        }
+        if self.ambient_agent_view_model.as_ref(app).is_in_setup() {}
 
         if self.ssh_file_upload.as_ref(app).has_upload() {
             stack.add_child(
@@ -25395,34 +25164,8 @@ impl View for TerminalView {
             element
         };
 
-        // Wrap with cloud mode details panel on the right if open
-        // On WASM, the panel is rendered in the wasm_view instead
-        let should_show_panel = !cfg!(target_family = "wasm")
-            && self.is_cloud_mode_details_panel_open
-            && Self::can_show_cloud_mode_details_ui_for_task_id(
-                ambient_agent_task_id_for_details_panel,
-            );
-
-        if should_show_panel {
-            // Wrap panel with agent view background for visual consistency
-            let panel_with_background =
-                Container::new(ChildView::new(&self.cloud_mode_details_panel).finish())
-                    .with_background(agent_view_bg_fill(app))
-                    .finish();
-
-            Container::new(
-                Flex::row()
-                    .with_main_axis_size(warpui::elements::MainAxisSize::Max)
-                    .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-                    .with_child(Shrinkable::new(1., final_element).finish())
-                    .with_child(panel_with_background)
-                    .finish(),
-            )
-            .with_border(Border::top(1.0).with_border_fill(appearance.theme().outline()))
-            .finish()
-        } else {
-            final_element
-        }
+        let _ = ambient_agent_task_id_for_details_panel;
+        final_element
     }
 
     fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {

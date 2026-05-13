@@ -135,12 +135,3 @@ pub fn prune_now(conversation: &mut AIConversation, cfg: &CompactionConfig) -> u
     log::info!("[byop-compaction] pruned {count} tool output(s)");
     count
 }
-
-// Reference traits for type inference
-#[allow(unused_imports)]
-use super::algorithm::Role as _Role;
-#[allow(unused_imports)]
-use super::algorithm::ToolOutputRef as _ToolOutputRef;
-// Mention MessageRef so that the import isn't dropped
-#[allow(dead_code)]
-fn _ensure_message_ref_imported<M: MessageRef>(_m: &M) {}

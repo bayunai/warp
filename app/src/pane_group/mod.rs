@@ -1,4 +1,3 @@
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent::api::ServerConversationToken;
 use crate::ai::agent::conversation::{AIAgentHarness, AIConversation, AIConversationId};
 use crate::ai::agent_conversations_model::{
@@ -7,7 +6,7 @@ use crate::ai::agent_conversations_model::{
 use crate::ai::ai_document_view::AIDocumentView;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
-use crate::ai::blocklist::history_model::CloudConversationData;
+use crate::ai::blocklist::history_model::LoadedConversationData;
 use crate::ai::blocklist::inline_action::code_diff_view::CodeDiffView;
 use crate::ai::blocklist::suggested_agent_mode_workflow_modal::SuggestedAgentModeWorkflowAndId;
 use crate::ai::blocklist::suggested_rule_modal::SuggestedRuleAndId;
@@ -16,9 +15,11 @@ use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel, AIDo
 use crate::ai::execution_profiles::profiles::{AIExecutionProfilesModel, ClientProfileId};
 use crate::ai::llms::LLMId;
 use crate::ai::restored_conversations::RestoredAgentConversations;
-use crate::auth::auth_manager::AuthManager;
-use crate::auth::auth_view_modal::AuthViewVariant;
+use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
+use crate::auth::AuthViewVariant;
+#[cfg(target_family = "wasm")]
+use crate::cloud_object::model::persistence::CloudModel;
 use crate::cloud_object::Space;
 #[cfg(feature = "local_fs")]
 use crate::code::editor_management::CodeSource;
@@ -32,8 +33,6 @@ use crate::pane_group::pane::get_started_pane::GetStartedPane;
 use crate::pane_group::pane::welcome_pane::WelcomePane;
 use crate::pane_group::pane::ActionOrigin;
 use crate::quit_warning::UnsavedStateSummary;
-#[cfg(target_family = "wasm")]
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::settings::{AISettings, DefaultSessionMode, PaneSettings};
 use crate::settings_view::SettingsSection;
 use crate::shell_indicator::ShellIndicatorType;
@@ -171,10 +170,9 @@ pub use pane::ai_fact_pane::AIFactPane;
 pub use pane::code_diff_pane::CodeDiffPane;
 pub use pane::code_pane::CodePane;
 pub use pane::env_var_collection_pane::EnvVarCollectionPane;
-pub use pane::environment_management_pane::EnvironmentManagementPane;
+// OpenWarp Wave 7-3:`EnvironmentManagementPane` 随 Cloud Mode UI 子系统物理删。
 pub use pane::execution_profile_editor_pane::ExecutionProfileEditorPane;
 pub use pane::file_pane::FilePane;
-pub use pane::network_log_pane::NetworkLogPane;
 pub use pane::notebook_pane::NotebookPane;
 pub use pane::settings_pane::SettingsPane;
 pub use pane::terminal_pane::TerminalPane;
@@ -638,7 +636,8 @@ pub enum Event {
         initial_content: Option<String>,
     },
     OpenAddRulePane,
-    OpenEnvironmentManagementPane,
+    // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` event 随 Cloud Mode UI
+    // 子系统物理删。
     OpenFilesPalette {
         source: PaletteSource,
     },
@@ -697,10 +696,6 @@ pub enum Event {
     },
     RunTabConfigSkill {
         path: PathBuf,
-    },
-    /// Request to open LSP logs in a terminal pane
-    OpenLspLogs {
-        log_path: PathBuf,
     },
     FreeTierLimitCheckTriggered,
     #[cfg(not(target_family = "wasm"))]
@@ -834,9 +829,9 @@ pub struct PaneGroup {
     terminal_with_open_summarization_dialog: Option<TerminalPaneId>,
 
     /// Pane with an open environment setup mode selector modal (rendered at tab level).
-    pane_with_open_environment_setup_mode_selector: Option<PaneId>,
-    /// Pane with an open agent-assisted environment modal (rendered at tab level).
-    pane_with_open_agent_assisted_environment_modal: Option<PaneId>,
+    // OpenWarp Wave 7-3:`pane_with_open_environment_setup_mode_selector` /
+    // `pane_with_open_agent_assisted_environment_modal` 随 Cloud Mode UI 子系统
+    // 物理删。
 
     /// If the left panel is open for this pane group
     pub left_panel_open: bool,
@@ -1750,16 +1745,15 @@ impl PaneGroup {
             }
             LeafContents::AmbientAgent(snapshot) => {
                 let task_data = snapshot.task_id.map(|task_id| {
-                    let task = AgentConversationsModel::handle(ctx).update(ctx, |model, ctx| {
-                        model.get_or_async_fetch_task_data(&task_id, ctx)
-                    });
+                    let task = AgentConversationsModel::handle(ctx)
+                        .update(ctx, |model, _| model.get_or_async_fetch_task_data(&task_id));
                     (task_id, task)
                 });
 
                 let restore_kind = match &task_data {
                     Some((_, Some(task))) => {
                         let item = ConversationOrTask::Task(task);
-                        match item.get_open_action(None, ctx) {
+                        match item.get_open_action(None) {
                             Some(WorkspaceAction::OpenAmbientAgentSession {
                                 session_id, ..
                             }) => AmbientRestoreKind::SharedSession { session_id },
@@ -1840,26 +1834,6 @@ impl PaneGroup {
                     "SSH server pane should not have been persisted, as it cannot be restored"
                 ))
             }
-            LeafContents::NetworkLog => {
-                // Network log panes are intentionally not restored. Two
-                // reasons:
-                //
-                // 1. The in-memory log starts empty on each launch, so a
-                //    restored pane would display a blank editor anyway.
-                // 2. More importantly, persisting the pane's contents would
-                //    effectively regress back to a persisted, on-disk
-                //    network log (via the SQLite app-state database) on app
-                //    shutdown, defeating the purpose of moving the log off
-                //    disk in the first place.
-                //
-                // `save_pane_state` in `persistence/sqlite.rs` skips network
-                // log panes entirely, so reaching this arm indicates a
-                // programmer error on the persistence side. Users reopen the
-                // pane on demand via Privacy settings or the keybinding.
-                Err(anyhow::anyhow!(
-                    "Network log pane should not have been persisted, as it cannot be restored"
-                ))
-            }
             LeafContents::GetStarted => {
                 if !FeatureFlag::GetStartedTab.is_enabled() {
                     Err(anyhow::anyhow!("GetStarted pane not supported"))
@@ -1889,14 +1863,8 @@ impl PaneGroup {
                     };
                     Ok((PaneData::new(pane_id), focus))
                 }
-            }
-            LeafContents::EnvironmentManagement(_) => {
-                // Environment management panes are not restored from persistence.
-                // They are opened on-demand via workspace actions.
-                Err(anyhow::anyhow!(
-                    "Environment management panes are not restored"
-                ))
-            }
+            } // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents arm 随 Cloud Mode UI
+              // 子系统物理删。
         };
 
         if let (Ok((pane_data, _)), Some(title)) = (&result, custom_vertical_tabs_title.as_deref())
@@ -2864,8 +2832,8 @@ impl PaneGroup {
             shared_session_role_change_modal,
             active_file_model,
             terminal_with_open_summarization_dialog: None,
-            pane_with_open_environment_setup_mode_selector: None,
-            pane_with_open_agent_assisted_environment_modal: None,
+            // OpenWarp Wave 7-3:Cloud Mode UI 子系统中的 pane-level modal 跟踪
+            // 字段随 UI 物理删。
             right_panel_open: false,
             left_panel_open: false,
             is_right_panel_maximized: false,
@@ -3061,8 +3029,8 @@ impl PaneGroup {
         ctx: &mut ViewContext<Self>,
     ) {
         for (task_id, _) in &pending {
-            AgentConversationsModel::handle(ctx).update(ctx, |model, ctx| {
-                model.get_or_async_fetch_task_data(task_id, ctx);
+            AgentConversationsModel::handle(ctx).update(ctx, |model, _| {
+                model.get_or_async_fetch_task_data(task_id);
             });
         }
 
@@ -3126,7 +3094,7 @@ impl PaneGroup {
             };
 
             let item = ConversationOrTask::Task(&task);
-            match item.get_open_action(None, ctx) {
+            match item.get_open_action(None) {
                 Some(WorkspaceAction::OpenAmbientAgentSession {
                     session_id,
                     task_id,
@@ -3204,7 +3172,7 @@ impl PaneGroup {
 
         let future = history_model_handle
             .as_ref(ctx)
-            .load_conversation_data(ai_conversation_id, ctx);
+            .load_conversation_data(ai_conversation_id);
         ctx.spawn(future, move |group, conversation, ctx| {
             if let Some(conversation) = conversation {
                 group.load_data_into_transcript_viewer(target_view, conversation, ctx);
@@ -3594,7 +3562,7 @@ impl PaneGroup {
     /// Uses the active session view as the target.
     pub fn load_data_into_conversation_transcript_viewer(
         &mut self,
-        conversation: CloudConversationData,
+        conversation: LoadedConversationData,
         ctx: &mut ViewContext<Self>,
     ) {
         // Get the active terminal view
@@ -3609,7 +3577,7 @@ impl PaneGroup {
     fn load_data_into_transcript_viewer(
         &mut self,
         terminal_view: ViewHandle<TerminalView>,
-        cloud_conversation: CloudConversationData,
+        cloud_conversation: LoadedConversationData,
         ctx: &mut ViewContext<Self>,
     ) {
         let terminal_manager = self
@@ -3619,10 +3587,10 @@ impl PaneGroup {
             .map(|session| session.terminal_manager(ctx));
 
         let ambient_agent_task_id = match &cloud_conversation {
-            CloudConversationData::Oz(conversation) => conversation
+            LoadedConversationData::Oz(conversation) => conversation
                 .server_metadata()
                 .and_then(|metadata| metadata.ambient_agent_task_id),
-            CloudConversationData::CLIAgent(cli_conversation) => {
+            LoadedConversationData::CLIAgent(cli_conversation) => {
                 cli_conversation.metadata.ambient_agent_task_id
             }
         };
@@ -3647,7 +3615,7 @@ impl PaneGroup {
         }
 
         match cloud_conversation {
-            CloudConversationData::Oz(conversation) => {
+            LoadedConversationData::Oz(conversation) => {
                 terminal_view.update(ctx, |view, ctx| {
                     view.restore_conversation_after_view_creation(
                         RestoredAIConversation::new(*conversation),
@@ -3656,7 +3624,7 @@ impl PaneGroup {
                     );
                 });
             }
-            CloudConversationData::CLIAgent(cli_conversation) => {
+            LoadedConversationData::CLIAgent(cli_conversation) => {
                 if !FeatureFlag::AgentHarness.is_enabled() {
                     log::warn!("AgentHarness flag is disabled; ignoring CLI agent conversation");
                     return;
@@ -3669,7 +3637,7 @@ impl PaneGroup {
                 };
                 terminal_view.update(ctx, |view, ctx| {
                     view.restore_conversation_and_directory_context(
-                        CloudConversationData::CLIAgent(cli_conversation),
+                        LoadedConversationData::CLIAgent(cli_conversation),
                         true,
                         |_, _| {},
                         ctx,
@@ -3700,13 +3668,7 @@ impl PaneGroup {
             }
         };
 
-        // Register the transcript viewer as an ambient session so it appears in the Active section
-        // of the conversation list.
-        if let Some(task_id) = ambient_agent_task_id {
-            ActiveAgentViewsModel::handle(ctx).update(ctx, |active_views, ctx| {
-                active_views.register_ambient_session(terminal_view.id(), task_id, ctx);
-            });
-        }
+        let _ = ambient_agent_task_id;
 
         // Insert the conversation ended tombstone (includes Open in Warp button on WASM).
         if terminal_manager.is_some() {
@@ -4352,13 +4314,8 @@ impl PaneGroup {
             }
 
             // OpenWarp:删除 share_block_modal cleanup(云端 share block)
-
-            if self.pane_with_open_environment_setup_mode_selector == Some(pane_id) {
-                self.pane_with_open_environment_setup_mode_selector = None;
-            }
-            if self.pane_with_open_agent_assisted_environment_modal == Some(pane_id) {
-                self.pane_with_open_agent_assisted_environment_modal = None;
-            }
+            // OpenWarp Wave 7-3:Cloud Mode UI 子系统中的 pane-level modal 跟踪
+            // 字段 cleanup 随 UI 物理删。
 
             self.focus_next_terminal_pane_and_activate_session(
                 pane_id,
@@ -4381,13 +4338,8 @@ impl PaneGroup {
             self.clean_up_pane(pane_id, ctx);
 
             // OpenWarp:删除 share_block_modal cleanup(云端 share block)
-
-            if self.pane_with_open_environment_setup_mode_selector == Some(pane_id) {
-                self.pane_with_open_environment_setup_mode_selector = None;
-            }
-            if self.pane_with_open_agent_assisted_environment_modal == Some(pane_id) {
-                self.pane_with_open_agent_assisted_environment_modal = None;
-            }
+            // OpenWarp Wave 7-3:Cloud Mode UI 子系统中的 pane-level modal 跟踪
+            // 字段 cleanup 随 UI 物理删。
 
             self.focus_next_terminal_pane_and_activate_session(
                 pane_id,
@@ -5430,13 +5382,7 @@ impl PaneGroup {
             history_model.mark_terminal_view_as_conversation_transcript_viewer(terminal_view.id());
         });
 
-        // Register the transcript viewer as an ambient session so it appears in the Active section
-        // of the conversation list.
-        if let Some(task_id) = ambient_agent_task_id {
-            ActiveAgentViewsModel::handle(ctx).update(ctx, |active_views, ctx| {
-                active_views.register_ambient_session(terminal_view.id(), task_id, ctx);
-            });
-        }
+        let _ = ambient_agent_task_id;
 
         (terminal_view, terminal_manager)
     }
@@ -5550,18 +5496,18 @@ impl PaneGroup {
     pub fn replace_loading_pane_with_terminal(
         &mut self,
         loading_pane_id: PaneId,
-        cloud_conversation: CloudConversationData,
+        cloud_conversation: LoadedConversationData,
         ctx: &mut ViewContext<Self>,
     ) -> bool {
         let restoration = match cloud_conversation {
-            CloudConversationData::Oz(conversation) => {
+            LoadedConversationData::Oz(conversation) => {
                 ConversationRestorationInNewPaneType::Historical {
                     conversation: *conversation,
                     should_use_live_appearance: true,
                     ambient_agent_task_id: None,
                 }
             }
-            CloudConversationData::CLIAgent(cli_conversation) => {
+            LoadedConversationData::CLIAgent(cli_conversation) => {
                 if !FeatureFlag::AgentHarness.is_enabled() {
                     log::warn!("AgentHarness flag is disabled; ignoring CLI agent conversation");
                     return false;
@@ -6081,7 +6027,7 @@ impl PaneGroup {
         // We need to wait for the app to be loaded before we attempt to get the
         // shareable links. This is because the links come from CloudModel objects
 
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete = CloudModel::as_ref(ctx).initial_load_complete();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
             if let Some(pane) = me.focused_pane_content(ctx) {
                 match pane.shareable_link(ctx) {
@@ -6777,43 +6723,8 @@ impl View for PaneGroup {
             }
         }
 
-        // Render environment setup mode selector at tab level when open.
-        if let Some(pane_id) = self.pane_with_open_environment_setup_mode_selector {
-            let selector_handle = self
-                .terminal_view_from_pane_id(pane_id, app)
-                .and_then(|tv| {
-                    tv.as_ref(app)
-                        .environment_setup_mode_selector_handle()
-                        .cloned()
-                })
-                .or_else(|| {
-                    self.downcast_pane_by_id::<EnvironmentManagementPane>(pane_id)
-                        .and_then(|emp| {
-                            emp.environments_page_view(app)
-                                .as_ref(app)
-                                .environment_setup_mode_selector_handle()
-                                .cloned()
-                        })
-                });
-            if let Some(handle) = selector_handle {
-                stack.add_child(ChildView::new(&handle).finish());
-            }
-        }
-
-        // Render agent-assisted environment modal at tab level when open.
-        if let Some(pane_id) = self.pane_with_open_agent_assisted_environment_modal {
-            if let Some(handle) = self
-                .downcast_pane_by_id::<EnvironmentManagementPane>(pane_id)
-                .and_then(|emp| {
-                    emp.environments_page_view(app)
-                        .as_ref(app)
-                        .agent_assisted_environment_modal_handle(app)
-                        .cloned()
-                })
-            {
-                stack.add_child(ChildView::new(&handle).finish());
-            }
-        }
+        // OpenWarp Wave 7-3:environment setup mode selector / agent-assisted environment
+        // modal 在 tab 层级的覆盖渲染随 Cloud Mode UI 子系统物理删。
 
         stack.finish()
     }

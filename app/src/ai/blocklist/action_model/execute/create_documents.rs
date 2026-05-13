@@ -104,7 +104,7 @@ impl CreateDocumentsExecutor {
                 // Add plan artifact to the conversation.
                 let artifact = Artifact::Plan {
                     document_uid: id.to_string(),
-                    notebook_uid: None, // Will be updated when synced to Warp Drive
+                    notebook_uid: None, // openWarp 不同步到云 notebook,始终为 None;本地打开走 document_uid
                     title: Some(document.title.clone()),
                 };
                 let terminal_view_id = self.terminal_view_id;
@@ -136,14 +136,9 @@ impl CreateDocumentsExecutor {
             model.clear_streaming_documents_for_action(&conversation_id, action_id, ctx);
         });
 
-        // Register each created document in CloudModel so it appears in the Drive sidebar
-        // Plans folder. create_object writes a local ClientId entry immediately, making it
-        // visible without requiring a successful cloud sync round-trip.
-        for context in &created_documents {
-            model.update(ctx, |model, ctx| {
-                model.sync_to_warp_drive(context.document_id, ctx);
-            });
-        }
+        // openWarp 不再把 plan 推送到 Warp Drive；plan 内容已通过
+        // AIDocumentModel::enqueue_save 写入本地 SQLite ai_document_panes 表,
+        // 用户在右侧 pane 中可直接查看与编辑。
 
         ActionExecution::Sync(CreateDocumentsResult::Success { created_documents }.into())
     }

@@ -21,6 +21,34 @@ use warp_core::{
 };
 use warpui::{AppContext, Entity, ModelContext, ModelHandle, SingletonEntity};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillManagerEvent {
+    InventoryChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillInventoryDuplicate {
+    pub path: PathBuf,
+    pub name: String,
+    pub description: String,
+    pub content: String,
+    pub provider: SkillProvider,
+    pub scope: ai::skills::SkillScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillInventoryItem {
+    pub name: String,
+    pub default_skill: SkillInventoryDuplicate,
+    pub duplicates: Vec<SkillInventoryDuplicate>,
+}
+
+impl SkillInventoryItem {
+    pub fn has_duplicates(&self) -> bool {
+        self.duplicates.len() > 1
+    }
+}
+
 /// Activation condition for a bundled skill.
 #[derive(Debug, Clone)]
 pub enum BundledSkillActivation {
@@ -86,8 +114,8 @@ impl SkillManager {
 
         ctx.spawn_stream_local(
             skill_watcher_rx,
-            |me, message, _ctx| {
-                me.handle_skill_watcher_event(message);
+            |me, message, ctx| {
+                me.handle_skill_watcher_event(message, ctx);
             },
             |_, _| {}, // No cleanup needed when stream ends
         );
@@ -342,18 +370,66 @@ impl SkillManager {
         bundled.activation.is_enabled(ctx).then_some(&bundled.skill)
     }
 
-    fn handle_skill_watcher_event(&mut self, event: SkillWatcherEvent) {
+    pub fn list_skill_inventory(&self, ctx: &AppContext) -> Vec<SkillInventoryItem> {
+        let _ = ctx;
+        let mut by_name: HashMap<String, Vec<SkillInventoryDuplicate>> = HashMap::new();
+
+        for skill in self.skills_by_path.values() {
+            by_name
+                .entry(skill.name.clone())
+                .or_default()
+                .push(SkillInventoryDuplicate {
+                    path: skill.path.clone(),
+                    name: skill.name.clone(),
+                    description: skill.description.clone(),
+                    content: skill.content.clone(),
+                    provider: skill.provider,
+                    scope: skill.scope,
+                });
+        }
+
+        let mut items = by_name
+            .into_iter()
+            .filter_map(|(name, mut duplicates)| {
+                duplicates.sort_by(|a, b| {
+                    provider_rank(a.provider)
+                        .cmp(&provider_rank(b.provider))
+                        .then_with(|| format!("{:?}", a.scope).cmp(&format!("{:?}", b.scope)))
+                        .then_with(|| a.path.cmp(&b.path))
+                });
+                let default_skill = duplicates.first()?.clone();
+                Some(SkillInventoryItem {
+                    name,
+                    default_skill,
+                    duplicates,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        items.sort_by(|a, b| a.name.cmp(&b.name));
+        items
+    }
+
+    fn handle_skill_watcher_event(
+        &mut self,
+        event: SkillWatcherEvent,
+        ctx: &mut ModelContext<Self>,
+    ) {
         match event {
             SkillWatcherEvent::SkillsAdded { skills } => {
-                self.handle_skills_added(skills);
+                self.handle_skills_added(skills, ctx);
             }
             SkillWatcherEvent::SkillsDeleted { paths } => {
-                self.handle_skills_deleted(paths);
+                self.handle_skills_deleted(paths, ctx);
             }
         }
     }
 
-    pub fn handle_skills_added(&mut self, skills: Vec<ParsedSkill>) {
+    pub fn handle_skills_added(&mut self, skills: Vec<ParsedSkill>, ctx: &mut ModelContext<Self>) {
+        if skills.is_empty() {
+            return;
+        }
+
         for skill in skills {
             if let Ok(parent_dir) = extract_skill_parent_directory(&skill.path) {
                 self.directory_skills
@@ -373,12 +449,20 @@ impl SkillManager {
                 );
             }
         }
+
+        ctx.emit(SkillManagerEvent::InventoryChanged);
     }
 
-    fn handle_skills_deleted(&mut self, paths: Vec<PathBuf>) {
+    fn handle_skills_deleted(&mut self, paths: Vec<PathBuf>, ctx: &mut ModelContext<Self>) {
+        if paths.is_empty() {
+            return;
+        }
+
         for path in paths {
             self.handle_path_deleted(&path);
         }
+
+        ctx.emit(SkillManagerEvent::InventoryChanged);
     }
 
     fn handle_path_deleted(&mut self, path: &Path) {
@@ -593,7 +677,7 @@ fn is_home_directory(path: &Path) -> bool {
 }
 
 impl Entity for SkillManager {
-    type Event = ();
+    type Event = SkillManagerEvent;
 }
 
 impl SingletonEntity for SkillManager {}

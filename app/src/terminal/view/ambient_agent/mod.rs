@@ -1,5 +1,5 @@
 mod block;
-mod first_time_setup;
+// OpenWarp Wave 7-2:`first_time_setup` 随 cloud ambient agent UI 物理删。
 mod footer;
 mod harness_selector;
 mod host_selector;
@@ -12,7 +12,6 @@ mod tips;
 mod view_impl;
 
 pub use block::*;
-pub use first_time_setup::{FirstTimeCloudAgentSetupView, FirstTimeCloudAgentSetupViewEvent};
 pub use footer::{render_error_footer, render_loading_footer};
 pub use harness_selector::{HarnessSelector, HarnessSelectorAction, HarnessSelectorEvent};
 pub use host_selector::{

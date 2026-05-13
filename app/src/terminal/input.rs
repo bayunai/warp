@@ -25,7 +25,6 @@ mod terminal_message_bar;
 mod universal;
 pub mod user_query;
 
-use crate::ai::active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId};
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent::{AIAgentExchangeId, CancellationReason};
 use crate::ai::blocklist::agent_view::shortcuts::AgentShortcutViewModel;
@@ -101,7 +100,7 @@ use crate::ai::attachment_utils::MAX_ATTACHMENT_SIZE_BYTES;
 use crate::ai::block_context::BlockContext;
 use crate::ai::blocklist::AttachmentType;
 use crate::ai::mcp::TemplatableMCPServerManager;
-use crate::server::server_api::ai::{AttachmentFileInfo, AttachmentInput};
+use crate::server::server_api::ai::AttachmentInput;
 use crate::{
     ai::{
         agent::{AIAgentContext, EntrypointType},
@@ -217,7 +216,7 @@ use crate::{
         WorkspaceAction,
     },
     workspaces::user_workspaces::UserWorkspaces,
-    AgentModeEntrypoint, ServerApiProvider,
+    AgentModeEntrypoint,
 };
 
 use ai::skills::SkillReference;
@@ -255,11 +254,8 @@ use warp_completer::{
     parsers::{simple::command_at_cursor_position, LiteCommand},
     signatures::CommandRegistry,
 };
+use warp_core::ui::theme::{color::internal_colors, AnsiColorIdentifier};
 use warp_core::user_preferences::GetUserPreferences as _;
-use warp_core::{
-    context_flag::ContextFlag,
-    ui::theme::{color::internal_colors, AnsiColorIdentifier},
-};
 use warp_editor::editor::NavigationKey;
 use warp_util::path::ShellFamily;
 use warpui::{
@@ -944,6 +940,8 @@ pub enum InputEmptyStateChangeReason {
 pub enum Event {
     AutosuggestionAccepted,
     ClearSelectedBlock,
+    PageUp,
+    PageDown,
     SelectRecentBlocks {
         /// Select the `count` most recent blocks.
         count: usize,
@@ -1071,6 +1069,8 @@ pub enum InputAction {
     CtrlR,
     CtrlD,
     Up,
+    PageUp,
+    PageDown,
     ClearScreen,
     SelectAndRefreshVoltron(VoltronItem),
     ShowAiCommandSearch,
@@ -1762,19 +1762,29 @@ pub fn init(app: &mut AppContext) {
     ]);
 
     app.register_editable_bindings([EditableBinding::new(
-        "input:insert_network_logging_workflow",
-        crate::t!("keybinding-desc-input-show-network-log"),
-        WorkspaceAction::OpenNetworkLogPane,
-    )
-    .with_enabled(|| ContextFlag::NetworkLogConsole.is_enabled())]);
-
-    app.register_editable_bindings([EditableBinding::new(
         "input:clear_screen",
         crate::t!("keybinding-desc-input-clear-screen"),
         InputAction::ClearScreen,
     )
     .with_context_predicate(id!("Input"))
     .with_key_binding("ctrl-l")]);
+
+    app.register_editable_bindings([
+        EditableBinding::new(
+            "terminal:scroll_up_one_page",
+            "Scroll terminal output up one page",
+            InputAction::PageUp,
+        )
+        .with_context_predicate(id!("Input") & !id!("IMEOpen"))
+        .with_key_binding("pageup"),
+        EditableBinding::new(
+            "terminal:scroll_down_one_page",
+            "Scroll terminal output down one page",
+            InputAction::PageDown,
+        )
+        .with_context_predicate(id!("Input") & !id!("IMEOpen"))
+        .with_key_binding("pagedown"),
+    ]);
 
     app.register_editable_bindings([EditableBinding::new(
         "workspace:edit_prompt",
@@ -2280,12 +2290,11 @@ impl Input {
                         position_offset_from_prompt: offset,
                     });
                 }
-                AgentInputFooterEvent::OpenEnvironmentManagementPane => {
-                    ctx.emit(Event::OpenEnvironmentManagementPane);
-                }
                 AgentInputFooterEvent::PluginInstalled(agent) => {
                     ctx.emit(Event::RegisterPluginListener(*agent));
                 }
+                // OpenWarp Wave 7-3:`AgentInputFooterEvent::OpenEnvironmentManagementPane` handler
+                // 随 Cloud Mode UI 子系统物理删。
                 #[cfg(not(target_family = "wasm"))]
                 AgentInputFooterEvent::OpenPluginInstructionsPane(agent, kind) => {
                     ctx.emit(Event::OpenPluginInstructionsPane(*agent, *kind));
@@ -2510,6 +2519,10 @@ impl Input {
                     include_ai_context_menu: false,
                     delegate_paste_handling: true,
                     keymap_context_modifier: Some(Box::new(move |context, app| {
+                        context
+                            .set
+                            .insert(flags::TERMINAL_INPUT_PAGE_KEYS_HANDLED_BY_INPUT);
+
                         // When ctrl-enter is bound to accepting prompt suggestions and there's
                         // a pending passive code diff, suggested prompt, or prompt suggestion
                         // banner, set a flag so the editor's ctrl-enter binding doesn't match
@@ -3628,10 +3641,7 @@ impl Input {
                 );
 
                 let conversation_id = conversation_navigation_data.id;
-                let active_ids =
-                    ActiveAgentViewsModel::as_ref(ctx).get_all_active_conversation_ids(ctx);
-                let is_active =
-                    active_ids.contains(&ConversationOrTaskId::ConversationId(conversation_id));
+                let is_active = false;
 
                 if self
                     .suggestions_mode_model
@@ -7677,8 +7687,12 @@ impl Input {
             }
         });
         send_telemetry_from_ctx!(event, ctx);
-        self.editor
-            .update(ctx, |input, ctx| input.move_page_up(ctx));
+        if self.suggestions_mode_model.as_ref(ctx).is_visible() {
+            self.editor
+                .update(ctx, |input, ctx| input.move_page_up(ctx));
+        } else {
+            ctx.emit(Event::PageUp);
+        }
     }
 
     /// Asks the currently active inline menu whether the buffer should be restored on dismiss
@@ -7992,8 +8006,12 @@ impl Input {
             }
         });
         send_telemetry_from_ctx!(event, ctx);
-        self.editor
-            .update(ctx, |input, ctx| input.move_page_down(ctx));
+        if self.suggestions_mode_model.as_ref(ctx).is_visible() {
+            self.editor
+                .update(ctx, |input, ctx| input.move_page_down(ctx));
+        } else {
+            ctx.emit(Event::PageDown);
+        }
     }
 
     fn maybe_generate_autosuggestion(&mut self, ctx: &mut ViewContext<Self>) {
@@ -12527,8 +12545,6 @@ impl Input {
                     .map(ServerConversationToken::from_uuid)
             });
 
-        let ambient_agent_task_id = self.ambient_agent_view_model.as_ref(ctx).task_id();
-
         // Collect attachments from ai_context_model
         let attachments: Vec<AgentAttachment> = self
             .ai_context_model
@@ -12563,185 +12579,21 @@ impl Input {
             .cloned()
             .collect();
 
-        let has_uploads = (!pending_images.is_empty() || !pending_files.is_empty())
-            && FeatureFlag::CloudModeImageContext.is_enabled();
-
-        if let Some(task_id) = ambient_agent_task_id.filter(|_| has_uploads) {
-            // Upload files first, then send prompt with file references in callback
-            Self::upload_files_then_send_prompt(
-                task_id,
-                server_conversation_token,
-                prompt,
-                attachments,
-                &pending_images,
-                &pending_files,
-                ctx,
+        if !pending_images.is_empty() || !pending_files.is_empty() {
+            log::warn!(
+                "Ignoring {} shared-session image attachment(s) and {} file attachment(s) because cloud attachment uploads are disabled in OpenWarp",
+                pending_images.len(),
+                pending_files.len()
             );
-        } else {
-            // No files to upload, send prompt immediately
-            if !pending_images.is_empty() || !pending_files.is_empty() {
-                log::warn!("Cannot upload files: no task_id available");
-            }
-            ctx.emit(Event::SendAgentPrompt {
-                server_conversation_token,
-                prompt,
-                attachments,
-            });
         }
+
+        ctx.emit(Event::SendAgentPrompt {
+            server_conversation_token,
+            prompt,
+            attachments,
+        });
 
         true
-    }
-
-    /// Uploads image and file attachments to GCS via presigned URLs, then emits `SendAgentPrompt`
-    /// with the resulting `FileReference` attachments appended.
-    fn upload_files_then_send_prompt(
-        task_id: crate::ai::ambient_agents::AmbientAgentTaskId,
-        server_conversation_token: Option<
-            session_sharing_protocol::common::ServerConversationToken,
-        >,
-        prompt: String,
-        base_attachments: Vec<AgentAttachment>,
-        pending_images: &[crate::ai::agent::ImageContext],
-        pending_files: &[crate::ai::blocklist::PendingFile],
-        ctx: &mut ViewContext<Self>,
-    ) {
-        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-        let server_api = ServerApiProvider::as_ref(ctx).get();
-
-        // Decode all images upfront; drop any that fail so that file_infos
-        // and files_to_upload stay in sync (they're zipped later).
-        let mut files_to_upload: Vec<(String, String, Vec<u8>)> = pending_images
-            .iter()
-            .filter_map(|img| {
-                base64::engine::general_purpose::STANDARD
-                    .decode(&img.data)
-                    .map(|bytes| (img.file_name.clone(), img.mime_type.clone(), bytes))
-                    .map_err(|e| {
-                        log::error!("Failed to decode base64 image {}: {e}", img.file_name)
-                    })
-                    .ok()
-            })
-            .collect();
-
-        // Also read non-image files from disk and add them to the upload list.
-        for file in pending_files {
-            match std::fs::read(&file.file_path) {
-                Ok(bytes) => {
-                    if bytes.len() > MAX_ATTACHMENT_SIZE_BYTES {
-                        log::warn!(
-                            "Skipping file {} ({} bytes) — exceeds 10MB limit",
-                            file.file_name,
-                            bytes.len()
-                        );
-                        continue;
-                    }
-                    files_to_upload.push((file.file_name.clone(), file.mime_type.clone(), bytes));
-                }
-                Err(e) => {
-                    log::error!("Failed to read file {}: {e}", file.file_path.display());
-                }
-            }
-        }
-
-        let file_infos: Vec<AttachmentFileInfo> = files_to_upload
-            .iter()
-            .map(|(name, mime, _)| AttachmentFileInfo {
-                filename: name.clone(),
-                mime_type: mime.clone(),
-            })
-            .collect();
-
-        ctx.spawn(
-            async move {
-                let response = match ai_client
-                    .prepare_attachments_for_upload(&task_id, &file_infos)
-                    .await
-                {
-                    Ok(resp) => resp,
-                    Err(e) => {
-                        log::error!(
-                            "Failed to prepare attachment uploads for task {task_id}: {e:?}"
-                        );
-                        return None;
-                    }
-                };
-
-                let mut uploaded = Vec::new();
-                for ((file_name, mime_type, file_bytes), upload_info) in
-                    files_to_upload.iter().zip(response.attachments.iter())
-                {
-                    let result = server_api
-                        .http_client()
-                        .put(&upload_info.upload_url)
-                        .header("Content-Type", mime_type.as_str())
-                        .body(file_bytes.clone())
-                        .send()
-                        .await;
-
-                    match result {
-                        Ok(resp) if resp.status().is_success() => {
-                            uploaded.push(AgentAttachment::FileReference {
-                                attachment_id: upload_info.attachment_id.clone(),
-                                file_name: file_name.clone(),
-                            });
-                        }
-                        Ok(resp) => {
-                            log::error!(
-                                "Failed to upload attachment {}: HTTP {}",
-                                file_name,
-                                resp.status()
-                            );
-                        }
-                        Err(e) => {
-                            log::error!("Failed to upload attachment {file_name}: {e:?}");
-                        }
-                    }
-                }
-
-                if uploaded.len() < files_to_upload.len() {
-                    log::warn!(
-                        "Only {}/{} attachments uploaded successfully",
-                        uploaded.len(),
-                        files_to_upload.len()
-                    );
-                }
-
-                Some(uploaded)
-            },
-            move |input, maybe_uploaded, ctx| {
-                let Some(uploaded_files) = maybe_uploaded else {
-                    // Prepare request failed (e.g. attachment limit exceeded).
-                    // Keep pending attachments so the user can retry, unfreeze input,
-                    // and show an error toast.
-                    input.unfreeze_and_clear_agent_input(ctx);
-                    let window_id = ctx.window_id();
-                    ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                        toast_stack.add_ephemeral_toast(
-                            DismissibleToast::error(
-                                "Too many attachments for this conversation.".to_string(),
-                            ),
-                            window_id,
-                            ctx,
-                        );
-                    });
-                    return;
-                };
-
-                // Upload succeeded — clear pending attachments now.
-                input.ai_context_model.update(ctx, |context_model, ctx| {
-                    context_model.clear_pending_attachments(ctx);
-                });
-
-                let mut all_attachments = base_attachments;
-                all_attachments.extend(uploaded_files);
-
-                ctx.emit(Event::SendAgentPrompt {
-                    server_conversation_token,
-                    prompt,
-                    attachments: all_attachments,
-                });
-            },
-        );
     }
 
     /// Returns true if toggling the input mode is disabled.
@@ -13884,6 +13736,8 @@ impl TypedActionView for Input {
         match action {
             InputAction::FocusInputBox => self.focus_input_box(ctx),
             InputAction::Up => self.editor_up(ctx),
+            InputAction::PageUp => self.editor_page_up(ctx),
+            InputAction::PageDown => self.editor_page_down(ctx),
             InputAction::CtrlD => self.ctrl_d(ctx),
             InputAction::CtrlR => self.ctrl_r(ctx),
             InputAction::ClearScreen => self.clear_screen(ctx),

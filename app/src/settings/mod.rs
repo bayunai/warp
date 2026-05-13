@@ -6,7 +6,6 @@ pub mod app_installation_detection;
 mod autoupdate;
 mod block_visibility;
 pub mod cloud_preferences;
-pub mod cloud_preferences_syncer;
 mod code;
 mod debug;
 mod editor;

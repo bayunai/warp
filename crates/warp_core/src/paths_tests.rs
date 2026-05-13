@@ -97,6 +97,13 @@ fn test_state_dir_path() {
 }
 
 #[test]
+fn test_oss_secure_state_dir_is_disabled() {
+    // ChannelState 默认是 Channel::Oss。OpenWarp 不应该探测 Warp 官方 App Group,
+    // 否则 macOS 会把它识别成访问其他 App 数据并在每次启动时弹权限窗。
+    assert_eq!(secure_state_dir(), None);
+}
+
+#[test]
 fn test_project_path_for_warp_app_id() {
     let project_dirs = project_dirs_for_app_id(AppId::new("dev", "warp", "Warp"), None)
         .expect("should be able to compute project dirs");

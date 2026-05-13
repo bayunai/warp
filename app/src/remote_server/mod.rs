@@ -1,9 +1,3 @@
-#[cfg(not(target_family = "wasm"))]
-use crate::server::server_api::{ServerApiEvent, ServerApiProvider};
-#[cfg(not(target_family = "wasm"))]
-use remote_server::manager::RemoteServerManager;
-#[cfg(not(target_family = "wasm"))]
-use warpui::SingletonEntity;
 // Re-export everything from the `remote_server` crate so existing
 // `crate::remote_server::*` imports in `app` continue to work.
 pub use remote_server::*;
@@ -88,16 +82,7 @@ pub(super) fn run_daemon_app(
     Ok(())
 }
 
-/// Forwards app auth-token rotation events to the remote-server manager.
-#[cfg(not(target_family = "wasm"))]
-pub fn wire_auth_token_rotation(ctx: &mut warpui::AppContext) {
-    let server_api = ServerApiProvider::handle(ctx);
-    let manager = RemoteServerManager::handle(ctx);
-    ctx.subscribe_to_model(&server_api, move |_, event, ctx| {
-        if let ServerApiEvent::AccessTokenRefreshed { token } = event {
-            manager.update(ctx, |manager, _| {
-                manager.rotate_auth_token(token.clone());
-            });
-        }
-    });
-}
+// OpenWarp Wave 6-1:`wire_auth_token_rotation` 函数物理删 — 原订阅
+// `ServerApiEvent::AccessTokenRefreshed` 事件并转发到 `RemoteServerManager::rotate_auth_token`。
+// Wave 3-1 删 auth 子系统后该事件 0 emit 点,Wave 6-1 同步删 variant + 本订阅函数
+// + `lib.rs` 中的调用点。`RemoteServerManager::rotate_auth_token` 函数本体暂保留。

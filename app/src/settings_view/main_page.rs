@@ -1,4 +1,4 @@
-use super::{
+﻿use super::{
     flags,
     settings_page::{
         render_body_item, render_customer_type_badge, AdditionalInfo, LocalOnlyIconState,
@@ -13,13 +13,13 @@ use crate::send_telemetry_from_ctx;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{
     appearance::Appearance,
-    auth::{auth_state::AuthState, auth_view_modal::AuthViewVariant},
+    auth::{AuthState, AuthViewVariant},
     report_if_error,
     settings::cloud_preferences::CloudPreferencesSettings,
     TelemetryEvent,
 };
-use crate::{auth::auth_manager::AuthManager, server::ids::ServerId};
-use crate::{auth::auth_manager::LoginGatedFeature, workspaces::workspace::CustomerType};
+use crate::{auth::AuthManager, server::ids::ServerId};
+use crate::{auth::LoginGatedFeature, workspaces::workspace::CustomerType};
 use crate::{workspace::WorkspaceAction, workspaces::update_manager::TeamUpdateManager};
 use ::settings::{Setting, ToggleableSetting};
 use lazy_static::lazy_static;

@@ -3,9 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
-use crate::ai::active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId};
 use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::agent_management::telemetry::{AgentManagementTelemetryEvent, OpenedFrom};
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
 use crate::appearance::Appearance;
 use crate::editor::{
@@ -22,10 +20,9 @@ use crate::workspace::view::conversation_list::item::{
     render_item, render_static_item, ItemProps, ItemState, OverflowMenuDisplay, StaticItemProps,
     STATIC_ITEM_MIN_HEIGHT,
 };
+use crate::workspace::view::conversation_list::view_model::ConversationOrTaskId;
 use crate::workspace::ToastStack;
 use crate::workspace::WorkspaceAction;
-use warp_core::features::FeatureFlag;
-use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::Icon;
 
 use super::view_model::{ConversationEntry, ConversationListViewModel};
@@ -192,11 +189,6 @@ impl ConversationListView {
             me.sync_list_items(ctx);
         });
 
-        let active_agent_views_model = ActiveAgentViewsModel::handle(ctx);
-        ctx.subscribe_to_model(&active_agent_views_model, |me, _, _, ctx| {
-            me.sync_list_items(ctx);
-        });
-
         // Editor for the search query.
         let query_editor = ctx.add_typed_action_view(|ctx| {
             let appearance = Appearance::as_ref(ctx);
@@ -271,52 +263,15 @@ impl ConversationListView {
 
     /// Rebuilds the flat list of items based on sections and collapse state.
     fn rebuild_list_items(&mut self, ctx: &mut ViewContext<Self>) {
-        let active_views_model = ActiveAgentViewsModel::as_ref(ctx);
-        let active_ids = if FeatureFlag::ActiveConversationRequiresInteraction.is_enabled() {
-            active_views_model.get_all_active_conversation_ids(ctx)
-        } else {
-            active_views_model.get_all_open_conversation_ids(ctx)
-        };
-
-        let focused_new_conversation =
-            active_views_model.maybe_get_focused_new_conversation(ctx.window_id(), ctx);
         let model = self.view_model.as_ref(ctx);
 
-        // Sort entries into active and past lists.
-        let mut active_items = Vec::new();
-        let mut past_items = Vec::new();
-        for entry in model.filtered_items() {
-            let list_item = ListItem::Conversation(entry.clone());
-            if active_ids.contains(&entry.id) {
-                active_items.push(list_item);
-            } else {
-                past_items.push(list_item);
-            }
-        }
-
-        // If the focused conversation is a new/empty conversation that's not already in the list,
-        // add it as a regular conversation entry so it participates in the sort.
-        if let Some(new_conv_id) = focused_new_conversation {
-            let conv_id = ConversationOrTaskId::ConversationId(new_conv_id);
-            let already_in_list = active_items
-                .iter()
-                .any(|item| matches!(item, ListItem::Conversation(entry) if entry.id == conv_id));
-            if !already_in_list {
-                active_items.push(ListItem::Conversation(ConversationEntry {
-                    id: conv_id,
-                    highlight_indices: vec![],
-                }));
-            }
-        }
-
-        // Sort active items by last opened time (most recently opened first).
-        active_items.sort_by(|a, b| {
-            let get_time = |item: &ListItem| match item {
-                ListItem::Conversation(entry) => active_views_model.get_last_opened_time(&entry.id),
-                _ => None,
-            };
-            get_time(b).cmp(&get_time(a))
-        });
+        // Without active-views tracking, treat all entries as past.
+        let active_items: Vec<ListItem> = Vec::new();
+        let past_items: Vec<ListItem> = model
+            .filtered_items()
+            .iter()
+            .map(|entry| ListItem::Conversation(entry.clone()))
+            .collect();
 
         let mut items = Vec::new();
         let has_content = !active_items.is_empty() || !past_items.is_empty();
@@ -384,11 +339,8 @@ impl ConversationListView {
         // Focus the search bar when the panel is opened.
         ctx.focus(&self.query_editor);
 
-        // Select the focused conversation if there is one.
-        let focused_conversation =
-            ActiveAgentViewsModel::as_ref(ctx).get_focused_conversation(ctx.window_id());
-        self.selected_index =
-            focused_conversation.and_then(|id| self.get_index_of_conversation_id(id));
+        // No focused conversation tracking after BYOP cloud removal.
+        self.selected_index = None;
 
         if let Some(index) = self.selected_index {
             self.state_handles.list_state.scroll_to(index);
@@ -513,28 +465,7 @@ impl ConversationListView {
     }
 
     /// Send telemetry for opening a conversation or task
-    fn send_open_telemetry(id: &ConversationOrTaskId, ctx: &mut ViewContext<Self>) {
-        match id {
-            ConversationOrTaskId::ConversationId(conversation_id) => {
-                send_telemetry_from_ctx!(
-                    AgentManagementTelemetryEvent::ConversationOpened {
-                        conversation_id: conversation_id.to_string(),
-                        opened_from: OpenedFrom::ConversationList,
-                    },
-                    ctx
-                );
-            }
-            ConversationOrTaskId::TaskId(task_id) => {
-                send_telemetry_from_ctx!(
-                    AgentManagementTelemetryEvent::CloudRunOpened {
-                        task_id: task_id.to_string(),
-                        opened_from: OpenedFrom::ConversationList,
-                    },
-                    ctx
-                );
-            }
-        }
-    }
+    fn send_open_telemetry(_id: &ConversationOrTaskId, _ctx: &mut ViewContext<Self>) {}
 
     /// Activate the currently selected item by dispatching the appropriate WorkspaceAction
     /// (i.e. opening the selected conversation or starting a new conversation).
@@ -557,7 +488,7 @@ impl ConversationListView {
                 };
 
                 // Use shared logic from ConversationOrTask to determine click action
-                if let Some(action) = item.get_open_action(None, ctx) {
+                if let Some(action) = item.get_open_action(None) {
                     Self::send_open_telemetry(&entry.id, ctx);
                     ctx.dispatch_typed_action(&action);
                 }
@@ -1000,7 +931,7 @@ impl TypedActionView for ConversationListView {
                 let Some(item) = model.get_item_by_id(id, ctx) else {
                     return;
                 };
-                let Some(action) = item.get_open_action(None, ctx) else {
+                let Some(action) = item.get_open_action(None) else {
                     return;
                 };
 
@@ -1128,8 +1059,7 @@ impl View for ConversationListView {
             let list_items = self.list_items.clone();
             let overflow_menu = self.item_overflow_menu.clone();
             let overflow_menu_state = self.overflow_menu_state;
-            let focused_conversation =
-                ActiveAgentViewsModel::as_ref(app).get_focused_conversation(self.window_id);
+            let focused_conversation: Option<ConversationOrTaskId> = None;
             let list_position_id = self.get_position_id();
             let tooltip_opens_right = TabSettings::as_ref(app)
                 .header_toolbar_chip_selection

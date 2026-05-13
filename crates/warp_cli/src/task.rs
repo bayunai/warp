@@ -10,19 +10,9 @@ pub enum TaskCommand {
     List(ListTasksArgs),
     /// Get status of a specific ambient agent task.
     Get(TaskGetArgs),
-    /// Retrieve the conversation for a specific run or conversation.
-    #[command(subcommand)]
-    Conversation(ConversationCommand),
     /// Messages sent to and from runs.
     #[command(subcommand)]
     Message(MessageCommand),
-}
-
-/// Conversation-related subcommands.
-#[derive(Debug, Clone, Subcommand)]
-pub enum ConversationCommand {
-    /// Get a conversation by conversation ID.
-    Get(ConversationGetArgs),
 }
 
 /// Message-related subcommands.
@@ -39,12 +29,6 @@ pub enum MessageCommand {
     /// Mark a message as delivered.
     #[command(alias = "delivered")]
     MarkDelivered(MessageDeliveredArgs),
-}
-
-#[derive(Debug, Clone, Args)]
-pub struct ConversationGetArgs {
-    /// The conversation ID to retrieve.
-    pub conversation_id: String,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -302,10 +286,6 @@ pub enum RunSortOrderArg {
 pub struct TaskGetArgs {
     /// The task ID to get status for.
     pub task_id: String,
-
-    /// Retrieve the conversation for this run instead of the run status.
-    #[arg(long = "conversation")]
-    pub conversation: bool,
 
     /// JSON formatting configuration.
     #[command(flatten)]

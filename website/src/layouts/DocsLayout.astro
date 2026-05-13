@@ -4,6 +4,7 @@ import I18nScript from '../components/I18nScript.astro';
 import Banner from '../components/Banner.astro';
 import DocsNav from '../components/DocsNav.astro';
 import DocsSidebar from '../components/DocsSidebar.astro';
+import Analytics from '../components/Analytics.astro';
 
 interface Heading {
   depth: number;
@@ -27,7 +28,7 @@ interface Props {
 const { title, title_zh, lede, lede_zh, section, section_zh, activeSlug, headings, prev, next } = Astro.props;
 const tocItems = headings.filter((h) => h.depth === 2);
 const repo = 'https://github.com/zerx-lab/warp';
-const editUrl = `${repo}/blob/main/official-website/src/content/docs/${activeSlug}.mdx`;
+const editUrl = `${repo}/blob/main/website/src/content/docs/${activeSlug}.mdx`;
 ---
 <!doctype html>
 <html lang="en">
@@ -40,12 +41,14 @@ const editUrl = `${repo}/blob/main/official-website/src/content/docs/${activeSlu
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+    <Analytics />
   </head>
   <body data-locale="en">
     <I18nScript />
     <Banner
       en="Early development · Docs are evolving alongside the source · Community fork of Warp"
-      zh="早期开发 · 文档随源码持续演进 · Warp 的社区 fork"
+      zh="早期开发阶段 · 文档随源码持续更新 · Warp 的社区分支"
     />
     <DocsNav />
 
@@ -115,17 +118,30 @@ const editUrl = `${repo}/blob/main/official-website/src/content/docs/${activeSlu
       </aside>
     </div>
 
+    <div class="search-modal" id="docs-search-modal" hidden>
+      <div class="search-modal-backdrop" data-search-close></div>
+      <div class="search-modal-panel">
+        <div id="docs-search-ui"></div>
+      </div>
+    </div>
+
+    <script src="/pagefind/pagefind-ui.js" is:inline></script>
     <script>
       (function () {
-        function setLocale(l: string) {
+        function applyLocale(l: string) {
           document.body.dataset.locale = l;
           document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
-          localStorage.setItem('openwarp:locale', l);
           document.querySelectorAll('.lang button').forEach((b) => {
             b.classList.toggle('active', (b as HTMLElement).getAttribute('data-set-lang') === l);
           });
         }
-        setLocale((document.body.dataset.locale as string) || 'en');
+        function setLocale(l: string) {
+          // Only persist when the user explicitly chose a language; auto-detection
+          // should keep following the OS / browser on subsequent visits.
+          localStorage.setItem('openwarp:locale', l);
+          applyLocale(l);
+        }
+        applyLocale((document.body.dataset.locale as string) || 'en');
         document.querySelectorAll<HTMLButtonElement>('.lang button').forEach((b) => {
           b.addEventListener('click', () => setLocale(b.getAttribute('data-set-lang') || 'en'));
         });
@@ -195,6 +211,47 @@ const editUrl = `${repo}/blob/main/official-website/src/content/docs/${activeSlu
               setTimeout(() => { span.textContent = prev; }, 1400);
             }
           } catch (_) {}
+        });
+
+        // Pagefind search modal
+        const searchModal = document.getElementById('docs-search-modal');
+        const searchTrigger = document.getElementById('docs-search-trigger');
+        const searchUi = document.getElementById('docs-search-ui');
+        let searchInited = false;
+        function openSearch() {
+          if (!searchModal) return;
+          searchModal.hidden = false;
+          if (!searchInited && searchUi) {
+            if ((window as any).PagefindUI) {
+              new (window as any).PagefindUI({
+                element: '#docs-search-ui',
+                showSubResults: true,
+                showImages: false,
+                resetStyles: false,
+                translations: document.body.dataset.locale === 'zh'
+                  ? { placeholder: '搜索文档…', clear_search: '清除', load_more: '加载更多', search_label: '搜索文档', filters_label: '筛选', zero_results: '未找到 [SEARCH_TERM] 的结果', many_results: '共 [COUNT] 条结果', one_result: '共 [COUNT] 条结果', alt_search: '未找到 [SEARCH_TERM] — 显示 [DIFFERENT_TERM] 的结果', search_suggestion: '未找到 [SEARCH_TERM] — 试试以下:', searching: '搜索 [SEARCH_TERM]…' }
+                  : undefined,
+              });
+            } else {
+              const zh = document.body.dataset.locale === 'zh';
+              searchUi.innerHTML = `<div class="search-fallback">
+                <div class="t">${zh ? '搜索仅在生产构建中可用' : 'Search is only available in production builds'}</div>
+                <div class="d">${zh ? '运行 <code>bun run build</code> 后,Pagefind 索引会生成在 <code>dist/pagefind/</code>。开发模式 (<code>bun run dev</code>) 不打包索引。' : 'Run <code>bun run build</code> to generate the Pagefind index under <code>dist/pagefind/</code>. Dev mode (<code>bun run dev</code>) does not produce the index.'}</div>
+              </div>`;
+            }
+            searchInited = true;
+          }
+          setTimeout(() => {
+            const input = searchUi?.querySelector<HTMLInputElement>('input');
+            input?.focus();
+          }, 50);
+        }
+        function closeSearch() { if (searchModal) searchModal.hidden = true; }
+        searchTrigger?.addEventListener('click', openSearch);
+        searchModal?.querySelectorAll('[data-search-close]').forEach((el) => el.addEventListener('click', closeSearch));
+        document.addEventListener('keydown', (e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openSearch(); }
+          else if (e.key === 'Escape' && searchModal && !searchModal.hidden) { closeSearch(); }
         });
 
         // TOC active on scroll

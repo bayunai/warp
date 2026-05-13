@@ -7,19 +7,15 @@ use crate::{
     },
     appearance::Appearance,
     auth::{
-        auth_manager::{AuthManager, LoginGatedFeature},
-        auth_state::AuthState,
-        auth_view_modal::AuthViewVariant,
-        AuthStateProvider,
+        AuthState, AuthStateProvider, AuthViewVariant, {AuthManager, LoginGatedFeature},
     },
     cloud_object::{
         model::{
             persistence::{CloudModel, CloudModelEvent},
             view::{CloudViewModel, CloudViewModelEvent, UpdateTimestamp},
         },
-        CloudObject, CloudObjectEventEntrypoint, CloudObjectLocation, CloudObjectSyncStatus,
-        GenericCloudObject, GenericStringObjectFormat, JsonObjectType, NumInFlightRequests,
-        ObjectType, Space,
+        CloudObject, CloudObjectLocation, GenericCloudObject, GenericStringObjectFormat,
+        JsonObjectType, ObjectType, Space,
     },
     editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions},
     env_vars::CloudEnvVarCollection,
@@ -31,7 +27,6 @@ use crate::{
     server::{
         cloud_objects::update_manager::{FetchSingleObjectOption, UpdateManager},
         ids::{ClientId, ObjectUid, ServerId, SyncId},
-        sync_queue::SyncQueue,
         telemetry::TelemetryEvent,
     },
     settings::app_installation_detection::{UserAppInstallDetectionSettings, UserAppInstallStatus},
@@ -71,7 +66,6 @@ use super::{
     CloudObjectTypeAndId, DriveObjectType, DriveSortOrder,
 };
 use crate::drive::panel::DrivePanelAction;
-use crate::server::cloud_objects::update_manager::InitiatedBy;
 use futures::Future;
 use itertools::Itertools;
 use pathfinder_color::ColorU;
@@ -239,9 +233,6 @@ pub enum DriveIndexAction {
     MoveObject {
         cloud_object_type_and_id: CloudObjectTypeAndId,
         new_space: Space,
-    },
-    LeaveSharedObject {
-        cloud_object_type_and_id: CloudObjectTypeAndId,
     },
     OpenCloudObjectNamingDialog {
         space: Space,
@@ -886,7 +877,9 @@ impl DriveIndex {
 
         let sorting_choice = *WarpDriveSettings::as_ref(ctx).sorting_choice.value();
 
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete =
+            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+                .initial_load_complete();
         ctx.spawn(initial_load_complete, |me, _, ctx| {
             me.initialize_section_states(ctx);
             me.has_initialized_sections.set();
@@ -2636,7 +2629,7 @@ impl DriveIndex {
             share_dialog_open,
             is_selected,
             is_focused,
-            SyncQueue::as_ref(app).is_dequeueing(),
+            false, /* OpenWarp(Wave 4):SyncQueue 整删,is_dequeueing 永远 false */
             tools_panel_menu_direction(app),
             appearance,
         )?;
@@ -3211,24 +3204,6 @@ impl DriveIndex {
         ctx.notify();
     }
 
-    fn leave_object(
-        &mut self,
-        cloud_object_type_and_id: &CloudObjectTypeAndId,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        let Some(server_id) = cloud_object_type_and_id.server_id() else {
-            return;
-        };
-
-        UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
-            update_manager.leave_object(server_id, ctx);
-        });
-
-        // Reflect the removed objects.
-        self.initialize_section_states(ctx);
-        ctx.notify();
-    }
-
     /// If the given space is tied to a section in warp drive, ensures that that section is open.
     fn open_section_of_space(&mut self, space: Space) {
         if let Some(target_section) = self
@@ -3746,30 +3721,9 @@ impl DriveIndex {
     }
 
     fn retry_all_failed(&mut self, ctx: &mut ViewContext<Self>) {
-        CloudModel::handle(ctx).update(ctx, |cloud_model, ctx| {
-            for object in cloud_model.cloud_objects_mut() {
-                if object.metadata().is_errored() {
-                    let Some(queue_item) = object
-                        .create_object_queue_item(
-                            CloudObjectEventEntrypoint::default(),
-                            // When adding the initiated_by parameter to this function call, InitiatedBy::User was set as a default value.
-                            // It can be changed to InitiatedBy::System if this action was automatically kicked off and does not require toasts to notify the user of completion.
-                            InitiatedBy::User,
-                        )
-                        .or_else(|| object.update_object_queue_item(None))
-                    else {
-                        continue;
-                    };
-                    object.set_pending_content_changes_status(CloudObjectSyncStatus::InFlight(
-                        NumInFlightRequests(1),
-                    ));
-                    SyncQueue::handle(ctx).update(ctx, |sync_queue, ctx| {
-                        sync_queue.enqueue(queue_item, ctx);
-                    });
-                    self.num_errored_objects -= 1;
-                }
-            }
-        });
+        // OpenWarp(Wave 4):SyncQueue 整删后,“重试”原语义(重新上报服务端)
+        // 不再适用;本地化后对象不会进入 errored 态,这个路径是 dead code。
+        let _ = ctx;
     }
 
     fn revert_failed_object(&mut self, server_id: &ServerId, ctx: &mut ViewContext<Self>) {
@@ -4379,16 +4333,8 @@ impl DriveIndex {
                 );
 
                 if let Some(object) = object {
-                    if FeatureFlag::SharedWithMe.is_enabled() && object.can_leave(app) {
-                        menu_items.push(
-                            MenuItemFields::new(crate::t!("drive-remove"))
-                                .with_on_select_action(DriveIndexAction::LeaveSharedObject {
-                                    cloud_object_type_and_id: *cloud_object_type_and_id,
-                                })
-                                .with_icon(Icon::Minus)
-                                .into_item(),
-                        )
-                    }
+                    // OpenWarp(Wave 6-7):“Leave shared object” 菜单随 `leave_object` pub fn 退役。
+                    let _ = object;
                 }
             }
         } else {
@@ -4628,14 +4574,7 @@ impl DriveIndex {
                 }
 
                 if FeatureFlag::SharedWithMe.is_enabled() && object.can_leave(app) {
-                    menu_items.push(
-                        MenuItemFields::new(crate::t!("drive-remove"))
-                            .with_on_select_action(DriveIndexAction::LeaveSharedObject {
-                                cloud_object_type_and_id: *cloud_object_type_and_id,
-                            })
-                            .with_icon(Icon::Minus)
-                            .into_item(),
-                    )
+                    // OpenWarp(Wave 6-7):“Leave shared object” 菜单随 `leave_object` pub fn 退役。
                 }
             }
         }
@@ -5261,11 +5200,6 @@ impl TypedActionView for DriveIndex {
                 }
 
                 ctx.notify();
-            }
-            DriveIndexAction::LeaveSharedObject {
-                cloud_object_type_and_id,
-            } => {
-                self.leave_object(cloud_object_type_and_id, ctx);
             }
             DriveIndexAction::CloseCloudObjectNamingDialog => {
                 self.cloud_object_naming_dialog.close(ctx);

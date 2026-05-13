@@ -27,8 +27,10 @@ on:
 
 # 创建 release + 上传 asset 需要写权限。默认 GITHUB_TOKEN 在 fork/受限仓库下是只读,
 # 这里显式声明 contents: write 兜底 403 "Resource not accessible by integration"。
+# actions: write 用于 publish_release 末尾删除本次 run 的 workflow artifact(释放 Actions storage)。
 permissions:
   contents: write
+  actions: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -115,10 +117,20 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
 
-      - name: Build ${{ matrix.arch }} bundle (unsigned)
+      # 用 --selfsign 走 ad-hoc 签名(无 Apple Developer cert 时 fallback 到 `-`):
+      # 1. 让 .app 拥有 cdhash → UNUserNotificationCenter 才肯把 OpenWarp 注册到
+      #    System Settings → Notifications(否则桌面通知静默失效,见 issue #40)。
+      # 2. ad-hoc + Hardened Runtime + Debug-Entitlements.plist(disable-library-validation
+      #    + get-task-allow)是合法组合,可在 macos-26 runner 上无凭证完成。
+      # 3. notarize 整段被 `script/macos/bundle` 的 CODESIGN=false 分支跳过;DMG 从
+      #    BUNDLE_DIR 直接 create-dmg,不进 codesign / staple 步骤。
+      # 4. 用户首次打开仍会触发 Gatekeeper 的「未识别开发者」对话框(无 Developer ID
+      #    notarize 的固有限制);issue #51 提供的 `xattr -rd com.apple.quarantine`
+      #    自助方案继续有效。
+      - name: Build ${{ matrix.arch }} bundle (ad-hoc signed)
         id: bundle_app
         run: |
-          script/bundle --channel "$CHANNEL" --arch ${{ matrix.arch }} --dmg-name-suffix "${{ matrix.dmg_name_suffix }}"
+          script/bundle --channel "$CHANNEL" --arch ${{ matrix.arch }} --dmg-name-suffix "${{ matrix.dmg_name_suffix }}" --selfsign
         shell: bash
         env:
           GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
@@ -256,3 +268,20 @@ jobs:
           make_latest: "true"
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 发布成功后立刻删本次 run 的 workflow artifact,释放 Actions storage 配额。
+      # 安装包已经挂到 GitHub Release(独立存储,不占 Actions storage),
+      # workflow artifact 只是 build job → publish job 的中间传递管道,留着没用。
+      # 仅在 Release 创建成功后执行(if: success()),失败保留 artifact 方便复盘。
+      - name: Delete workflow artifacts to free Actions storage
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ids=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" --jq '.artifacts[].id')
+          for id in $ids; do
+            echo "Deleting artifact $id"
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id"
+          done
+        shell: bash

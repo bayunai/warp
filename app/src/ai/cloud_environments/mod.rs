@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use warp_server_client::cloud_object::Owner;
 
 use crate::{
-    auth::AuthStateProvider,
     cloud_object::{
         model::{
             generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
@@ -11,10 +9,9 @@ use crate::{
             persistence::CloudModel,
         },
         GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, Revision, ServerCloudObject,
+        JsonObjectType, ServerCloudObject,
     },
-    server::{ids::SyncId, sync_queue::QueueItem},
-    workspaces::user_workspaces::UserWorkspaces,
+    server::ids::SyncId,
 };
 use warpui::{AppContext, SingletonEntity as _};
 
@@ -165,18 +162,6 @@ impl StringModel for AmbientAgentEnvironment {
         self.name.clone()
     }
 
-    fn update_object_queue_item(
-        &self,
-        revision_ts: Option<Revision>,
-        object: &CloudAmbientAgentEnvironment,
-    ) -> Option<QueueItem> {
-        Some(QueueItem::UpdateCloudEnvironment {
-            model: object.model().clone().into(),
-            id: object.id,
-            revision: revision_ts.or_else(|| object.metadata.revision.clone()),
-        })
-    }
-
     fn uniqueness_key(&self) -> Option<GenericStringObjectUniqueKey> {
         None
     }
@@ -203,30 +188,3 @@ impl JsonModel for AmbientAgentEnvironment {
         JsonObjectType::CloudEnvironment
     }
 }
-
-/// Resolves the current owner for creating new environments.
-///
-/// If the user is on a team, returns `Owner::Team`. Otherwise, returns
-/// `Owner::User` with the current user's ID. Returns `None` if the user
-/// is not logged in.
-pub fn owner_for_new_environment(ctx: &AppContext) -> Option<Owner> {
-    if let Some(team_uid) = UserWorkspaces::as_ref(ctx).current_team_uid() {
-        Some(Owner::Team { team_uid })
-    } else {
-        let user_id = AuthStateProvider::as_ref(ctx).get().user_id()?;
-        Some(Owner::User { user_uid: user_id })
-    }
-}
-
-/// Resolves the current owner for creating new personal environments.
-///
-/// Returns `Owner::User` with the current user's ID. Returns `None` if the user
-/// is not logged in.
-pub fn owner_for_new_personal_environment(ctx: &AppContext) -> Option<Owner> {
-    let user_id = AuthStateProvider::as_ref(ctx).get().user_id()?;
-    Some(Owner::User { user_uid: user_id })
-}
-
-#[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;

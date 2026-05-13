@@ -4,7 +4,6 @@ use warpui::{rendering::GPUPowerPreference, AppContext, SingletonEntity};
 use warpui_extras::user_preferences;
 
 use crate::{
-    ai::cloud_agent_settings::CloudAgentSettings,
     appearance,
     banner::BannerState,
     drive::settings::WarpDriveSettings,
@@ -73,7 +72,7 @@ pub fn register_all_settings(ctx: &mut AppContext) {
     GPUSettings::register(ctx);
     GeneralSettings::register(ctx);
     AISettings::register_and_subscribe_to_events(ctx);
-    CloudAgentSettings::register(ctx);
+    // OpenWarp Wave 7-3:`CloudAgentSettings` 随 Cloud Mode UI 子系统物理删。
     ScrollSettings::register(ctx);
     SelectionSettings::register(ctx);
     InputModeSettings::register(ctx);

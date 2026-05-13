@@ -168,7 +168,7 @@ impl Requests {
 
     /// Starts a Warp AI request against the server with the given request prompt.
     pub fn issue_request(&mut self, request: String, ctx: &mut ModelContext<Self>) {
-        let server_api = self.server_api.clone();
+        let ai_client = self.ai_client.clone();
         let raw_request = request.trim();
         let request_for_api = raw_request.to_string();
         let transcript = self.current_transcript.clone();
@@ -184,9 +184,12 @@ impl Requests {
         let future_handle = ctx.spawn(
             async move {
                 let start_time = Utc::now();
-                (start_time, server_api
-                    .generate_dialogue_answer(transcript, request_for_api, ai_execution_context)
-                    .await)
+                (
+                    start_time,
+                    ai_client
+                        .generate_dialogue_answer(transcript, request_for_api, ai_execution_context)
+                        .await,
+                )
             },
             move |model, (start_time, response), ctx| {
                 let succeeded = response.is_ok();

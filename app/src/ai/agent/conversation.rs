@@ -2697,10 +2697,7 @@ impl AIConversation {
     /// `SubagentParams { command_id }`,task 一开始就 Server-backed。dependencies 指向
     /// root task 让 conversation tree 完整。**不 emit CreatedSubtask**,由调用方
     /// (cli_controller)在升级 block 后手动 emit `SpawnedSubagent` 创建浮窗。
-    pub fn create_optimistic_cli_subagent_task_silent(
-        &mut self,
-        block_id: &BlockId,
-    ) -> TaskId {
+    pub fn create_optimistic_cli_subagent_task_silent(&mut self, block_id: &BlockId) -> TaskId {
         if self.optimistic_cli_subagent_subtask_id.take().is_some() {
             log::error!(
                 "Tried to optimistically create new subtask for CLI agent when one exists already."

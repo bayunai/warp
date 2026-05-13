@@ -18,6 +18,8 @@ use warpui::{
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::agent_conversations_model::AgentConversationsModel;
+use crate::ai::skills::{SkillManager, SkillOpenOrigin};
+use crate::code::editor_management::CodeSource;
 #[cfg(feature = "local_fs")]
 use crate::code::file_tree::FileTreeEvent;
 use crate::coding_panel_enablement_state::CodingPanelEnablementState;
@@ -28,6 +30,7 @@ use crate::pane_group::{PaneGroup, WorkingDirectoriesEvent, WorkingDirectoriesMo
 use crate::server::telemetry::CodePanelsFileOpenEntrypoint;
 use crate::server::telemetry::{FileTreeSource, WarpDriveSource};
 use crate::settings_view::keybindings::{KeybindingChangedEvent, KeybindingChangedNotifier};
+use crate::skill_manager::{SkillManagerPanel, SkillManagerPanelEvent};
 use crate::ssh_manager::SshManagerPanel;
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
@@ -42,10 +45,10 @@ use crate::workspace::view::global_search::view::{
 };
 use crate::workspace::view::{
     LEFT_PANEL_AGENT_CONVERSATIONS_BINDING_NAME, LEFT_PANEL_GLOBAL_SEARCH_BINDING_NAME,
-    LEFT_PANEL_PROJECT_EXPLORER_BINDING_NAME, LEFT_PANEL_SSH_MANAGER_BINDING_NAME,
-    LEFT_PANEL_WARP_DRIVE_BINDING_NAME, OPEN_GLOBAL_SEARCH_BINDING_NAME,
-    TOGGLE_CONVERSATION_LIST_VIEW_BINDING_NAME, TOGGLE_PROJECT_EXPLORER_BINDING_NAME,
-    TOGGLE_WARP_DRIVE_BINDING_NAME,
+    LEFT_PANEL_PROJECT_EXPLORER_BINDING_NAME, LEFT_PANEL_SKILL_MANAGER_BINDING_NAME,
+    LEFT_PANEL_SSH_MANAGER_BINDING_NAME, LEFT_PANEL_WARP_DRIVE_BINDING_NAME,
+    OPEN_GLOBAL_SEARCH_BINDING_NAME, TOGGLE_CONVERSATION_LIST_VIEW_BINDING_NAME,
+    TOGGLE_PROJECT_EXPLORER_BINDING_NAME, TOGGLE_WARP_DRIVE_BINDING_NAME,
 };
 use crate::{
     appearance::Appearance,
@@ -63,6 +66,8 @@ use crate::{
     TelemetryEvent,
 };
 
+const SKILL_MANAGER_MIN_SIDEBAR_WIDTH: f32 = 360.0;
+
 #[derive(Default)]
 struct MouseStateHandles {
     project_explorer_button: MouseStateHandle,
@@ -70,6 +75,7 @@ struct MouseStateHandles {
     warp_drive_button: MouseStateHandle,
     conversation_list_view_button: MouseStateHandle,
     ssh_manager_button: MouseStateHandle,
+    skill_manager_button: MouseStateHandle,
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +85,7 @@ pub enum LeftPanelAction {
     WarpDrive,
     ConversationListView,
     SshManager,
+    SkillManager,
 }
 
 pub enum LeftPanelEvent {
@@ -90,6 +97,9 @@ pub enum LeftPanelEvent {
         path: PathBuf,
         target: FileTarget,
         line_col: Option<LineAndColumnArg>,
+    },
+    OpenSkillFile {
+        source: CodeSource,
     },
     NewConversationInNewTab,
     ShowDeleteConfirmationDialog {
@@ -117,6 +127,7 @@ pub enum ToolPanelView {
     WarpDrive,
     ConversationListView,
     SshManager,
+    SkillManager,
 }
 
 /// Encapsulates the active view state to enforce that all mutations go through
@@ -184,6 +195,7 @@ pub struct LeftPanelView {
     warp_drive_view: ViewHandle<DrivePanel>,
     conversation_list_view: ViewHandle<ConversationListView>,
     ssh_manager_view: ViewHandle<SshManagerPanel>,
+    skill_manager_view: ViewHandle<SkillManagerPanel>,
     active_view: active_view_state::ActiveViewState,
     toolbelt_buttons: Vec<ToolbeltButtonConfig>,
     active_pane_group: Option<WeakViewHandle<PaneGroup>>,
@@ -229,6 +241,7 @@ impl LeftPanelView {
         let warp_drive_view = ctx.add_typed_action_view(DrivePanel::new);
         let conversation_list_view = ctx.add_typed_action_view(ConversationListView::new);
         let ssh_manager_view = ctx.add_typed_action_view(SshManagerPanel::new);
+        let skill_manager_view = ctx.add_typed_action_view(SkillManagerPanel::new);
         ctx.subscribe_to_view(&ssh_manager_view, |_me, _, event, ctx| {
             use crate::ssh_manager::SshManagerPanelEvent;
             match event {
@@ -246,6 +259,18 @@ impl LeftPanelView {
                 SshManagerPanelEvent::PersistenceError(msg) => {
                     log::error!("ssh_manager persistence error: {msg}");
                 }
+            }
+        });
+        ctx.subscribe_to_view(&skill_manager_view, |_me, _, event, ctx| match event {
+            SkillManagerPanelEvent::OpenSkillFile { path } => {
+                let reference = SkillManager::as_ref(ctx).reference_for_skill_path(path);
+                ctx.emit(LeftPanelEvent::OpenSkillFile {
+                    source: CodeSource::Skill {
+                        reference,
+                        path: path.clone(),
+                        origin: SkillOpenOrigin::SkillManager,
+                    },
+                });
             }
         });
 
@@ -346,6 +371,7 @@ impl LeftPanelView {
             warp_drive_view,
             conversation_list_view,
             ssh_manager_view,
+            skill_manager_view,
             active_view: active_view_state::new(active_view),
             toolbelt_buttons,
             active_pane_group: None,
@@ -386,6 +412,7 @@ impl LeftPanelView {
             match (v, &current_view) {
                 (ToolPanelView::GlobalSearch { .. }, ToolPanelView::GlobalSearch { .. }) => true,
                 (ToolPanelView::SshManager, ToolPanelView::SshManager) => true,
+                (ToolPanelView::SkillManager, ToolPanelView::SkillManager) => true,
                 _ => std::mem::discriminant(v) == std::mem::discriminant(&current_view),
             }
         });
@@ -486,6 +513,18 @@ impl LeftPanelView {
                     active_icon: None,
                     tooltip_text: crate::t!("workspace-left-panel-ssh-manager"),
                     action: LeftPanelAction::SshManager,
+                    render_with_active_state: false,
+                    tooltip_keybinding: toolbelt_tooltip_keybinding(&tooltip_keybinding_names, ctx),
+                    tooltip_keybinding_names,
+                }
+            }
+            ToolPanelView::SkillManager => {
+                let tooltip_keybinding_names = vec![LEFT_PANEL_SKILL_MANAGER_BINDING_NAME];
+                ToolbeltButtonConfig {
+                    icon: Icon::BookOpen,
+                    active_icon: None,
+                    tooltip_text: crate::t!("workspace-left-panel-skill-manager"),
+                    action: LeftPanelAction::SkillManager,
                     render_with_active_state: false,
                     tooltip_keybinding: toolbelt_tooltip_keybinding(&tooltip_keybinding_names, ctx),
                     tooltip_keybinding_names,
@@ -736,6 +775,9 @@ impl LeftPanelView {
             ToolPanelView::SshManager => {
                 ctx.focus(&self.ssh_manager_view);
             }
+            ToolPanelView::SkillManager => {
+                ctx.focus(&self.skill_manager_view);
+            }
         }
     }
 
@@ -889,6 +931,9 @@ impl LeftPanelView {
                     self.active_view.get() == ToolPanelView::ConversationListView
                 }
                 LeftPanelAction::SshManager => self.active_view.get() == ToolPanelView::SshManager,
+                LeftPanelAction::SkillManager => {
+                    self.active_view.get() == ToolPanelView::SkillManager
+                }
             };
         }
     }
@@ -1033,6 +1078,9 @@ impl LeftPanelView {
             LeftPanelAction::SshManager => {
                 active_view_state::set(self, ToolPanelView::SshManager, ctx);
             }
+            LeftPanelAction::SkillManager => {
+                active_view_state::set(self, ToolPanelView::SkillManager, ctx);
+            }
         }
     }
 
@@ -1133,6 +1181,7 @@ impl View for LeftPanelView {
                 ToolPanelView::WarpDrive => ctx.focus(&self.warp_drive_view),
                 ToolPanelView::ConversationListView => ctx.focus(&self.conversation_list_view),
                 ToolPanelView::SshManager => ctx.focus(&self.ssh_manager_view),
+                ToolPanelView::SkillManager => ctx.focus(&self.skill_manager_view),
             }
         }
     }
@@ -1148,6 +1197,7 @@ impl View for LeftPanelView {
                 .conversation_list_view_button
                 .clone(),
             self.mouse_state_handles.ssh_manager_button.clone(),
+            self.mouse_state_handles.skill_manager_button.clone(),
         ];
 
         // If there is only one button in the toolbelt row,
@@ -1214,6 +1264,14 @@ impl View for LeftPanelView {
                     .finish(),
             )
             .finish(),
+            ToolPanelView::SkillManager => Shrinkable::new(
+                1.0,
+                Container::new(ChildView::new(&self.skill_manager_view).finish())
+                    .with_padding_left(2.)
+                    .with_padding_right(2.)
+                    .finish(),
+            )
+            .finish(),
         };
 
         let panel_content = Container::new({
@@ -1258,13 +1316,18 @@ impl View for LeftPanelView {
             super::PanelPosition::Left => DragBarSide::Right,
             super::PanelPosition::Right => DragBarSide::Left,
         };
+        let min_sidebar_width = if self.active_view.get() == ToolPanelView::SkillManager {
+            SKILL_MANAGER_MIN_SIDEBAR_WIDTH
+        } else {
+            MIN_SIDEBAR_WIDTH
+        };
         Resizable::new(self.resizable_state_handle.clone(), panel_content)
             .with_dragbar_side(drag_side)
             .on_resize(move |ctx, _| {
                 ctx.notify();
             })
-            .with_bounds_callback(Box::new(|window_size| {
-                let min_width = MIN_SIDEBAR_WIDTH;
+            .with_bounds_callback(Box::new(move |window_size| {
+                let min_width = min_sidebar_width;
                 let max_width = window_size.x() * MAX_SIDEBAR_WIDTH_RATIO;
                 (min_width, max_width.max(min_width))
             }))

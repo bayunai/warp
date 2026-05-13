@@ -6,7 +6,7 @@ use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::document::ai_document_model::{AIDocumentSaveStatus, AIDocumentUserEditStatus};
 use crate::appearance::Appearance;
-use crate::drive::{items::WarpDriveItemId, CloudObjectTypeAndId};
+use crate::drive::items::WarpDriveItemId;
 use crate::notebooks::editor::view::RichTextEditorConfig;
 use crate::pane_group::focus_state::PaneFocusHandle;
 use crate::pane_group::pane::view::header::components::{
@@ -542,16 +542,9 @@ impl AIDocumentView {
     }
 
     fn update_header_buttons(&mut self, ctx: &mut ViewContext<Self>) {
-        let server_id = AIDocumentModel::as_ref(ctx)
-            .get_current_document(&self.document_id)
-            .and_then(|doc| doc.sync_id)
-            .and_then(|sync_id| sync_id.into_server());
-
+        // openWarp 本地化:plan 不再同步到云 notebook,原本这里从 sync_id
+        // 取 server_id 传给 sharing UI;sync_id 已删,这里仅重发 header overflow menu。
         self.pane_configuration.update(ctx, |pc, ctx| {
-            // TODO(openwarp-cloud-removal Phase 5): sharing UI 已退役,
-            // `set_shareable_object` 调用移除;`server_id` / `ShareableObject`
-            // 等 cloud_object 类型在后续 phase 一并清理。
-            let _ = server_id;
             pc.refresh_pane_header_overflow_menu_items(ctx);
         });
         ctx.notify();
@@ -659,8 +652,8 @@ impl AIDocumentView {
                 )
                 .finish()
             }
-            // openWarp 中这两个状态不会正常出现，隐藏按钮。
-            AIDocumentSaveStatus::NotSaved | AIDocumentSaveStatus::Saving => Empty::new().finish(),
+            // openWarp 中 NotSaved 仅表示文档不存在(调用侧占位),不画任何 UI。
+            AIDocumentSaveStatus::NotSaved => Empty::new().finish(),
         }
     }
 
@@ -898,13 +891,10 @@ impl AIDocumentView {
         });
     }
 
-    fn create_warp_drive_notebook(&self, ctx: &mut ViewContext<Self>) {
-        let success = AIDocumentModel::handle(ctx).update(ctx, |model, ctx| {
-            model.sync_to_warp_drive(self.document_id, ctx)
-        });
-        if !success {
-            log::error!("Failed to create Warp Drive notebook");
-        }
+    fn create_warp_drive_notebook(&self, _ctx: &mut ViewContext<Self>) {
+        // openWarp 本地化:plan 不再推送到云 notebook,菜单中这条入口已下架,
+        // 仅保留 enum 变体以防旧 keybinding 配置恶性反序列化;这里 no-op。
+        log::debug!("AIDocumentAction::CreateWarpDriveNotebook is a no-op in openWarp");
     }
 
     /// Export the current content as a markdown file.
@@ -1122,15 +1112,10 @@ impl TypedActionView for AIDocumentView {
                 self.update_header_buttons(ctx);
             }
             AIDocumentAction::ShowInWarpDrive => {
-                if let Some(document) =
-                    AIDocumentModel::as_ref(ctx).get_current_document(&self.document_id)
-                {
-                    if let Some(sync_id) = document.sync_id {
-                        ctx.emit(AIDocumentEvent::ViewInWarpDrive(WarpDriveItemId::Object(
-                            CloudObjectTypeAndId::Notebook(sync_id),
-                        )));
-                    }
-                }
+                // openWarp 本地化:plan 不再同步到云 Drive,原本发 ViewInWarpDrive
+                // 事件跳到云 notebook 步路已完全不可达。仅保留 enum 变体防旧
+                // keybinding 反序列化崩,这里 no-op。
+                log::debug!("AIDocumentAction::ShowInWarpDrive is a no-op in openWarp");
             }
             AIDocumentAction::AttachToActiveSession => {
                 ctx.emit(AIDocumentEvent::AttachPlanAsContext(self.document_id));
@@ -1170,27 +1155,12 @@ impl BackingView for AIDocumentView {
 
     fn pane_header_overflow_menu_items(
         &self,
-        ctx: &AppContext,
+        _ctx: &AppContext,
     ) -> Vec<MenuItem<Self::PaneHeaderOverflowMenuAction>> {
         let mut menu_items = vec![];
 
-        // Only show shareable link when the document is synced to Warp Drive
-        if let Some(link) =
-            AIDocumentModel::as_ref(ctx).get_document_warp_drive_object_link(&self.document_id, ctx)
-        {
-            menu_items.push(
-                MenuItemFields::new(crate::t!("common-copy-link"))
-                    .with_on_select_action(AIDocumentAction::CopyLink(link))
-                    .with_icon(Icon::Link)
-                    .into_item(),
-            );
-            menu_items.push(
-                MenuItemFields::new(crate::t!("ai-document-show-in-warp-drive"))
-                    .with_on_select_action(AIDocumentAction::ShowInWarpDrive)
-                    .with_icon(Icon::WarpDrive)
-                    .into_item(),
-            );
-        }
+        // openWarp 本地化:云菜单项 "Copy Link" / "Show in Warp Drive"
+        // 原本仅在云同步成功后才显示,本地路径完全不可达,直接删除。
 
         #[cfg(feature = "local_fs")]
         {

@@ -154,10 +154,10 @@ impl TryFrom<PaneNodeSnapshot> for PaneTemplateType {
                 | LeafContents::CodeReview(_)
                 | LeafContents::ExecutionProfileEditor
                 | LeafContents::GetStarted
-                | LeafContents::NetworkLog
                 | LeafContents::Welcome { .. }
                 | LeafContents::AIDocument(_)
-                | LeafContents::EnvironmentManagement(_)
+                // OpenWarp Wave 7-3:`EnvironmentManagement` arm 随 Cloud Mode UI
+                // 子系统物理删。
                 | LeafContents::SshServer { .. }
                 | LeafContents::AmbientAgent(_) => {
                     // TODO: Handle AIDocument in launch config

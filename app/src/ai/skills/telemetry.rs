@@ -17,6 +17,8 @@ pub enum SkillOpenOrigin {
     EditFiles,
     // /open-skill command
     OpenSkillCommand,
+    // Skill manager panel edit button
+    SkillManager,
 }
 
 /// Telemetry events for skills
@@ -29,7 +31,7 @@ pub enum SkillTelemetryEvent {
         reference: SkillReference,
         /// Specifies the parsed skill name from SKILL.md front matter, if the reference resolved
         name: Option<String>,
-        /// Specifies the scope of the skill (home or project)
+        /// Specifies the scope of the skill.
         scope: Option<SkillScope>,
         /// Specifies the provider of the skill (Warp, Claude, Codex, etc.)
         provider: Option<SkillProvider>,
@@ -109,7 +111,9 @@ impl TelemetryEventDesc for SkillTelemetryEventDiscriminants {
     fn description(&self) -> &'static str {
         match self {
             Self::Read => "A skill was read via the ReadSkill tool call",
-            Self::Opened => "A skill was opened from an 'open skill' button or /edit-skill command",
+            Self::Opened => {
+                "A skill was opened from an open-skill entry point, slash command, or Skill Manager"
+            }
         }
     }
 

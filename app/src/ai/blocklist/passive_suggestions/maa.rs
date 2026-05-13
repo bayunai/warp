@@ -1,4 +1,4 @@
-use std::sync::Arc;
+﻿use std::sync::Arc;
 
 use super::super::controller::{BlocklistAIController, BlocklistAIControllerEvent};
 use crate::ai::agent::api::generate_multi_agent_output;
@@ -14,7 +14,7 @@ use crate::ai::blocklist::{
     SessionContext,
 };
 use crate::ai::paths::host_native_absolute_path;
-use crate::auth::auth_state::AuthStateProvider;
+use crate::auth::AuthStateProvider;
 use crate::server::server_api::ServerApiProvider;
 use crate::settings::AISettings;
 use crate::terminal::event::{BlockType, UserBlockCompleted};

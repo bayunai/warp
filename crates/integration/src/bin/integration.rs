@@ -320,10 +320,7 @@ fn register_tests() -> HashMap<&'static str, BoxedBuilderFn> {
     register_test!(test_history_command_is_linked_to_local_workflow);
     register_test!(test_up_arrow_history_enters_shift_tab_for_workflow);
 
-    register_test!(test_websocket_does_not_begin_on_startup);
-    register_test!(test_websocket_begins_on_startup);
-    register_test!(test_websocket_begins_after_joining_a_team);
-    register_test!(test_websocket_begins_after_creating_an_object);
+    // OpenWarp(本地化,Phase 5):websocket 集成测试随 Listener 物理删除。
 
     register_test!(test_secret_is_obfuscated_on_copy);
     register_test!(test_secret_tooltip_shows_on_click);

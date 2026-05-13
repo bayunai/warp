@@ -1,4 +1,4 @@
-use std::io::Write as _;
+﻿use std::io::Write as _;
 use std::sync::Arc;
 
 use ai::diff_validation::{DiffDelta, ParsedDiff, V4AHunk};
@@ -9,7 +9,7 @@ use warpui::App;
 
 use crate::ai::agent::{AIIdentifiers, FileEdit};
 use crate::ai::blocklist::SessionContext;
-use crate::auth::auth_state::AuthState;
+use crate::auth::AuthState;
 
 use super::*;
 

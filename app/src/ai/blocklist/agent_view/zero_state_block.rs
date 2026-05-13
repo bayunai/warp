@@ -19,7 +19,6 @@ use warpui::{
 
 use crate::{
     ai::{
-        active_agent_views_model::{ActiveAgentViewsModel, ConversationOrTaskId},
         agent::conversation::AIConversationId,
         blocklist::{
             agent_view::{
@@ -133,11 +132,6 @@ impl AgentViewZeroStateBlock {
                 }
             },
         );
-
-        let active_agent_views_model = ActiveAgentViewsModel::handle(ctx);
-        ctx.subscribe_to_model(&active_agent_views_model, |_, _, _, ctx| {
-            ctx.notify();
-        });
 
         let cloud_agent_view_model_clone = cloud_agent_view_model.clone();
         ctx.subscribe_to_model(
@@ -314,19 +308,10 @@ impl AgentViewZeroStateBlock {
         current_working_directory: &str,
         app: &AppContext,
     ) -> Vec<ConversationNavigationData> {
-        let open_conversation_ids = ActiveAgentViewsModel::as_ref(app)
-            .get_all_open_conversation_ids(app)
-            .iter()
-            .filter_map(ConversationOrTaskId::conversation_id)
-            .collect::<std::collections::HashSet<_>>();
         ConversationNavigationData::all_conversations(app)
             .into_iter()
-            .filter(|conversation_data| {
-                if open_conversation_ids.contains(&conversation_data.id) {
-                    return false;
-                }
-
-                match conversation_data.latest_working_directory.as_ref() {
+            .filter(
+                |conversation_data| match conversation_data.latest_working_directory.as_ref() {
                     Some(latest_working_directory) => {
                         latest_working_directory == current_working_directory
                     }
@@ -336,8 +321,8 @@ impl AgentViewZeroStateBlock {
                         .is_some_and(|initial_working_directory| {
                             initial_working_directory == current_working_directory
                         }),
-                }
-            })
+                },
+            )
             .sorted_by_key(|conversation_data| Reverse(conversation_data.last_updated))
             .take(MAX_RECENT_CONVERSATION_COUNT)
             .collect()
@@ -851,7 +836,7 @@ fn render_recent_conversations_section(
         .with_child(
             Container::new(
                 Text::new(
-                    "RECENT ACTIVITY",
+                    crate::t!("agent-zero-state-recent-activity"),
                     appearance.ui_font_family(),
                     header_font_size,
                 )

@@ -1,4 +1,4 @@
-use std::{
+﻿use std::{
     any::Any,
     collections::{HashMap, VecDeque},
     sync::Arc,
@@ -20,7 +20,7 @@ use crate::code_review::git_status_update::{GitRepoStatusModel, GitStatusMetadat
 #[cfg(windows)]
 use crate::system::SystemInfo;
 use crate::{
-    auth::{auth_manager::AuthManager, AuthStateProvider},
+    auth::{AuthManager, AuthStateProvider},
     context_chips::{
         context_chip::{ChipFingerprintInput, Environment},
         prompt::Prompt,

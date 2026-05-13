@@ -10,7 +10,7 @@ use crate::ai::blocklist::agent_view::{
     AgentViewEntryBlockParams, AgentViewEntryOrigin, DismissalStrategy, EphemeralMessage,
 };
 use crate::ai::blocklist::block::cli_controller::CLISubagentController;
-use crate::ai::blocklist::history_model::{CLIAgentConversation, CloudConversationData};
+use crate::ai::blocklist::history_model::{CLIAgentConversation, LoadedConversationData};
 use crate::ai::blocklist::BlocklistAIContextModel;
 use crate::terminal::input::message_bar::Message as InputMessage;
 use crate::terminal::input::message_bar::MessageItem;
@@ -46,7 +46,6 @@ use crate::{
             history_model::BlocklistAIHistoryModel, model::AIBlockModelImpl, AIBlock,
             BlocklistAIActionModel, BlocklistAIController, ClientIdentifiers,
         },
-        get_relevant_files::controller::GetRelevantFilesController,
         restored_conversations::RestoredAgentConversations,
     },
     persistence::model::AgentConversationData,
@@ -163,7 +162,6 @@ impl ConversationRestorationInNewPaneType {
 #[derive(Debug)]
 pub struct AIBlockCreationParams {
     pub ai_controller: ModelHandle<BlocklistAIController>,
-    pub get_relevant_files_controller: ModelHandle<GetRelevantFilesController>,
     pub ai_action_model: ModelHandle<BlocklistAIActionModel>,
     pub ai_context_model: ModelHandle<BlocklistAIContextModel>,
     pub cli_subagent_controller: ModelHandle<CLISubagentController>,
@@ -208,17 +206,17 @@ impl TerminalView {
     /// already in the right directory, or we need to cd.
     fn resolve_dir_restoration_state(
         &self,
-        cloud_conversation: &CloudConversationData,
+        cloud_conversation: &LoadedConversationData,
     ) -> RestorationDirState {
         let target_dir = match cloud_conversation {
-            CloudConversationData::Oz(conversation) => {
+            LoadedConversationData::Oz(conversation) => {
                 conversation.initial_working_directory().or_else(|| {
                     conversation
                         .server_metadata()
                         .and_then(|metadata| metadata.working_directory.clone())
                 })
             }
-            CloudConversationData::CLIAgent(cli_conversation) => {
+            LoadedConversationData::CLIAgent(cli_conversation) => {
                 cli_conversation.metadata.working_directory.clone()
             }
         };
@@ -241,7 +239,7 @@ impl TerminalView {
 
     pub(crate) fn restore_conversation_and_directory_context<F>(
         &mut self,
-        cloud_conversation: CloudConversationData,
+        cloud_conversation: LoadedConversationData,
         use_live_appearance: bool,
         on_restored: F,
         ctx: &mut ViewContext<Self>,
@@ -257,14 +255,14 @@ impl TerminalView {
                 me.maybe_show_restore_context_hint(restore_dir_state, ctx);
 
                 match cloud_conversation {
-                    CloudConversationData::Oz(conversation) => {
+                    LoadedConversationData::Oz(conversation) => {
                         me.restore_conversation_after_view_creation(
                             RestoredAIConversation::new(*conversation),
                             use_live_appearance,
                             ctx,
                         );
                     }
-                    CloudConversationData::CLIAgent(cli_conversation) => {
+                    LoadedConversationData::CLIAgent(cli_conversation) => {
                         if FeatureFlag::AgentHarness.is_enabled() {
                             me.restore_cli_agent_block_snapshot(cli_conversation.block);
                         } else {
@@ -572,7 +570,6 @@ impl TerminalView {
         for (exchange, command_block_index) in exchanges.into_iter().zip(command_block_indices) {
             let params = AIBlockCreationParams {
                 ai_controller: self.ai_controller.clone(),
-                get_relevant_files_controller: self.get_relevant_files_controller.clone(),
                 ai_action_model: self.ai_action_model.clone(),
                 ai_context_model: self.ai_context_model.clone(),
                 cli_subagent_controller: self.cli_subagent_controller.clone(),
@@ -709,7 +706,6 @@ impl TerminalView {
             .map(
                 |((exchange, conversation_id), command_block_index)| AIBlockCreationParams {
                     ai_controller: self.ai_controller.clone(),
-                    get_relevant_files_controller: self.get_relevant_files_controller.clone(),
                     ai_action_model: self.ai_action_model.clone(),
                     ai_context_model: self.ai_context_model.clone(),
                     cli_subagent_controller: self.cli_subagent_controller.clone(),
@@ -1045,7 +1041,6 @@ impl TerminalView {
                     response_stream_id: None,
                 },
                 params.ai_controller,
-                params.get_relevant_files_controller,
                 params.working_directory,
                 shell_launch_data,
                 params.ai_action_model,

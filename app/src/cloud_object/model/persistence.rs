@@ -3,8 +3,8 @@ use crate::auth::AuthStateProvider;
 use crate::cloud_object::{
     CloudModelType, CloudObjectLocation, CloudObjectPermissions, GenericCloudObject,
     GenericServerObject, GenericStringObjectFormat, JsonObjectType, ObjectIdType, ObjectType,
-    ObjectsToUpdate, Owner, Revision, RevisionAndLastEditor, ServerCloudObject, ServerCreationInfo,
-    ServerFolder, ServerMetadata, ServerNotebook, ServerPermissions, ServerWorkflow, Space,
+    Owner, Revision, RevisionAndLastEditor, ServerCloudObject, ServerCreationInfo, ServerFolder,
+    ServerMetadata, ServerNotebook, ServerPermissions, ServerWorkflow, Space,
 };
 use crate::drive::folders::{CloudFolder, CloudFolderModel};
 use crate::drive::{
@@ -23,12 +23,14 @@ use crate::workspaces::user_workspaces::UserWorkspaces;
 
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::mpsc::SyncSender;
 use warp_graphql::scalars::time::ServerTimestamp;
 
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
 use crate::cloud_object::CloudObject;
+use crate::util::sync::Condition;
 use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
 use warp_core::features::FeatureFlag;
@@ -113,6 +115,7 @@ enum FolderOpenState {
 pub struct CloudModel {
     objects_by_id: HashMap<ObjectUid, Box<dyn CloudObject>>,
     model_event_sender: Option<SyncSender<ModelEvent>>,
+    initial_load_complete: Condition,
 
     time_of_next_force_refresh: Option<DateTime<Utc>>,
 }
@@ -127,12 +130,29 @@ impl CloudModel {
             .into_iter()
             .map(|object| (object.uid().to_owned(), object))
             .collect::<HashMap<ObjectUid, Box<dyn CloudObject>>>();
+        let initial_load_complete = Condition::new();
+        // OpenWarp 没有云端 object 初始拉取；SQLite restore 完成后即可视为可读。
+        initial_load_complete.set();
 
         Self {
             objects_by_id,
             model_event_sender,
+            initial_load_complete,
             time_of_next_force_refresh,
         }
+    }
+
+    /// 等待本地 cloud object 存储可读。OpenWarp 下该条件在 SQLite restore 后立即满足。
+    pub fn initial_load_complete(&self) -> impl Future<Output = ()> {
+        self.initial_load_complete.wait()
+    }
+
+    pub fn initial_load_completed(&self) -> bool {
+        self.initial_load_complete.is_set()
+    }
+
+    pub fn mark_initial_load_complete(&self) {
+        self.initial_load_complete.set();
     }
 
     /// This method updates the in-memory object after the CreateObject() endpoint returns successfully.
@@ -529,12 +549,6 @@ impl CloudModel {
             }
             ServerCloudObject::AmbientAgentEnvironment(ambient_agent_environment) => {
                 self.upsert_from_server_object(ambient_agent_environment, ctx);
-            }
-            ServerCloudObject::ScheduledAmbientAgent(scheduled_ambient_agent) => {
-                self.upsert_from_server_object(scheduled_ambient_agent, ctx);
-            }
-            ServerCloudObject::CloudAgentConfig(cloud_agent_config) => {
-                self.upsert_from_server_object(cloud_agent_config, ctx);
             }
         }
     }
@@ -1348,27 +1362,6 @@ impl CloudModel {
             .filter_map(|object| object.into())
     }
 
-    /// Returns all objects the model knows about that should potentially be
-    /// updated by the server.
-    pub fn get_versions_for_all_objects(&self, app: &AppContext) -> ObjectsToUpdate {
-        let mut objects_to_update = ObjectsToUpdate::default();
-        for (versions, object_type) in self
-            .objects_by_id
-            .values()
-            .filter_map(|object| object.versions(app).zip(Some(object.object_type())))
-        {
-            match object_type {
-                ObjectType::Notebook => objects_to_update.notebooks.push(versions),
-                ObjectType::Workflow => objects_to_update.workflows.push(versions),
-                ObjectType::Folder => objects_to_update.folders.push(versions),
-                ObjectType::GenericStringObject(_) => {
-                    objects_to_update.generic_string_objects.push(versions)
-                }
-            }
-        }
-        objects_to_update
-    }
-
     pub fn get_notebook(&self, notebook_id: &SyncId) -> Option<&CloudNotebook> {
         self.objects_by_id
             .get(&notebook_id.uid())
@@ -1814,6 +1807,7 @@ impl CloudModel {
 
     pub fn reset(&mut self) {
         self.objects_by_id = HashMap::new();
+        self.initial_load_complete.set();
         self.time_of_next_force_refresh = None;
     }
 }

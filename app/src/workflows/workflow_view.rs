@@ -15,7 +15,7 @@ use url::Url;
 use crate::{
     ai::blocklist::secret_redaction::find_secrets_in_text,
     appearance::Appearance,
-    auth::{auth_state::AuthState, AuthStateProvider},
+    auth::{AuthState, AuthStateProvider},
     cloud_object::{
         breadcrumbs::ContainingObject,
         model::{
@@ -633,7 +633,9 @@ impl WorkflowView {
         window_id: WindowId,
         ctx: &mut ViewContext<Self>,
     ) {
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete =
+            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+                .initial_load_complete();
         // TODO @ianhodge CLD-2002: it could be nice to have a loading screen here while we wait for the load
         let settings = settings.clone();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
@@ -1957,6 +1959,19 @@ impl WorkflowView {
                         .tool_tip(crate::t!("notebook-sign-in-to-edit"))
                         .build()
                         .finish()
+                });
+            } else {
+                // openWarp UX: 与 notebook details_bar 一致,给 workflow 编辑
+                // 切换按钮加 tooltip,避免用户不知道这个铅笔能点、
+                // 点了会发生什么。Tooltip 表达「点击后会发生的动作」。
+                let tooltip_text = match self.workflow_view_mode {
+                    WorkflowViewMode::View => crate::t!("common-tooltip-enter-edit-mode"),
+                    WorkflowViewMode::Edit => crate::t!("common-tooltip-exit-edit-mode"),
+                    _ => crate::t!("common-tooltip-enter-edit-mode"),
+                };
+                let ui_builder = appearance.ui_builder().clone();
+                edit_button = edit_button.with_tooltip(move || {
+                    ui_builder.tool_tip(tooltip_text.clone()).build().finish()
                 });
             }
             let edit_button = edit_button.build();

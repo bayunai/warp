@@ -1,5 +1,4 @@
 use chrono::{DateTime, Duration, Utc};
-use instant::Instant;
 use persistence::model::AgentConversationData;
 use std::{
     collections::HashMap,
@@ -25,8 +24,8 @@ use crate::test_util::ai_agent_tasks::{create_api_task, create_message};
 use super::{
     AgentConversationsModel, AgentConversationsModelEvent, AgentManagementFilters,
     AgentRunDisplayStatus, ArtifactFilter, ConversationMetadata, ConversationOrTask,
-    EnvironmentFilter, HarnessFilter, OwnerFilter, StatusFilter, TaskFetchState,
-    MAX_PERSONAL_TASKS, MAX_TEAM_TASKS,
+    EnvironmentFilter, HarnessFilter, OwnerFilter, StatusFilter, MAX_PERSONAL_TASKS,
+    MAX_TEAM_TASKS,
 };
 use crate::ai::ambient_agents::task::HarnessConfig;
 use warp_cli::agent::Harness;
@@ -402,12 +401,9 @@ fn create_test_model() -> AgentConversationsModel {
     AgentConversationsModel {
         tasks: HashMap::new(),
         conversations: HashMap::new(),
-        in_flight_poll_abort_handle: None,
-        next_poll_abort_handle: None,
         active_data_consumers_per_window: HashMap::new(),
         has_finished_initial_load: false,
         manually_opened_task_ids: Default::default(),
-        task_fetch_state: Default::default(),
     }
 }
 
@@ -1053,10 +1049,7 @@ fn test_harness_filter_is_filtering_and_reset() {
 }
 
 #[test]
-fn test_get_or_async_fetch_task_data_returns_cached_task_without_fetching() {
-    // If the task is already in `tasks`, return it directly and don't touch the fetch-state
-    // map — even if a stale `PermanentlyFailedAt` entry exists (which shouldn't normally happen,
-    // but proves the success path takes precedence).
+fn test_get_or_async_fetch_task_data_returns_cached_task() {
     App::test((), |mut app| async move {
         let now = Utc::now();
         let task = create_test_task(&make_uuid(7000), "user-a", now);
@@ -1065,115 +1058,28 @@ fn test_get_or_async_fetch_task_data_returns_cached_task_without_fetching() {
         let model_handle = app.add_singleton_model(|_| {
             let mut model = create_test_model();
             model.tasks.insert(task_id, task.clone());
-            // Sentinel: even if a permanent-failure entry is present, the cached task wins.
-            model
-                .task_fetch_state
-                .insert(task_id, TaskFetchState::PermanentlyFailedAt(Instant::now()));
             model
         });
 
-        let result = model_handle.update(&mut app, |model, ctx| {
-            model.get_or_async_fetch_task_data(&task_id, ctx)
+        let result = model_handle.update(&mut app, |model, _| {
+            model.get_or_async_fetch_task_data(&task_id)
         });
 
         assert!(result.is_some(), "cached task should be returned");
-        model_handle.update(&mut app, |model, _| {
-            // The cached-hit fast path doesn't touch `task_fetch_state`, so the sentinel
-            // entry is left as-is and (importantly) no `InFlight` entry was added.
-            assert!(matches!(
-                model.task_fetch_state.get(&task_id),
-                Some(TaskFetchState::PermanentlyFailedAt(_))
-            ));
-        });
     });
 }
 
 #[test]
-fn test_get_or_async_fetch_task_data_skips_when_permanently_failed() {
-    // A task id marked as `PermanentlyFailedAt` within its cooldown (e.g. very recent 403) must
-    // not spawn a new fetch.
+fn test_get_or_async_fetch_task_data_does_not_fetch_missing_task() {
     App::test((), |mut app| async move {
         let task_id: AmbientAgentTaskId = make_uuid(7001).parse().unwrap();
+        let model_handle = app.add_singleton_model(|_| create_test_model());
 
-        let model_handle = app.add_singleton_model(|_| {
-            let mut model = create_test_model();
-            model
-                .task_fetch_state
-                .insert(task_id, TaskFetchState::PermanentlyFailedAt(Instant::now()));
-            model
-        });
-
-        let result = model_handle.update(&mut app, |model, ctx| {
-            model.get_or_async_fetch_task_data(&task_id, ctx)
+        let result = model_handle.update(&mut app, |model, _| {
+            model.get_or_async_fetch_task_data(&task_id)
         });
 
         assert!(result.is_none());
-        model_handle.update(&mut app, |model, _| {
-            // The state is unchanged — still permanently failed, no in-flight upgrade.
-            assert!(matches!(
-                model.task_fetch_state.get(&task_id),
-                Some(TaskFetchState::PermanentlyFailedAt(_))
-            ));
-        });
-    });
-}
-
-#[test]
-fn test_get_or_async_fetch_task_data_skips_when_in_flight() {
-    // A task id already marked as `InFlight` must not spawn a duplicate fetch.
-    App::test((), |mut app| async move {
-        let task_id: AmbientAgentTaskId = make_uuid(7002).parse().unwrap();
-
-        let model_handle = app.add_singleton_model(|_| {
-            let mut model = create_test_model();
-            model
-                .task_fetch_state
-                .insert(task_id, TaskFetchState::InFlight);
-            model
-        });
-
-        let result = model_handle.update(&mut app, |model, ctx| {
-            model.get_or_async_fetch_task_data(&task_id, ctx)
-        });
-
-        assert!(result.is_none());
-        model_handle.update(&mut app, |model, _| {
-            // Still exactly the one in-flight entry we pre-seeded.
-            assert_eq!(model.task_fetch_state.len(), 1);
-            assert!(matches!(
-                model.task_fetch_state.get(&task_id),
-                Some(TaskFetchState::InFlight)
-            ));
-        });
-    });
-}
-
-#[test]
-fn test_get_or_async_fetch_task_data_skips_within_transient_cooldown() {
-    // A recent transient failure (timestamp younger than the cooldown) must short-circuit.
-    App::test((), |mut app| async move {
-        let task_id: AmbientAgentTaskId = make_uuid(7003).parse().unwrap();
-
-        let model_handle = app.add_singleton_model(|_| {
-            let mut model = create_test_model();
-            model
-                .task_fetch_state
-                .insert(task_id, TaskFetchState::TransientlyFailedAt(Instant::now()));
-            model
-        });
-
-        let result = model_handle.update(&mut app, |model, ctx| {
-            model.get_or_async_fetch_task_data(&task_id, ctx)
-        });
-
-        assert!(result.is_none());
-        model_handle.update(&mut app, |model, _| {
-            // The transient entry is preserved (no upgrade to in-flight).
-            assert!(matches!(
-                model.task_fetch_state.get(&task_id),
-                Some(TaskFetchState::TransientlyFailedAt(_))
-            ));
-        });
     });
 }
 

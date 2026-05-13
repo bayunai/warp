@@ -86,13 +86,14 @@ pub fn is_feedback_skill_available(ctx: &AppContext) -> bool {
 
 use crate::workspace::view::{
     LEFT_PANEL_AGENT_CONVERSATIONS_BINDING_NAME, LEFT_PANEL_GLOBAL_SEARCH_BINDING_NAME,
-    LEFT_PANEL_PROJECT_EXPLORER_BINDING_NAME, LEFT_PANEL_SSH_MANAGER_BINDING_NAME,
-    LEFT_PANEL_WARP_DRIVE_BINDING_NAME, NEW_AGENT_TAB_BINDING_NAME,
-    NEW_AMBIENT_AGENT_TAB_BINDING_NAME, NEW_TAB_BINDING_NAME, NEW_TERMINAL_TAB_BINDING_NAME,
-    OPEN_GLOBAL_SEARCH_BINDING_NAME, TOGGLE_CONVERSATION_LIST_VIEW_BINDING_NAME,
-    TOGGLE_NOTIFICATION_MAILBOX_BINDING_NAME, TOGGLE_PROJECT_EXPLORER_BINDING_NAME,
-    TOGGLE_RIGHT_PANEL_BINDING_NAME, TOGGLE_TAB_CONFIGS_MENU_BINDING_NAME,
-    TOGGLE_VERTICAL_TABS_PANEL_BINDING_NAME, TOGGLE_WARP_DRIVE_BINDING_NAME,
+    LEFT_PANEL_PROJECT_EXPLORER_BINDING_NAME, LEFT_PANEL_SKILL_MANAGER_BINDING_NAME,
+    LEFT_PANEL_SSH_MANAGER_BINDING_NAME, LEFT_PANEL_WARP_DRIVE_BINDING_NAME,
+    NEW_AGENT_TAB_BINDING_NAME, NEW_AMBIENT_AGENT_TAB_BINDING_NAME, NEW_TAB_BINDING_NAME,
+    NEW_TERMINAL_TAB_BINDING_NAME, OPEN_GLOBAL_SEARCH_BINDING_NAME,
+    TOGGLE_CONVERSATION_LIST_VIEW_BINDING_NAME, TOGGLE_NOTIFICATION_MAILBOX_BINDING_NAME,
+    TOGGLE_PROJECT_EXPLORER_BINDING_NAME, TOGGLE_RIGHT_PANEL_BINDING_NAME,
+    TOGGLE_TAB_CONFIGS_MENU_BINDING_NAME, TOGGLE_VERTICAL_TABS_PANEL_BINDING_NAME,
+    TOGGLE_WARP_DRIVE_BINDING_NAME,
 };
 pub use one_time_modal_model::OneTimeModalModel;
 pub use registry::WorkspaceRegistry;
@@ -128,7 +129,6 @@ pub fn init(app: &mut AppContext) {
     notebooks::init(app);
     code::init(app);
     sync_inputs::init(app);
-    lsp::init(app);
 
     app.register_fixed_bindings([FixedBinding::empty(
         "Dump debug info",
@@ -824,6 +824,17 @@ pub fn init(app: &mut AppContext) {
         .with_mac_key_binding("ctrl-5")
         .with_linux_or_windows_key_binding("alt-5"),
         EditableBinding::new(
+            LEFT_PANEL_SKILL_MANAGER_BINDING_NAME,
+            BindingDescription::new(crate::t!(
+                "keybinding-desc-workspace-left-panel-skill-manager"
+            )),
+            WorkspaceAction::ToggleSkillManager,
+        )
+        .with_group(bindings::BindingGroup::Navigation.as_str())
+        .with_context_predicate(id!("Workspace"))
+        .with_mac_key_binding("ctrl-6")
+        .with_linux_or_windows_key_binding("alt-6"),
+        EditableBinding::new(
             TOGGLE_PROJECT_EXPLORER_BINDING_NAME,
             BindingDescription::new(crate::t!(
                 "keybinding-desc-workspace-toggle-project-explorer"
@@ -1486,20 +1497,8 @@ fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {
         )
         .with_group(bindings::BindingGroup::Settings.as_str())
         .with_context_predicate(id!("Workspace")),
-        EditableBinding::new(
-            "workspace:show_settings_shared_blocks_page",
-            BindingDescription::new(crate::t!(
-                "keybinding-desc-workspace-show-settings-shared-blocks"
-            ))
-            .with_custom_description(
-                bindings::MAC_MENUS_CONTEXT,
-                crate::t!("keybinding-desc-workspace-show-settings-shared-blocks-menu"),
-            ),
-            WorkspaceAction::ShowSettingsPage(SettingsSection::SharedBlocks),
-        )
-        .with_group(bindings::BindingGroup::Settings.as_str())
-        .with_context_predicate(id!("Workspace"))
-        .with_custom_action(CustomAction::ViewSharedBlocks),
+        // OpenWarp Wave 6-8:`workspace:show_settings_shared_blocks_page` keybinding 随
+        // `ShowBlocksView` 设置页与 `CustomAction::ViewSharedBlocks` 一同物理删。
         EditableBinding::new(
             "workspace:show_settings_keyboard_shortcuts_page",
             BindingDescription::new(crate::t!(
@@ -1567,28 +1566,14 @@ fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {
         EditableBinding::new(
             "workspace:show_settings_code_page",
             BindingDescription::new(crate::t!("keybinding-desc-workspace-show-settings-code")),
-            WorkspaceAction::ShowSettingsPage(SettingsSection::CodeIndexing),
+            WorkspaceAction::ShowSettingsPage(SettingsSection::EditorAndCodeReview),
         )
         .with_group(bindings::BindingGroup::Settings.as_str())
         .with_context_predicate(id!("Workspace")),
-        EditableBinding::new(
-            "workspace:show_settings_referrals_page",
-            BindingDescription::new(crate::t!(
-                "keybinding-desc-workspace-show-settings-referrals"
-            )),
-            WorkspaceAction::ShowSettingsPage(SettingsSection::Referrals),
-        )
-        .with_group(bindings::BindingGroup::Settings.as_str())
-        .with_context_predicate(id!("Workspace")),
-        EditableBinding::new(
-            "workspace:show_settings_environments_page",
-            BindingDescription::new(crate::t!(
-                "keybinding-desc-workspace-show-settings-environments"
-            )),
-            WorkspaceAction::ShowSettingsPage(SettingsSection::CloudEnvironments),
-        )
-        .with_group(bindings::BindingGroup::Settings.as_str())
-        .with_context_predicate(id!("Workspace")),
+        // OpenWarp Wave 6-8:`workspace:show_settings_referrals_page` keybinding 随
+        // `ReferralsPageView` 设置页物理删。
+        // OpenWarp Wave 7-3:`workspace:show_settings_environments_page` keybinding 随
+        // Cloud Mode UI 子系统物理删。
         EditableBinding::new(
             "workspace:show_mcp_servers_settings_page",
             BindingDescription::new(crate::t!(

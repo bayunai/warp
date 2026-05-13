@@ -20,7 +20,6 @@
 //! 把 result 序列化为 `role=tool, tool_call_id=...` 的 content 给上游。
 
 pub mod ask;
-pub mod codebase;
 pub mod coerce;
 pub mod documents;
 pub mod edit;
@@ -33,6 +32,7 @@ pub mod search;
 pub mod shell;
 pub mod skill;
 pub mod suggest;
+pub mod todowrite;
 pub mod web_runtime;
 pub mod webfetch;
 pub mod websearch;
@@ -78,8 +78,6 @@ pub const REGISTRY: &[&OpenAiTool] = &[
     &files::READ_FILES,
     &search::GREP,
     &search::FILE_GLOB_V2,
-    // search_codebase 暂未对外暴露:代码索引(embeddings/symbol outline)尚未实现。
-    // 模块和静态值保留以便日后启用,见 codebase.rs。
     &edit::APPLY_FILE_DIFFS,
     &long_shell::WRITE_TO_LONG_RUNNING_SHELL_COMMAND,
     &long_shell::READ_SHELL_COMMAND_OUTPUT,
@@ -95,6 +93,8 @@ pub const REGISTRY: &[&OpenAiTool] = &[
     // UI marker(无副作用,信号通知前端)
     &markers::OPEN_CODE_REVIEW,
     &markers::TRANSFER_SHELL_CONTROL,
+    // 本地 todo list(BYOP 自合成 Message::UpdateTodos,不走 protobuf executor)
+    &todowrite::TODOWRITE,
     // BYOP-only 网络工具:不映射到 protobuf executor variant,由 chat_stream
     // 在 parse_incoming_tool_call 之前按 name 拦截,直接调 web_runtime 跑 HTTP。
     // gating:profile.web_search_enabled=false 时,build_tools_array 会过滤掉。
@@ -190,7 +190,6 @@ pub fn action_result_to_msg_result(
         ReqR::Grep(r) => MsgR::Grep(r),
         ReqR::FileGlobV2(r) => MsgR::FileGlobV2(r),
         ReqR::ApplyFileDiffs(r) => MsgR::ApplyFileDiffs(r),
-        ReqR::SearchCodebase(r) => MsgR::SearchCodebase(r),
         ReqR::CallMcpTool(r) => MsgR::CallMcpTool(r),
         ReqR::ReadMcpResource(r) => MsgR::ReadMcpResource(r),
         ReqR::AskUserQuestion(r) => MsgR::AskUserQuestion(r),

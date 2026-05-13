@@ -12,7 +12,6 @@ use crate::cloud_object::{Revision, ServerAIExecutionProfile, ServerMetadata, Se
 use crate::network::NetworkStatus;
 use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ServerId, SyncId};
-use crate::server::sync_queue::SyncQueue;
 use crate::settings::PrivacySettings;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workspaces::team_tester::TeamTesterStatus;
@@ -38,7 +37,6 @@ fn mock_server_metadata(uid: ServerId) -> ServerMetadata {
 fn install_singletons(app: &mut App, auth_state: AuthStateProvider) {
     initialize_settings_for_tests(app);
     app.add_singleton_model(|_| auth_state);
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);

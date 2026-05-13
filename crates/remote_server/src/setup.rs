@@ -277,7 +277,12 @@ pub fn parse_uname_output(output: &str) -> Result<RemotePlatform> {
 /// - dev:         `~/.warp-dev/remote-server`
 /// - local:       `~/.warp-local/remote-server`
 /// - integration: `~/.warp-dev/remote-server`
-/// - warp-oss:    `~/.warp-oss/remote-server`
+/// - warp-oss:    `~/.warp-dev/remote-server`(临时复用官方 dev 通道)
+//
+// TODO(openwarp): OpenWarp 暂未发布自己的 remote-server 二进制,远端
+// 安装链路临时复用官方 `https://app.warp.dev/download/cli?channel=dev`
+// 的 latest dev 产物。等 OpenWarp 自己 release 后,这里改回 `.warp-oss`,
+// 并把下载源切到 OpenWarp 的 GitHub Release 资产。
 pub fn remote_server_dir() -> String {
     let warp_dir = match ChannelState::channel() {
         Channel::Stable => ".warp",
@@ -285,8 +290,7 @@ pub fn remote_server_dir() -> String {
         Channel::Dev | Channel::Integration => ".warp-dev",
         Channel::Local => ".warp-local",
         Channel::Oss => {
-            // TODO(alokedesai): need to figure out how remote server works with warp-oss
-            // For now, return what Dev returns.
+            // TODO(openwarp): 临时复用官方 dev 通道路径,见上方 TODO。
             ".warp-dev"
         }
     };
@@ -328,8 +332,22 @@ pub fn remote_server_daemon_dir(identity_key: &str) -> String {
 /// Returns the binary name, keyed by channel.
 ///
 /// Matches the CLI command names: `oz` (stable), `oz-preview`, `oz-dev`.
+///
+/// 注意:这是远端 remote-server 二进制的文件名,不是本地 CLI 的安装名。
+/// 在 [`Channel::Oss`] 下需要跟 tarball 里实际打包的二进制对得上,
+/// 因此**临时**返回 `oz-dev` —— OpenWarp 自己还没发布远端二进制,我们
+/// 复用官方 dev channel 的 `/download/cli` 产物,而该 tarball 内的
+/// 二进制就是 `oz-dev`。本地 CLI 的安装名仍然由
+/// [`Channel::cli_command_name`] 返回的 `warp-oss` 决定,两者解耦。
+//
+// TODO(openwarp): 待 OpenWarp 发布自己的 remote-server 二进制后,这里
+// 改回 `Channel::cli_command_name()`(即 `warp-oss`),并把 tarball 里的
+// 二进制名一起对齐。
 pub fn binary_name() -> &'static str {
-    ChannelState::channel().cli_command_name()
+    match ChannelState::channel() {
+        Channel::Oss => "oz-dev",
+        _ => ChannelState::channel().cli_command_name(),
+    }
 }
 
 /// Returns the full remote binary path for the current channel and client
@@ -339,9 +357,15 @@ pub fn binary_name() -> &'static str {
 ///
 /// - [`Channel::Local`] and [`Channel::Oss`] always use the bare
 ///   `{binary_name}` path. For `Local` this is the slot
-///   `script/deploy_remote_server` writes to; `Oss` is treated the
-///   same way because it has no release-pinned CDN artifact and is
-///   expected to be deployed/managed locally.
+///   `script/deploy_remote_server` writes to. [`Channel::Oss`] **临时**
+///   也走无版本后缀路径,因为下载链路临时复用官方
+///   `/download/cli?channel=dev` 的 latest 产物,客户端不持有官方 dev
+///   tag,无法拼出 `&version=...`,所以远端文件名只能落到 `oz-dev`
+///   (无版本后缀)。这意味着官方更新 dev 构建后,我们这边的
+///   `binary_check_command` 仍会命中旧文件,**不会自动更新**;直到用户
+///   手动删除 `~/.warp-dev/remote-server/oz-dev` 才会重新下载。这是
+///   临时方案的已知缺陷,等 OpenWarp 自己 release 后会一并修复
+///   (届时回到版本号路径)。
 /// - Every other channel always uses `{binary_name}-{version}`, where
 ///   `version` is the baked-in `GIT_RELEASE_TAG` when present and falls
 ///   back to `CARGO_PKG_VERSION` otherwise. The fallback keeps the path
@@ -417,7 +441,22 @@ pub fn install_script() -> String {
 ///
 /// For example, given `https://app.warp.dev`, returns
 /// `https://app.warp.dev/download/cli`.
+///
+/// OpenWarp 临时例外:[`Channel::Oss`] 下 `ChannelState::server_root_url()`
+/// 是 cloud-removal sentinel `http://192.0.2.0:9`(见
+/// `WarpServerConfig::disabled`),不能拿去拼下载 URL,否则远端
+/// curl 会一路 timeout(RFC 5737 TEST-NET-1)。这里硬编码官方
+/// `https://app.warp.dev`,让 SSH Extension 下载临时走官方 dev
+/// channel。
 fn download_url() -> String {
+    // TODO(openwarp): 等 OpenWarp 发布自己的 remote-server 二进制
+    // 后,这里改为指向 OpenWarp 的 GitHub Release 下载源
+    // (如 `https://github.com/zerx-lab/warp/releases/download/{tag}/`),
+    // 同时不再依赖官方 `?package=tar&channel=...&version=...` 的
+    // query 参数格式,改成 GitHub Release 的路径式资产 URL。
+    if matches!(ChannelState::channel(), Channel::Oss) {
+        return "https://app.warp.dev/download/cli".to_string();
+    }
     let base = ChannelState::server_root_url();
     let base = base.trim_end_matches('/');
     format!("{base}/download/cli")
@@ -432,11 +471,11 @@ fn download_channel() -> &'static str {
         Channel::Stable => "stable",
         Channel::Preview => "preview",
         Channel::Dev | Channel::Local | Channel::Integration => "dev",
-        Channel::Oss => {
-            // TODO(alokedesai): need to figure out how remote server works with warp-oss
-            // For now, return what Dev returns.
-            "dev"
-        }
+        // TODO(openwarp): OpenWarp 暂未发布自己的 remote-server 二进制,
+        // 临时复用官方 dev channel 产物。等 OpenWarp 自己 release 后,
+        // 把这条整体替换成走 GitHub Release 的下载源(届时
+        // `download_url` / `install_remote_server.sh` 也要一起调整)。
+        Channel::Oss => "dev",
     }
 }
 

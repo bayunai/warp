@@ -1,4 +1,4 @@
-//! Module containing helper code to apply suggested diffs from an LLM
+﻿//! Module containing helper code to apply suggested diffs from an LLM
 //! to a set of files on the user's filesystem.
 
 use std::{
@@ -21,7 +21,7 @@ use crate::{
         blocklist::SessionContext,
         paths::host_native_absolute_path,
     },
-    auth::auth_state::AuthState,
+    auth::AuthState,
     safe_debug, safe_warn, send_telemetry_on_executor,
 };
 

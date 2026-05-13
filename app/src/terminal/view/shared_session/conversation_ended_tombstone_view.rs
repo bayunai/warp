@@ -1,12 +1,10 @@
 use crate::ai::agent::conversation::AIConversationId;
-use crate::ai::agent_management::telemetry::{AgentManagementTelemetryEvent, ArtifactType};
 use crate::ai::ambient_agents::{
     conversation_output_status_from_conversation, AmbientAgentTaskId, AmbientConversationStatus,
 };
 use crate::ai::artifacts::{Artifact, ArtifactButtonsRow, ArtifactButtonsRowEvent};
 use crate::ai::blocklist::{format_credits, BlocklistAIHistoryModel};
 use crate::appearance::Appearance;
-use crate::server::ids::SyncId;
 use crate::settings::ai::{AISettings, AISettingsChangedEvent};
 use crate::ui_components::blended_colors;
 use crate::util::time_format::human_readable_precise_duration;
@@ -20,7 +18,6 @@ use warp_core::paths::home_relative_path;
 
 #[cfg(not(target_family = "wasm"))]
 use crate::ai::ambient_agents::AmbientAgentTask;
-use warp_core::send_telemetry_from_ctx;
 use warp_core::ui::icons::Icon;
 use warp_core::ui::theme::{AnsiColorIdentifier, Fill};
 use warpui::elements::{
@@ -32,9 +29,6 @@ use warpui::{
     AppContext, Element, Entity, EntityId, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
-
-#[cfg(not(target_family = "wasm"))]
-use crate::server::server_api::ServerApiProvider;
 
 /// Metadata collected for display in the tombstone.
 #[derive(Default)]
@@ -55,7 +49,7 @@ struct TombstoneDisplayData {
     working_directory: Option<String>,
     /// Artifacts from the conversation
     artifacts: Vec<Artifact>,
-    /// Execution harness for the task. None until the task is loaded.
+    /// 在可从本地数据获得时记录任务执行 harness。
     #[cfg(not(target_family = "wasm"))]
     harness: Option<Harness>,
 }
@@ -118,7 +112,7 @@ impl TombstoneDisplayData {
         }
     }
 
-    /// Update with data from an AmbientAgentTask fetch
+    /// 用 AmbientAgentTask 的数据补充展示信息。
     #[cfg(not(target_family = "wasm"))]
     fn enrich_from_task(&mut self, task: AmbientAgentTask) {
         // Use task title if we don't have a conversation title.
@@ -245,48 +239,32 @@ impl ConversationEndedTombstoneView {
         ctx.subscribe_to_view(
             &view.artifact_buttons_view,
             |_, _, event, ctx| match event {
-                ArtifactButtonsRowEvent::OpenPlan { notebook_uid } => {
-                    send_telemetry_from_ctx!(
-                        AgentManagementTelemetryEvent::TombstoneArtifactClicked {
-                            artifact_type: ArtifactType::Plan
-                        },
-                        ctx
-                    );
-                    ctx.dispatch_typed_action(&WorkspaceAction::OpenNotebook {
-                        id: SyncId::ServerId((*notebook_uid).into()),
+                ArtifactButtonsRowEvent::OpenPlan { document_uid } => {
+                    // openWarp 本地化:在 shared session tombstone 中同样走本地
+                    // AIDocument pane,不再依赖云 notebook_uid。
+                    let document_version =
+                        crate::ai::document::ai_document_model::AIDocumentModel::as_ref(ctx)
+                            .get_current_document(document_uid)
+                            .map(|doc| doc.version)
+                            .unwrap_or_default();
+                    ctx.dispatch_typed_action(&WorkspaceAction::OpenAIDocumentPane {
+                        document_id: *document_uid,
+                        document_version,
                     });
                 }
                 ArtifactButtonsRowEvent::CopyBranch { branch } => {
-                    send_telemetry_from_ctx!(
-                        AgentManagementTelemetryEvent::TombstoneArtifactClicked {
-                            artifact_type: ArtifactType::Branch
-                        },
-                        ctx
-                    );
                     ctx.clipboard()
                         .write(warpui::clipboard::ClipboardContent::plain_text(
                             branch.clone(),
                         ));
                 }
                 ArtifactButtonsRowEvent::OpenPullRequest { url } => {
-                    send_telemetry_from_ctx!(
-                        AgentManagementTelemetryEvent::TombstoneArtifactClicked {
-                            artifact_type: ArtifactType::PullRequest
-                        },
-                        ctx
-                    );
                     ctx.open_url(url);
                 }
                 ArtifactButtonsRowEvent::ViewScreenshots { artifact_uids } => {
                     crate::ai::artifacts::open_screenshot_lightbox(artifact_uids, ctx);
                 }
                 ArtifactButtonsRowEvent::DownloadFile { artifact_uid } => {
-                    send_telemetry_from_ctx!(
-                        AgentManagementTelemetryEvent::TombstoneArtifactClicked {
-                            artifact_type: ArtifactType::File
-                        },
-                        ctx
-                    );
                     crate::ai::artifacts::download_file_artifact(artifact_uid, ctx);
                 }
             },
@@ -298,29 +276,6 @@ impl ConversationEndedTombstoneView {
                 ctx.notify();
             }
         });
-
-        // Fetch AmbientAgentTask for additional metadata (source, skill, artifacts, etc.)
-        #[cfg(not(target_family = "wasm"))]
-        if let Some(task_id) = task_id {
-            let ai_client = ServerApiProvider::handle(ctx).as_ref(ctx).get_ai_client();
-            ctx.spawn(
-                async move { ai_client.get_ambient_agent_task(&task_id).await },
-                |me, result, ctx| match result {
-                    Ok(task) => {
-                        me.display_data.enrich_from_task(task);
-                        me.artifact_buttons_view.update(ctx, |row, ctx| {
-                            row.update_artifacts(&me.display_data.artifacts, ctx);
-                        });
-                        ctx.notify();
-                    }
-                    Err(err) => {
-                        log::warn!(
-                            "Failed to fetch AmbientAgentTask for tombstone metadata: {err}"
-                        );
-                    }
-                },
-            );
-        }
 
         view
     }
@@ -601,17 +556,12 @@ impl TypedActionView for ConversationEndedTombstoneView {
         match action {
             #[cfg(not(target_family = "wasm"))]
             ConversationEndedTombstoneAction::ContinueLocally(conversation_id) => {
-                send_telemetry_from_ctx!(
-                    AgentManagementTelemetryEvent::TombstoneContinueLocally,
-                    ctx
-                );
                 ctx.dispatch_typed_action(&WorkspaceAction::ContinueConversationLocally {
                     conversation_id: *conversation_id,
                 });
             }
             #[cfg(target_family = "wasm")]
             ConversationEndedTombstoneAction::OpenInWarp(conversation_id) => {
-                send_telemetry_from_ctx!(AgentManagementTelemetryEvent::TombstoneOpenInWarp, ctx);
                 let conversation = BlocklistAIHistoryModel::handle(ctx)
                     .as_ref(ctx)
                     .conversation(conversation_id);

@@ -8,39 +8,26 @@ pub mod notebook;
 mod styles;
 pub mod telemetry;
 
-use std::sync::Arc;
-
-use async_trait::async_trait;
-
-use anyhow::Result;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use warpui::AppContext;
 
-use crate::server::cloud_objects::update_manager::InitiatedBy;
 use crate::{
     ai::document::ai_document_model::AIDocumentId,
     appearance::Appearance,
-    cloud_object::{
-        CloudModelType, CloudObjectEventEntrypoint, CreateCloudObjectResult, CreateObjectRequest,
-        GenericCloudObject, GenericServerObject, ObjectType, Owner, Revision, ServerCloudObject,
-        UpdateCloudObjectResult,
-    },
+    cloud_object::{CloudModelType, GenericCloudObject, ObjectType, Owner, ServerCloudObject},
     drive::{
         items::{notebook::WarpDriveNotebook, WarpDriveItem},
         CloudObjectTypeAndId,
     },
     persistence::ModelEvent,
-    server::{
-        ids::{ServerId, SyncId},
-        server_api::object::ObjectClient,
-        sync_queue::{QueueItem, SerializedModel},
-    },
+    server::ids::{ServerId, SyncId},
 };
 
-/// Serialized representation of a notebook for sync queue
-/// The AIDocumentID and ConversationID are stored here to avoid polluting the
-/// generic CreateObjectRequest type.
+use crate::cloud_object::SerializedModel;
+
+/// Serialized representation of a notebook stored in local object persistence.
+/// The AIDocumentID and ConversationID stay grouped with notebook content.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SerializedNotebook {
     pub(crate) data: String,
@@ -60,8 +47,6 @@ pub struct CloudNotebookModel {
 
 pub type CloudNotebook = GenericCloudObject<NotebookId, CloudNotebookModel>;
 
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
 impl CloudModelType for CloudNotebookModel {
     type CloudObjectType = CloudNotebook;
     type IdType = NotebookId;
@@ -100,42 +85,6 @@ impl CloudModelType for CloudNotebookModel {
         ModelEvent::UpsertNotebooks(objects.to_vec())
     }
 
-    fn create_object_queue_item(
-        &self,
-        notebook: &CloudNotebook,
-        entrypoint: CloudObjectEventEntrypoint,
-        initiated_by: InitiatedBy,
-    ) -> Option<QueueItem> {
-        if let SyncId::ClientId(client_id) = notebook.id {
-            let title = Some(notebook.model().display_name())
-                .filter(|name| !name.is_empty())
-                .map(Arc::new);
-
-            let serialized_model = Some(Arc::new(notebook.model().serialized()));
-
-            return Some(QueueItem::CreateObject {
-                object_type: self.object_type(),
-                owner: notebook.permissions.owner,
-                id: client_id,
-                title,
-                serialized_model,
-                initial_folder_id: notebook.metadata.folder_id,
-                entrypoint,
-                initiated_by,
-            });
-        }
-        None
-    }
-
-    fn update_object_queue_item(
-        &self,
-        _revision_ts: Option<Revision>,
-        _notebook: &CloudNotebook,
-    ) -> Option<QueueItem> {
-        // OpenWarp: notebooks are local-only, never enqueued to the cloud sync queue.
-        None
-    }
-
     fn should_update_after_server_conflict(&self) -> bool {
         true
     }
@@ -160,29 +109,6 @@ impl CloudModelType for CloudNotebookModel {
         };
         let json = serde_json::to_string(&serialized).expect("Failed to serialize notebook");
         SerializedModel::new(json)
-    }
-
-    async fn send_create_request(
-        object_client: Arc<dyn ObjectClient>,
-        request: CreateObjectRequest,
-    ) -> Result<CreateCloudObjectResult> {
-        object_client.create_notebook(request).await
-    }
-
-    async fn send_update_request(
-        &self,
-        object_client: Arc<dyn ObjectClient>,
-        server_id: ServerId,
-        revision: Option<Revision>,
-    ) -> Result<UpdateCloudObjectResult<GenericServerObject<NotebookId, Self>>> {
-        object_client
-            .update_notebook(
-                server_id.into(),
-                Some(self.title.clone()),
-                Some(self.data.clone().into()),
-                revision,
-            )
-            .await
     }
 
     fn renders_in_warp_drive(&self) -> bool {

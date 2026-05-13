@@ -669,32 +669,6 @@ union CloudObjectResult = CloudObjectOutput | UserFacingError
 
 union CloudObjectWithDescendants = AIConversation | FolderWithDescendants | GenericStringObject | Notebook | Workflow
 
-type CodebaseContextConfigOutput implements Response {
-  embeddingCadence: Int!
-  embeddingConfig: EmbeddingConfig!
-  responseContext: ResponseContext!
-}
-
-union CodebaseContextConfigResult = CodebaseContextConfigOutput | UserFacingError
-
-type CodebaseContextPolicy {
-  defaultEnabledValue: Boolean!
-  embeddingGenerationBatchSize: Int!
-  isUnlimitedIndices: Boolean!
-  maxFilesPerRepo: Int!
-  maxIndices: Int!
-  toggleable: Boolean!
-}
-
-type CodebaseContextSettings {
-  enabled: Boolean!
-  setting: AdminEnablementSetting!
-}
-
-input CodebaseContextSettingsInput {
-  enabled: AdminEnablementSetting
-}
-
 enum ComputerUseAutonomyValue {
   ALWAYS_ALLOW
   ALWAYS_ASK
@@ -1165,8 +1139,6 @@ enum Experiment {
   BUILD_PLAN_AUTO_RELOAD_POST_PURCHASE_MODAL
   CLOUD_PREFERENCES_CONTROL
   CLOUD_PREFERENCES_GRADUAL_ROLLOUT_EXPERIMENT
-  CODEBASE_CONTEXT_CONTROL
-  CODEBASE_CONTEXT_EXPERIMENT
   DISABLE_AGENT_MODE_EXPERIMENT
   ENV_VARS_EARLY_ACCESS_EXPERIMENT
   FREE_TIER_TO_BUILD_CONVERSION_CONTROL
@@ -1488,7 +1460,6 @@ enum GenericStringObjectFormat {
   JsonEnvVarCollection
   JsonMCPServer
   JsonPreference
-  JsonScheduledAmbientAgent
   JsonTemplatableMCPServer
   JsonWorkflowEnum
 }
@@ -2271,8 +2242,6 @@ type PlanArtifact {
 }
 
 type PlanPricing {
-  codebaseContextFileLimit: Int!
-  codebaseLimit: Int!
   maxTeamSize: Int
   monthlyPlanPricePerMonthUsdCents: Int!
   plan: StripeSubscriptionPlan!
@@ -2521,10 +2490,8 @@ type RequestLimitInfo {
   embeddingGenerationBatchSize: Int!
   isUnlimited: Boolean!
   isUnlimitedAutosuggestions: Boolean!
-  isUnlimitedCodebaseIndices: Boolean!
   isUnlimitedSuggestedCodeDiffs: Boolean!
   isUnlimitedVoice: Boolean!
-  maxCodebaseIndices: Int!
   maxFilesPerRepo: Int!
   nextRefreshTime: Time!
   requestLimit: Int!
@@ -2721,7 +2688,6 @@ type RootMutation {
 type RootQuery {
   apiKeys(requestContext: RequestContext!): APIKeyPropertiesResult!
   cloudObject(input: CloudObjectInput!, requestContext: RequestContext!): CloudObjectResult!
-  codebaseContextConfig(requestContext: RequestContext!): CodebaseContextConfigResult!
 
   """
   Returns the model choices available on the free tier without requiring
@@ -2758,14 +2724,6 @@ type RootQuery {
   """
   syncMerkleTree(input: SyncMerkleTreeInput!, requestContext: RequestContext!): SyncMerkleTreeResult!
 
-  """
-  Fetch attachments for a task.
-  Requires the caller to have ViewAction permission on the task.
-  
-  Note: This query returns a Task object to allow future extension.
-  In the future, this may be merged with taskSecrets into a single task query.
-  """
-  task(input: TaskInput!, requestContext: RequestContext!): TaskResult!
   taskSecrets(input: TaskSecretsInput!, requestContext: RequestContext!): TaskSecretsResult!
   updatedCloudObjects(input: UpdatedCloudObjectsInput!, requestContext: RequestContext!): UpdatedCloudObjectsResult!
   user(requestContext: RequestContext!): UserResult!
@@ -3131,50 +3089,6 @@ type TOSViolationError implements UserFacingErrorInterface {
   message: String!
 }
 
-"""
-Task object containing attachments.
-In the future, this can be extended with more fields (secrets, etc.) and 
-merged with other task queries into a single unified query.
-"""
-type Task {
-  """List of attachments (images/files) associated with this task."""
-  attachments: [TaskAttachment!]!
-
-  """The ID of the task."""
-  taskId: ID!
-}
-
-"""A task attachment (file or image) with presigned download URL."""
-type TaskAttachment {
-  """Presigned URL for downloading the attachment (valid for 15 minutes)."""
-  downloadUrl: String!
-
-  """
-  Unique identifier for this file (UUID from GCS).
-  Can be used to distinguish files with duplicate names.
-  """
-  fileId: ID!
-
-  """Original filename of the attachment."""
-  filename: String!
-
-  """MIME type of the attachment."""
-  mimeType: String!
-}
-
-"""Input for task-related queries."""
-input TaskInput {
-  """The ID of the task."""
-  taskId: ID!
-}
-
-type TaskOutput implements Response {
-  responseContext: ResponseContext!
-  task: Task!
-}
-
-union TaskResult = TaskOutput | UserFacingError
-
 type TaskSecretEntry {
   name: String!
   value: ManagedSecretValue!
@@ -3263,7 +3177,6 @@ type Tier {
   anyoneWithLinkSharingPolicy: AnyoneWithLinkSharingPolicy
   byoApiKeyPolicy: ByoApiKeyPolicy
   cloudConversationStoragePolicy: CloudConversationStoragePolicy
-  codebaseContextPolicy: CodebaseContextPolicy
   customLlmPolicy: CustomLlmPolicy
   description: String!
   directApiUsOnlyInferencePolicy: DirectApiUsOnlyInferencePolicy
@@ -3334,7 +3247,6 @@ type ToolUsageMetadata {
   readShellCommandOutputStats: ToolCallStats!
   runCommandStats: ToolCallStats!
   runCommandsExecuted: Int!
-  searchCodebaseStats: ToolCallStats!
   suggestCreatePlanStats: ToolCallStats!
   suggestPlanStats: ToolCallStats!
   useComputerStats: ToolCallStats!
@@ -3657,7 +3569,6 @@ input UpdateWorkspaceSettingsInput {
   setAiPermissionsSettings: AiPermissionsSettingsInput
   setAmbientAgentSettings: AmbientAgentSettingsInput
   setCloudConversationStorageSettings: CloudConversationStorageSettingsInput
-  setCodebaseContextSettings: CodebaseContextSettingsInput
   setDomainCaptureSettings: DomainCaptureSettingsInput
   setEnterpriseBillingSettings: EnterpriseBillingSettingsInput
   setLinkSharingSettings: LinkSharingSettingsInput
@@ -4029,7 +3940,6 @@ type WorkspaceSettings {
   aiPermissionsSettings: AiPermissionsSettings!
   ambientAgentSettings: AmbientAgentSettings
   cloudConversationStorageSettings: CloudConversationStorageSettings!
-  codebaseContextSettings: CodebaseContextSettings!
   domainCaptureSettings: DomainCaptureSettings!
   enterpriseBillingSettings: EnterpriseBillingSettings
   isDiscoverable: Boolean!

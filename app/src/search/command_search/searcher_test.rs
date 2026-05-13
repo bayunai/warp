@@ -1,5 +1,5 @@
-use super::*;
-use crate::auth::auth_manager::AuthManager;
+﻿use super::*;
+use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
 use crate::search::command_search::searcher::CommandSearchMixer;
 use crate::search::data_source::Query;

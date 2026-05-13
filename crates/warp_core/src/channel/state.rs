@@ -235,26 +235,14 @@ impl ChannelState {
             .clone()
     }
 
-    /// Returns the HTTP(S) root URL for the RTC server. Used for HTTP endpoints
-    /// served by warp-server-rtc (e.g. the agent event SSE stream).
+    /// Returns the HTTP(S) root URL for the RTC server.
     ///
-    /// Derived from [`ws_server_url`] by rewriting the scheme (`wss`→`https`,
-    /// `ws`→`http`) and stripping the path. Falls back to [`server_root_url`]
-    /// when the WS URL cannot be parsed or uses an unexpected scheme — this
-    /// keeps override paths (e.g. `WARP_WS_SERVER_URL=...`) working without a
-    /// separate override for the HTTP variant.
-    pub fn rtc_http_url() -> Cow<'static, str> {
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "test-util")] {
-                Cow::Owned(MOCK_SERVER_URL.clone())
-            } else {
-                match derive_http_origin_from_ws_url(&Self::ws_server_url()) {
-                    Some(origin) => Cow::Owned(origin),
-                    None => Self::server_root_url(),
-                }
-            }
-        }
-    }
+    /// OpenWarp Wave 5-5：原为 `warp-server-rtc` HTTP 端点(如 agent event SSE stream)
+    /// 提供根 URL。随着 `stream_agent_events` / `generate_multi_agent_output` 云端
+    /// SSE 路径 stub 化后,本方法在全仓 0 消费 → 物理删。
+    ///
+    /// `ws_server_url` 仍保留(BYOP harness `agent_sdk/driver/harness/mod.rs:289`
+    /// 仍依赖 — 为本地代理 server 提供 session_sharing-protocol 端点)。
 
     pub fn session_sharing_server_url() -> Option<Cow<'static, str>> {
         cfg_if::cfg_if! {
@@ -419,25 +407,7 @@ impl ChannelState {
     }
 }
 
-/// Derives an HTTP(S) origin URL from a WebSocket URL by rewriting the scheme
-/// (`wss`→`https`, `ws`→`http`) and stripping the path, query, and fragment.
-/// Returns [`None`] when the input cannot be parsed as a URL or uses a scheme
-/// other than `ws` or `wss`.
-#[cfg(not(feature = "test-util"))]
-fn derive_http_origin_from_ws_url(ws_url: &str) -> Option<String> {
-    let url = Url::parse(ws_url).ok()?;
-    let http_scheme = match url.scheme() {
-        "wss" => "https",
-        "ws" => "http",
-        _ => return None,
-    };
-    let host = url.host_str()?;
-    let mut origin = format!("{http_scheme}://{host}");
-    if let Some(port) = url.port() {
-        origin.push_str(&format!(":{port}"));
-    }
-    Some(origin)
-}
+/// OpenWarp Wave 5-5：`derive_http_origin_from_ws_url` 随 `rtc_http_url()` 一同物理删。
 
 #[cfg(all(test, not(feature = "test-util")))]
 #[path = "state_tests.rs"]

@@ -1,19 +1,16 @@
-use std::collections::HashSet;
+﻿use std::collections::HashSet;
 
 use super::*;
-use crate::ai::active_agent_views_model::ActiveAgentViewsModel;
 use crate::ai::agent_conversations_model::AgentConversationsModel;
 use crate::ai::blocklist::{AIQueryHistory, BlocklistAIPermissions};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::llms::LLMPreferences;
 use crate::ai::mcp::gallery::MCPGalleryManager;
 use crate::ai::mcp::templatable_manager::TemplatableMCPServerManager;
-use crate::ai::outline::RepoOutlines;
-use crate::ai::persisted_workspace::PersistedWorkspace;
 use crate::ai::restored_conversations::RestoredAgentConversations;
 use crate::ai::skills::SkillManager;
 use crate::ai::AIRequestUsageModel;
-use crate::auth::auth_manager::AuthManager;
+use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
 use crate::changelog_model::ChangelogModel;
 use crate::cloud_object::model::persistence::CloudModel;
@@ -31,11 +28,11 @@ use watcher::HomeDirectoryWatcher;
 use crate::editor::{EditorAction, TextStyleOperation};
 use crate::input_suggestions::{HistoryOrder, Item};
 use crate::network::NetworkStatus;
-use crate::server::cloud_objects::{listener::Listener, update_manager::UpdateManager};
+use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::server_api::ServerApiProvider;
-use crate::server::sync_queue::SyncQueue;
 
 use crate::server::telemetry::context_provider::AppTelemetryContextProvider;
+use crate::settings::import::model::ImportedConfigModel;
 use crate::settings::{AliasExpansionSettings, AppEditorSettings, InputBoxType, PrivacySettings};
 use crate::settings_view::keybindings::KeybindingChangedNotifier;
 #[cfg(windows)]
@@ -50,6 +47,7 @@ use crate::workspaces::team_tester::TeamTesterStatus;
 use crate::workspaces::update_manager::TeamUpdateManager;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 
+use crate::terminal::block_list_viewport::ScrollPosition;
 use crate::terminal::local_tty::shell::ShellStarter;
 use crate::terminal::model::ansi::{Handler, PrecmdValue};
 use crate::terminal::model::block::SerializedBlock;
@@ -62,6 +60,7 @@ use crate::terminal::model::terminal_model::BlockIndex;
 use chrono::Local;
 use warpui::text::SelectionType;
 
+use crate::experiments;
 use crate::terminal::shell::ShellType;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::themes::theme::AnsiColorIdentifier;
@@ -70,7 +69,6 @@ use crate::{
     editor::{DisplayPoint, Point},
     terminal::TerminalView,
 };
-use crate::{experiments, AgentNotificationsModel};
 use fuzzy_match::FuzzyMatchResult;
 use session_sharing_protocol::common::Role;
 use smol_str::SmolStr;
@@ -85,7 +83,7 @@ use unindent::Unindent;
 #[cfg(feature = "voice_input")]
 use voice_input::VoiceInputToggledFrom;
 use warpui::platform::WindowStyle;
-use warpui::{App, ReadModel, UpdateView};
+use warpui::{App, ReadModel, UpdateView, WindowId};
 
 use crate::terminal::universal_developer_input::UniversalDeveloperInputButtonBarEvent;
 
@@ -111,14 +109,13 @@ pub fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| SystemStats::new());
     app.add_singleton_model(|_| Prompt::mock());
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(CloudModel::mock);
+    app.add_singleton_model(ImportedConfigModel::new);
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(TeamUpdateManager::mock);
     app.add_singleton_model(UpdateManager::mock);
     app.add_singleton_model(MCPGalleryManager::new);
-    app.add_singleton_model(Listener::mock);
     app.add_singleton_model(|_| Appearance::mock());
     app.add_singleton_model(PrivacySettings::mock);
     app.add_singleton_model(|_ctx| SyncedInputState::mock());
@@ -133,8 +130,6 @@ pub fn initialize_app(app: &mut App) {
     });
     app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
     app.add_singleton_model(|_| CLIAgentSessionsModel::new());
-    app.add_singleton_model(|_| ActiveAgentViewsModel::new());
-    app.add_singleton_model(AgentNotificationsModel::new);
     app.add_singleton_model(BlocklistAIPermissions::new);
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
     app.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
@@ -146,7 +141,7 @@ pub fn initialize_app(app: &mut App) {
     app.add_singleton_model(|_| crate::code_review::git_status_update::GitStatusUpdateModel::new());
     app.add_singleton_model(RepoMetadataModel::new);
     app.add_singleton_model(FileSearchModel::new);
-    app.add_singleton_model(RepoOutlines::new_for_test);
+    // OpenWarp:RepoOutlines 已删除,不再注册。
     #[cfg(feature = "voice_input")]
     app.add_singleton_model(voice_input::VoiceInput::new);
 
@@ -192,7 +187,6 @@ pub fn initialize_app(app: &mut App) {
         crate::ai::ambient_agents::github_auth_notifier::GitHubAuthNotifier::new()
     });
     app.add_singleton_model(AgentConversationsModel::new);
-    app.add_singleton_model(PersistedWorkspace::new_for_test);
     // `LocalShellState` captures the user's interactive login-shell PATH (used
     // for MCP/sbx executable resolution). Tests don't exercise that capture, so
     // register the singleton in its `NotLoaded` state to satisfy callers that
@@ -253,6 +247,16 @@ pub async fn add_window_with_bootstrapped_terminal(
     history_file_commands: Option<Vec<String>>,
     session_info: Option<SessionInfo>,
 ) -> ViewHandle<TerminalView> {
+    add_window_with_bootstrapped_terminal_and_window_id(app, history_file_commands, session_info)
+        .await
+        .1
+}
+
+pub async fn add_window_with_bootstrapped_terminal_and_window_id(
+    app: &mut App,
+    history_file_commands: Option<Vec<String>>,
+    session_info: Option<SessionInfo>,
+) -> (WindowId, ViewHandle<TerminalView>) {
     let tips_model = app.add_model(|_| TipsCompleted::default());
 
     let shell_starter_source = ShellStarter::init(Default::default())
@@ -268,7 +272,7 @@ pub async fn add_window_with_bootstrapped_terminal(
         .with_shell_type(shell_type);
     let history_file_commands = history_file_commands.unwrap_or_default();
 
-    let (_, terminal) = app.add_window(WindowStyle::NotStealFocus, move |ctx| {
+    let (window_id, terminal) = app.add_window(WindowStyle::NotStealFocus, move |ctx| {
         TerminalView::new_for_test(tips_model, None, ctx)
     });
 
@@ -297,7 +301,7 @@ pub async fn add_window_with_bootstrapped_terminal(
     input.update(app, |input, ctx| {
         input.set_active_block_metadata(BlockMetadata::new(Some(session_id), None), false, ctx);
     });
-    terminal
+    (window_id, terminal)
 }
 
 /// Simulates being in a particular directory, for the purposes of completion
@@ -6260,5 +6264,238 @@ fn test_terminal_only_escape_locks_shell_mode() {
         });
         assert_eq!(config.input_type, InputType::Shell);
         assert!(config.is_locked);
+    });
+}
+
+#[test]
+fn test_page_up_and_down_scroll_terminal_from_prompt() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let (input, editor) = terminal.read(&app, |terminal, ctx| {
+            let input = terminal.input().clone();
+            let editor = input.as_ref(ctx).editor().clone();
+            (input, editor)
+        });
+
+        terminal.update(&mut app, |terminal, _| {
+            terminal
+                .model
+                .lock()
+                .simulate_block("ls", &"\n".repeat(1000));
+        });
+
+        input.update(&mut app, |input, ctx| {
+            input.user_insert("echo first line\necho second line", ctx);
+        });
+        editor.update(&mut app, |editor, ctx| {
+            editor.move_to_buffer_end(ctx);
+            editor.handle_action(&EditorAction::PageUp, ctx);
+        });
+
+        assert_eq!(
+            input.read(&app, |input, ctx| input.buffer_text(ctx)),
+            "echo first line\necho second line"
+        );
+        let scroll_position_after_page_up =
+            terminal.read(&app, |terminal, _| terminal.scroll_position());
+        assert!(matches!(
+            scroll_position_after_page_up,
+            ScrollPosition::FixedAtPosition { .. }
+        ));
+
+        editor.update(&mut app, |editor, ctx| {
+            editor.handle_action(&EditorAction::PageDown, ctx);
+        });
+
+        assert_eq!(
+            input.read(&app, |input, ctx| input.buffer_text(ctx)),
+            "echo first line\necho second line"
+        );
+        let scroll_position_after_page_down =
+            terminal.read(&app, |terminal, _| terminal.scroll_position());
+        assert_ne!(
+            scroll_position_after_page_down,
+            scroll_position_after_page_up
+        );
+    });
+}
+
+#[test]
+fn test_page_up_and_down_do_not_scroll_terminal_when_suggestions_are_visible() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+
+        let history_file_commands = vec![
+            "echo alpha\necho beta".to_string(),
+            "git status\ngit diff".to_string(),
+        ];
+        let terminal =
+            add_window_with_bootstrapped_terminal(&mut app, Some(history_file_commands), None)
+                .await;
+        let (input, editor) = terminal.read(&app, |terminal, ctx| {
+            let input = terminal.input().clone();
+            let editor = input.as_ref(ctx).editor().clone();
+            (input, editor)
+        });
+
+        terminal.update(&mut app, |terminal, _| {
+            terminal
+                .model
+                .lock()
+                .simulate_block("ls", &"\n".repeat(1000));
+        });
+
+        input.update(&mut app, |input, ctx| {
+            input.handle_action(&InputAction::Up, ctx);
+            assert!(input.suggestions_mode_model.as_ref(ctx).is_visible());
+        });
+
+        let initial_scroll_position = terminal.read(&app, |terminal, _| terminal.scroll_position());
+        let initial_buffer = input.read(&app, |input, ctx| input.buffer_text(ctx));
+
+        editor.update(&mut app, |editor, ctx| {
+            editor.handle_action(&EditorAction::PageUp, ctx);
+            editor.handle_action(&EditorAction::PageDown, ctx);
+        });
+
+        terminal.read(&app, |terminal, _| {
+            assert_eq!(terminal.scroll_position(), initial_scroll_position);
+        });
+        input.read(&app, |input, ctx| {
+            assert_eq!(input.buffer_text(ctx), initial_buffer);
+            assert!(input.suggestions_mode_model.as_ref(ctx).is_visible());
+        });
+    });
+}
+
+#[test]
+fn test_page_up_and_down_scroll_terminal_with_vim_mode_enabled() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+
+        let terminal = add_window_with_bootstrapped_terminal(&mut app, None, None).await;
+        let (input, editor) = terminal.read(&app, |terminal, ctx| {
+            let input = terminal.input().clone();
+            let editor = input.as_ref(ctx).editor().clone();
+            (input, editor)
+        });
+
+        terminal.update(&mut app, |terminal, _| {
+            terminal
+                .model
+                .lock()
+                .simulate_block("ls", &"\n".repeat(1000));
+        });
+
+        AppEditorSettings::handle(&app).update(&mut app, |settings, settings_ctx| {
+            let _ = settings.vim_mode.set_value(true, settings_ctx);
+        });
+
+        input.update(&mut app, |input, ctx| {
+            input.user_insert("echo first line\necho second line", ctx);
+        });
+        editor.update(&mut app, |editor, ctx| {
+            editor.vim_keystroke(&Keystroke::parse("escape").unwrap(), ctx);
+        });
+        editor.read(&app, |editor, ctx| {
+            assert_eq!(editor.vim_mode(ctx), Some(VimMode::Normal));
+        });
+
+        editor.update(&mut app, |editor, ctx| {
+            editor.handle_action(&EditorAction::PageUp, ctx);
+        });
+
+        assert_eq!(
+            input.read(&app, |input, ctx| input.buffer_text(ctx)),
+            "echo first line\necho second line"
+        );
+        let scroll_position_after_page_up =
+            terminal.read(&app, |terminal, _| terminal.scroll_position());
+        assert!(matches!(
+            scroll_position_after_page_up,
+            ScrollPosition::FixedAtPosition { .. }
+        ));
+
+        editor.update(&mut app, |editor, ctx| {
+            editor.handle_action(&EditorAction::PageDown, ctx);
+        });
+
+        assert_eq!(
+            input.read(&app, |input, ctx| input.buffer_text(ctx)),
+            "echo first line\necho second line"
+        );
+        let scroll_position_after_page_down =
+            terminal.read(&app, |terminal, _| terminal.scroll_position());
+        assert_ne!(
+            scroll_position_after_page_down,
+            scroll_position_after_page_up
+        );
+    });
+}
+
+#[test]
+fn test_custom_terminal_page_scroll_binding_applies_when_prompt_is_focused() {
+    App::test((), |mut app| async move {
+        initialize_app(&mut app);
+
+        let (window_id, terminal) =
+            add_window_with_bootstrapped_terminal_and_window_id(&mut app, None, None).await;
+        let (input, editor) = terminal.read(&app, |terminal, ctx| {
+            let input = terminal.input().clone();
+            let editor = input.as_ref(ctx).editor().clone();
+            (input, editor)
+        });
+
+        terminal.update(&mut app, |terminal, _| {
+            terminal
+                .model
+                .lock()
+                .simulate_block("ls", &"\n".repeat(1000));
+        });
+
+        app.update(|ctx| {
+            ctx.set_custom_trigger(
+                "terminal:scroll_up_one_page".to_owned(),
+                warpui::keymap::Trigger::Keystrokes(
+                    vec![Keystroke::parse("shift-pageup").unwrap()],
+                ),
+            );
+        });
+
+        let focus_path = [terminal.id(), input.id(), editor.id()];
+
+        let handled = app
+            .dispatch_keystroke(
+                window_id,
+                &focus_path,
+                &Keystroke::parse("pageup").unwrap(),
+                false,
+            )
+            .unwrap();
+        assert!(!handled);
+        terminal.read(&app, |terminal, _| {
+            assert_eq!(
+                terminal.scroll_position(),
+                ScrollPosition::FollowsBottomOfMostRecentBlock
+            );
+        });
+
+        let handled = app
+            .dispatch_keystroke(
+                window_id,
+                &focus_path,
+                &Keystroke::parse("shift-pageup").unwrap(),
+                false,
+            )
+            .unwrap();
+        assert!(handled);
+        terminal.read(&app, |terminal, _| {
+            assert!(matches!(
+                terminal.scroll_position(),
+                ScrollPosition::FixedAtPosition { .. }
+            ));
+        });
     });
 }

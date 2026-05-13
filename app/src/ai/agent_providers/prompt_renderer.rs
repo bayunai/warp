@@ -221,7 +221,17 @@ struct PromptContext {
 
 fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptContext {
     let mut out = PromptContext {
-        current_time: Local::now().format("%Y-%m-%d %H:%M:%S %:z").to_string(),
+        // P0-1 prompt cache 优化:`current_time` 只保留到自然日粒度,
+        // 不再精确到秒。原因:
+        // - system prompt 中任何每请求都变的内容都会让 Anthropic 的第 1 个
+        //   system breakpoint 写入的 hash 独一无二 → 写完即废,永不命中。
+        //   OpenAI 前 256 token 路由哈希同理,会被分散到不同机器。
+        // - 模型实际只需要知道“今天是哪天”就够了,跳越自然日那一次
+        //   miss 成本可接受(一天 × 所有活跃对话 × system tokens)。
+        // - 跨年同理成本与跨日一致,不需额外处理。
+        // 后续可考虑进一步把“当前时间”移到 user message 末尾(P0-1 方案 C),
+        // 让 system 段 100% 稳定;本步先取低风险的方案 B。
+        current_time: Local::now().format("%Y-%m-%d").to_string(),
         model_id: model_id.to_owned(),
         ..Default::default()
     };
@@ -247,10 +257,22 @@ fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptConte
                 }
             }
             AIAgentContext::CurrentTime { current_time } => {
-                out.current_time = current_time.format("%Y-%m-%d %H:%M:%S %:z").to_string();
+                // P0-1:与默认值保持一致,只保留自然日粒度。
+                // 上游 Warp 有可能传入精确到秒的 timestamp,这里统一压到“当前日期”。
+                out.current_time = current_time.format("%Y-%m-%d").to_string();
             }
             // 代码索引功能未实现,Codebase 上下文不进 system prompt。
             AIAgentContext::Codebase { .. } => {}
+            // P1-7 prompt cache 说明:`Git { head, branch }` 取决于当前仓库状态,
+            // 用户切分支会让渲染出的 system 段变化,导致所有上游供应商
+            // (Anthropic / OpenAI / DeepSeek)的 system+messages cache 全部失效。
+            // 这是**预期行为**:
+            //   - 指令模型在新分支上不能认为是老 git context;
+            //   - 作为代价用户在新分支上首请求 100% miss、写入新 cache,之后该
+            //     分支会复用。跨分支跳转频繁的开发者会看到最多的 miss。
+            // 考虑过的替代:把 git 状态移到 user message 末尾(同 P0-1 方案 C),
+            // 但那样 system 段会丢失“模型一看就知道当前分支”的上下文意义,
+            // 需要依赖它进行推理的模型会变差。本补丁维持现状。
             AIAgentContext::Git { head, branch } => {
                 out.git = Some(GitCtx {
                     head: head.clone(),

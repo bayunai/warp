@@ -1517,7 +1517,9 @@ impl NotebookView {
         window_id: WindowId,
         ctx: &mut ViewContext<Self>,
     ) {
-        let initial_load_complete = UpdateManager::as_ref(ctx).initial_load_complete();
+        let initial_load_complete =
+            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+                .initial_load_complete();
         // TODO @ianhodge CLD-2002: it could be nice to have a loading screen here while we wait for the load
         let settings = settings.clone();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
@@ -1621,7 +1623,8 @@ impl NotebookView {
         );
 
         // Once we've received metadata from the server, check if we can eagerly edit the notebook.
-        let has_metadata = UpdateManager::as_ref(ctx).initial_load_complete();
+        let has_metadata = crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+            .initial_load_complete();
         let baton_future = ctx.spawn(has_metadata, |me, _, ctx| {
             let active_notebook_data = me.active_notebook_data.as_ref(ctx);
 

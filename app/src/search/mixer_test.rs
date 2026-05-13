@@ -1,5 +1,5 @@
-use super::*;
-use crate::auth::auth_manager::AuthManager;
+﻿use super::*;
+use crate::auth::AuthManager;
 use crate::auth::AuthStateProvider;
 use crate::search::item::SearchItem;
 use crate::server::server_api::ServerApiProvider;

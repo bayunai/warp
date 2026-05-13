@@ -12,10 +12,7 @@ use warpui::{
 };
 
 use crate::{
-    ai::{
-        active_agent_views_model::ActiveAgentViewsModel, blocklist::BlocklistAIHistoryModel,
-        llms::LLMPreferences, skills::SkillManager,
-    },
+    ai::{blocklist::BlocklistAIHistoryModel, llms::LLMPreferences, skills::SkillManager},
     app_state::{AmbientAgentPaneSnapshot, LeafContents, TerminalPaneSnapshot},
     pane_group::{self, Direction, Event::OpenConversationHistory, PaneGroup},
     persistence::{BlockCompleted, ModelEvent},
@@ -291,15 +288,7 @@ impl PaneContent for TerminalPane {
         agent_view_controller.update(ctx, |controller, _ctx| {
             controller.set_pane_group_id(pane_group_id);
         });
-        let active_session = terminal_view.as_ref(ctx).active_session().clone();
-        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
-            model.register_agent_view_controller(
-                &agent_view_controller,
-                &active_session,
-                terminal_view_id,
-                ctx,
-            );
-        });
+        let _ = (agent_view_controller, terminal_view_id);
     }
 
     fn detach(
@@ -331,14 +320,7 @@ impl PaneContent for TerminalPane {
             ctx.unsubscribe_to_view(&view);
         }
 
-        // Notify the active agent views model that the terminal view has been closed
-        // (and that any active views are no longer active). On a `HiddenForClose` detach,
-        // `attach` will re-register via `register_agent_view_controller` when the tab is
-        // restored, so this is safe to run unconditionally.
         let terminal_view_id = self.terminal_view(ctx).id();
-        ActiveAgentViewsModel::handle(ctx).update(ctx, |model, ctx| {
-            model.unregister_agent_view_controller(terminal_view_id, ctx);
-        });
 
         // Clean up any active CLI agent session so its notification is removed.
         // Skip this for moves — the session is still running and will re-register in the new tab.
@@ -841,10 +823,8 @@ fn handle_terminal_view_event(
                 group.terminal_with_open_summarization_dialog = is_open.then_some(terminal_pane_id);
                 ctx.notify();
             }
-            Event::EnvironmentSetupModeSelectorToggled { is_open } => {
-                group.pane_with_open_environment_setup_mode_selector = is_open.then_some(pane_id);
-                ctx.notify();
-            }
+            // OpenWarp Wave 7-3:`Event::EnvironmentSetupModeSelectorToggled` handler 随
+            // Cloud Mode UI 子系统物理删。
             Event::AnonymousUserSignup => ctx.emit(pane_group::Event::AnonymousUserSignup),
             #[cfg(feature = "local_fs")]
             Event::OpenFileWithTarget {
@@ -947,9 +927,8 @@ fn handle_terminal_view_event(
                     initial_content: initial_content.clone(),
                 });
             }
-            Event::OpenEnvironmentManagementPane => {
-                ctx.emit(crate::pane_group::Event::OpenEnvironmentManagementPane);
-            }
+            // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` event forwarding 随 Cloud Mode UI
+            // 子系统物理删。
             #[cfg(feature = "local_fs")]
             Event::FileRenamed { old_path, new_path } => {
                 ctx.emit(pane_group::Event::FileRenamed {

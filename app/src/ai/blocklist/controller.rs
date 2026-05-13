@@ -43,9 +43,7 @@ use crate::ai::{
         StaticQueryType, UserQueryMode,
     },
     llms::LLMPreferences,
-    AIRequestUsageModel,
 };
-use crate::cloud_object::model::persistence::CloudModel;
 use crate::features::FeatureFlag;
 use crate::global_resource_handles::GlobalResourceHandlesProvider;
 use crate::network::NetworkStatus;
@@ -64,7 +62,6 @@ use crate::terminal::{
     ShellLaunchData,
 };
 use crate::workspaces::update_manager::TeamUpdateManager;
-use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{send_telemetry_from_ctx, server::telemetry::TelemetryEvent};
 use anyhow::anyhow;
 use chrono::{DateTime, Local};
@@ -74,13 +71,12 @@ use pending_response_streams::PendingResponseStreams;
 use session_sharing_protocol::common::ParticipantId;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
 use warp_core::assertions::safe_assert;
 use warp_multi_agent_api::{
     client_action::{Action, UpdateTaskDescription},
     message, ClientAction, Task, ToolType,
 };
-use warpui::r#async::{SpawnedFutureHandle, Timer};
+use warpui::r#async::SpawnedFutureHandle;
 
 use super::orchestration_events::{OrchestrationEventService, OrchestrationEventServiceEvent};
 use warpui::{AppContext, Entity, EntityId, ModelContext, ModelHandle, SingletonEntity};
@@ -806,28 +802,19 @@ impl BlocklistAIController {
                 continue;
             }
 
-            // Look up notebook to get title and sync_id
-            let cloud_model = CloudModel::as_ref(ctx);
-            let notebook_data = cloud_model
-                .get_all_active_notebooks()
-                .find(|nb| nb.model().ai_document_id.as_ref() == Some(&document_id))
-                .map(|nb| (nb.model().title.clone(), nb.id));
-
-            if let Some((title, sync_id)) = notebook_data {
-                AIDocumentModel::handle(ctx).update(ctx, |model, model_ctx| {
-                    model.create_document_from_notebook(
-                        document_id,
-                        sync_id,
-                        title,
-                        content,
-                        conversation_id,
-                        file_link_resolution_context.clone(),
-                        model_ctx,
-                    );
-                });
-            } else {
-                log::warn!("Notebook not found for ai_document_id: {document_id}");
-            }
+            // openWarp 本地化:plan 只存本地 SQLite。会话恢复时如果 plan 不在内存中,
+            // 从 attachment 携带的 content 重建。title 从 attachment 调用方没携带,
+            // 先用默认 planning 标题占位；apply_persisted_content 恢复时会被 SQLite 中存的 title 覆盖。
+            AIDocumentModel::handle(ctx).update(ctx, |model, model_ctx| {
+                model.create_document_with_id(
+                    document_id,
+                    crate::ai::ai_document_view::DEFAULT_PLANNING_DOCUMENT_TITLE,
+                    content.clone(),
+                    conversation_id,
+                    file_link_resolution_context.clone(),
+                    model_ctx,
+                );
+            });
         }
     }
 
@@ -1428,7 +1415,7 @@ impl BlocklistAIController {
         }
 
         BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
-            history.set_active_conversation_id(conversation_id, self.terminal_view_id, ctx);
+            history.mark_active_conversation_id(conversation_id, self.terminal_view_id, ctx);
         });
 
         if !FeatureFlag::AgentView.is_enabled() && trigger == FollowUpTrigger::Auto {
@@ -2204,7 +2191,7 @@ impl BlocklistAIController {
         });
         if !is_passive_request {
             BlocklistAIHistoryModel::handle(ctx).update(ctx, |history_model, ctx| {
-                history_model.set_active_conversation_id(
+                history_model.mark_active_conversation_id(
                     conversation_data.id,
                     self.terminal_view_id,
                     ctx,
@@ -2536,9 +2523,9 @@ impl BlocklistAIController {
                                     );
                                 },
                             );
-                            AIRequestUsageModel::handle(ctx).update(ctx, |model, ctx| {
-                                model.enable_buy_credits_banner(ctx);
-                            });
+                            // OpenWarp(Phase 3c A1):删除
+                            // `AIRequestUsageModel::enable_buy_credits_banner` 调用。
+                            // 本地化后 BYOP 场景下不存在"购买额外 credits"业务。
                         }
 
                         let mut renderable_error: RenderableAIError = e.as_ref().into();
@@ -2710,12 +2697,12 @@ impl BlocklistAIController {
                     // 修正参数重试。`can_attempt_resume_on_error=false` 防 LLM 持续输出坏 args 导致死循环。
                     // 只在本轮新加的 messages 里查找 synthetic 错误标记,避免历史持久化的
                     // 同标记反复命中导致死循环。
-                    // OpenWarp BYOP:两类 synthetic ToolCallResult 需要 auto-resume
-                    // (二者都不入 actions_to_queue,exchange 静默结束 → 模型卡死等结果)。
-                    // 1. invalid_arguments — from_args 解析失败兜底(原始)
-                    // 2. _byop_intercepted — webfetch / websearch 等本地拦截工具结果
-                    //    (chat_stream::dispatch_byop_web_tool 不走 protobuf executor,
-                    //     直接合成 result,没有 AIAgentAction 入队)
+                    // OpenWarp BYOP:没有进入 AIAgentAction 队列的 synthetic
+                    // ToolCallResult 需要 auto-resume,否则 exchange 静默结束,模型卡死等结果。
+                    // 1. invalid_arguments — from_args 解析失败兜底(原始)。
+                    // 2. _byop_intercepted — todowrite / webfetch / websearch 等本地拦截
+                    //    工具结果。这类工具不走 protobuf executor,直接合成 result,
+                    //    没有 AIAgentAction 入队。
                     let needs_byop_local_resume = conversation.all_tasks().any(|task| {
                         task.messages().any(|msg| {
                             newly_added_message_ids.contains(&MessageId::new(msg.id.clone()))
@@ -2813,11 +2800,10 @@ impl BlocklistAIController {
                     stream_id,
                     conversation_id,
                 });
-                AIRequestUsageModel::handle(ctx).update(ctx, |request_usage_model, ctx| {
-                    request_usage_model.refresh_request_usage_async(ctx);
-                });
-
-                self.maybe_refresh_ai_overages(ctx);
+                // OpenWarp(Phase 3c A1):删除
+                // `AIRequestUsageModel::refresh_request_usage_async` 与
+                // `maybe_refresh_ai_overages` 调用。两者本质都是服务端计量同步 RPC，
+                // 本地化后无作用。
             }
         }
     }
@@ -2840,37 +2826,9 @@ impl BlocklistAIController {
         });
     }
 
-    /// Checks if we should refresh AI overage information after an AI request completes.
-    /// This is used to ensure the UI matches the state of the workspace,
-    /// especially because overages are not real-time communicated to clients.
-    fn maybe_refresh_ai_overages(&mut self, ctx: &mut ModelContext<Self>) {
-        let workspace = UserWorkspaces::as_ref(ctx).current_workspace();
-        let Some(workspace) = workspace else {
-            return;
-        };
-
-        // We want to minimize the number of times we ping our backend for updated usage information;
-        // doing it after every AI query finishes would be very expensive.
-
-        // If a user is below their personal limits, then we know that they won't eat into overages,
-        // so we don't need to refresh.
-        let has_no_requests_remaining = !AIRequestUsageModel::as_ref(ctx).has_requests_remaining();
-        // If overages aren't enabled, we're not going to reap the benefit of refreshing at all anyway.
-        let are_overages_enabled = workspace.are_overages_enabled();
-
-        if are_overages_enabled && has_no_requests_remaining {
-            // Give a one second delay to ensure that Stripe has been charged and the database is completely updated,
-            // before syncing new AI overages data.
-            ctx.spawn(
-                async move { Timer::after(Duration::from_secs(1)).await },
-                |_, _, ctx| {
-                    UserWorkspaces::handle(ctx).update(ctx, |user_workspaces, ctx| {
-                        user_workspaces.refresh_ai_overages(ctx);
-                    });
-                },
-            );
-        }
-    }
+    // OpenWarp(Phase 3c A1):删除 `maybe_refresh_ai_overages` 函数。
+    // 原实现是“本地 limit 耗尽时从服务端拉取最新 overage 状态”的调优路径，
+    // BYOP 本地化后既无 limit 也无 overage，函数本体与唯一调用点都需要一起删除。
 
     pub(super) fn handle_response_stream_finished(
         &mut self,

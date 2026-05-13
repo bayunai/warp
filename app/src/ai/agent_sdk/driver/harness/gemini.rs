@@ -14,8 +14,9 @@ use warpui::{ModelHandle, ModelSpawner};
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::server::server_api::ai::AIClient;
 use crate::server::server_api::harness_support::HarnessSupportClient;
-use crate::server::server_api::ServerApi;
+use crate::server::server_api::AgentEventStreamClient;
 use crate::terminal::model::block::BlockId;
 use crate::terminal::CLIAgent;
 
@@ -67,20 +68,21 @@ impl ThirdPartyHarness for GeminiHarness {
         _resumption_prompt: Option<&str>,
         working_dir: &Path,
         _task_id: Option<AmbientAgentTaskId>,
-        server_api: Arc<ServerApi>,
+        harness_support_client: Arc<dyn HarnessSupportClient>,
+        _ai_client: Arc<dyn AIClient>,
+        _agent_event_stream_client: Arc<dyn AgentEventStreamClient>,
         terminal_driver: ModelHandle<TerminalDriver>,
         _resume: Option<ResumePayload>,
     ) -> Result<Box<dyn HarnessRunner>, AgentDriverError> {
         // Gemini does not support conversation resume yet. When it does, it will add its
         // own `ResumePayload::Gemini(..)` variant and override `fetch_resume_payload`,
         // and decide how to surface the user-turn resumption preamble.
-        let client: Arc<dyn HarnessSupportClient> = server_api;
         Ok(Box::new(GeminiHarnessRunner::new(
             self.cli_agent().command_prefix(),
             prompt,
             system_prompt,
             working_dir,
-            client,
+            harness_support_client,
             terminal_driver,
         )?))
     }

@@ -13,12 +13,8 @@ use super::response_stream::ResponseStreamId;
 use super::{BlocklistAIController, RequestInput};
 use crate::ai::agent::conversation::{AIConversationId, ConversationStatus};
 use crate::ai::agent::{AIAgentActionId, AIAgentAttachment, EntrypointType};
-use crate::ai::attachment_utils::{
-    build_file_attachment_map, download_file, sanitize_filename, DownloadedAttachment,
-};
 use crate::ai::blocklist::agent_view::AgentViewEntryOrigin;
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
-use crate::server::server_api::ServerApiProvider;
 use crate::terminal::model::block::BlockId;
 use warpui::{AppContext, ModelContext, SingletonEntity};
 
@@ -556,7 +552,7 @@ impl BlocklistAIController {
         // Process attachments and set them in the context model
         let mut block_ids = Vec::new();
         let mut selected_text_parts = Vec::new();
-        let mut file_downloads: Vec<(String, String)> = Vec::new();
+        let mut ignored_file_attachments = Vec::new();
         for attachment in attachments {
             match attachment {
                 AgentAttachment::BlockReference { block_id } => {
@@ -566,11 +562,8 @@ impl BlocklistAIController {
                 AgentAttachment::PlainText { content } => {
                     selected_text_parts.push(content);
                 }
-                AgentAttachment::FileReference {
-                    attachment_id,
-                    file_name,
-                } => {
-                    file_downloads.push((attachment_id, file_name));
+                AgentAttachment::FileReference { file_name, .. } => {
+                    ignored_file_attachments.push(file_name);
                 }
             }
         }
@@ -589,106 +582,20 @@ impl BlocklistAIController {
             }
         });
 
-        // If there are no file downloads (or the feature is disabled), send the query immediately.
-        if file_downloads.is_empty() || !FeatureFlag::CloudModeImageContext.is_enabled() {
-            self.send_shared_session_query(
-                prompt,
-                conversation_id,
-                participant_id,
-                HashMap::new(),
-                ctx,
+        if !ignored_file_attachments.is_empty() {
+            log::warn!(
+                "Ignoring {} shared-session file attachment(s) because cloud attachment downloads are disabled in OpenWarp: {}",
+                ignored_file_attachments.len(),
+                ignored_file_attachments.join(", ")
             );
-            return;
         }
 
-        // We have file downloads — ensure both the download dir and task ID are available.
-        let Some(attachment_dir) = self.attachments_download_dir.clone() else {
-            log::error!(
-                "No attachments_download_dir set on controller, cannot process file attachments"
-            );
-            self.send_shared_session_query(
-                prompt,
-                conversation_id,
-                participant_id,
-                HashMap::new(),
-                ctx,
-            );
-            return;
-        };
-        let Some(task_id) = self.ambient_agent_task_id else {
-            log::error!("No task_id available to download attachments");
-            self.send_shared_session_query(
-                prompt,
-                conversation_id,
-                participant_id,
-                HashMap::new(),
-                ctx,
-            );
-            return;
-        };
-
-        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-        let server_api = ServerApiProvider::as_ref(ctx).get();
-        let attachment_ids: Vec<String> = file_downloads.iter().map(|(id, _)| id.clone()).collect();
-
-        // Fetch presigned download URLs from the server, download files to disk,
-        // then build the attachment map from only the successfully downloaded files.
-        ctx.spawn(
-            async move {
-                let download_urls = match ai_client
-                    .download_task_attachments(&task_id, &attachment_ids)
-                    .await
-                {
-                    Ok(resp) => resp
-                        .attachments
-                        .into_iter()
-                        .map(|att| (att.attachment_id, att.download_url))
-                        .collect::<std::collections::HashMap<_, _>>(),
-                    Err(e) => {
-                        log::error!("Failed to get download URLs for task {task_id}: {e}");
-                        return vec![];
-                    }
-                };
-
-                if let Err(e) = async_fs::create_dir_all(&attachment_dir).await {
-                    log::error!("Failed to create attachments directory: {e}");
-                    return vec![];
-                }
-
-                let mut downloaded = Vec::new();
-                for (attachment_id, file_name) in &file_downloads {
-                    let Some(url) = download_urls.get(attachment_id) else {
-                        log::warn!("No download URL for attachment {attachment_id}");
-                        continue;
-                    };
-                    let safe_name = sanitize_filename(file_name).to_string();
-                    let dest = attachment_dir.join(format!("{attachment_id}_{safe_name}"));
-
-                    match download_file(server_api.http_client(), url, &dest).await {
-                        Ok(_) => {
-                            downloaded.push(DownloadedAttachment {
-                                file_id: attachment_id.clone(),
-                                file_name: safe_name,
-                                file_path: dest.to_string_lossy().into_owned(),
-                            });
-                        }
-                        Err(e) => {
-                            log::error!("Failed to download {safe_name}: {e}");
-                        }
-                    }
-                }
-                downloaded
-            },
-            move |controller, downloaded, ctx| {
-                let file_attachments = build_file_attachment_map(&downloaded);
-                controller.send_shared_session_query(
-                    prompt,
-                    conversation_id,
-                    participant_id,
-                    file_attachments,
-                    ctx,
-                );
-            },
+        self.send_shared_session_query(
+            prompt,
+            conversation_id,
+            participant_id,
+            HashMap::new(),
+            ctx,
         );
     }
 

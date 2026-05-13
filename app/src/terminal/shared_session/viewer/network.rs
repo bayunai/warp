@@ -39,12 +39,9 @@ use warpui::{
 use websocket::{Message, Sink, Stream, WebsocketMessage as _};
 
 use crate::{
-    auth::{auth_state::AuthState, AuthStateProvider, UserUid},
+    auth::{AuthState, AuthStateProvider, UserUid},
     editor::{CrdtOperation, ReplicaId},
-    server::{
-        server_api::{auth::AuthClient, ServerApiProvider},
-        telemetry::telemetry_context,
-    },
+    server::telemetry::telemetry_context,
     terminal::{
         event_listener::ChannelEventListener,
         model::block::BlockId,
@@ -297,30 +294,25 @@ impl Network {
         }
     }
 
-    async fn get_user_id(
-        auth_client: Arc<dyn AuthClient>,
-        auth_state: &AuthState,
-    ) -> anyhow::Result<UserID> {
+    async fn get_user_id(auth_state: &AuthState) -> anyhow::Result<UserID> {
+        // OpenWarp Wave 3-1:原 `auth_client.get_or_refresh_access_token()` 路径随
+        // AuthClient trait 一同物理删。OpenWarp 已无云端 session sharing,
+        // bearer_token 直接取 AuthState 本地缓存(绝大多数路径下为 `None`)。
         let user_id = UserID {
             anonymous_id: auth_state.anonymous_id(),
-            access_token: auth_client
-                .get_or_refresh_access_token()
-                .await
-                .ok()
-                .and_then(|token| token.bearer_token()),
+            access_token: auth_state.get_access_token_ignoring_validity(),
         };
         anyhow::Ok(user_id)
     }
 
     async fn connect_websocket_and_get_user_id(
         session_id: SessionId,
-        auth_client: Arc<dyn AuthClient>,
         auth_state: Arc<AuthState>,
     ) -> anyhow::Result<((impl Sink, impl Stream), UserID)> {
         let Some(join_endpoint) = connect_endpoint(format!("/sessions/join/{session_id}")) else {
             bail!("This channel does not support session-sharing.");
         };
-        let user_id = Self::get_user_id(auth_client, &auth_state).await?;
+        let user_id = Self::get_user_id(&auth_state).await?;
         let socket = websocket::WebSocket::connect(join_endpoint, None /* protocols */).await?;
         anyhow::Ok(((socket.split().await), user_id))
     }
@@ -391,11 +383,10 @@ impl Network {
         ws_proxy_rx: async_channel::Receiver<UpstreamMessage>,
         ctx: &mut ModelContext<Self>,
     ) {
-        let auth_client = ServerApiProvider::as_ref(ctx).get_auth_client();
         let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
         // Open a websocket to the server to join the session.
         ctx.spawn(
-            Self::connect_websocket_and_get_user_id(session_id, auth_client, auth_state.clone()),
+            Self::connect_websocket_and_get_user_id(session_id, auth_state.clone()),
             |network, conn, ctx| match conn {
                 Ok(((sink, stream), user_id)) => {
                     let initialize_message = UpstreamMessage::Initialize(InitPayload {
@@ -441,12 +432,11 @@ impl Network {
             return;
         };
         let session_id = self.session_id;
-        let auth_client = ServerApiProvider::as_ref(ctx).get_auth_client();
         let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
         let abort_handle = ctx.spawn_with_retry_on_error(
             move || {
                 log::info!("Attempting to reconnect to session sharing server as viewer");
-                Self::connect_websocket_and_get_user_id(session_id, auth_client.clone(), auth_state.clone())
+                Self::connect_websocket_and_get_user_id(session_id, auth_state.clone())
             },
             RECONNECT_RETRY_STRATEGY,
             move |network, conn, ctx| match conn {
@@ -493,10 +483,9 @@ impl Network {
 
     /// Fetches the new user id and reconnectes to the websocket.
     pub fn reauthenticate_viewer(&mut self, ctx: &mut ModelContext<Self>) {
-        let server_api = ServerApiProvider::as_ref(ctx).get();
         let auth_state = AuthStateProvider::as_ref(ctx).get().clone();
         ctx.spawn(
-            async move { Self::get_user_id(server_api, &auth_state).await },
+            async move { Self::get_user_id(&auth_state).await },
             |network, res, ctx| match res {
                 Ok(user_id) => {
                     let message = UpstreamMessage::Reauthenticated { user_id };

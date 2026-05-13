@@ -2,16 +2,13 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{
-    cloud_object::{
-        model::{
-            generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
-            json_model::{JsonModel, JsonSerializer},
-        },
-        GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, Revision, ServerCloudObject, UniquePer,
+use crate::cloud_object::{
+    model::{
+        generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
+        json_model::{JsonModel, JsonSerializer},
     },
-    server::sync_queue::QueueItem,
+    GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey, JsonObjectType,
+    ServerCloudObject, UniquePer,
 };
 
 use settings::{
@@ -168,18 +165,6 @@ impl StringModel for Preference {
 
     fn display_name(&self) -> String {
         self.model_type_name().to_owned()
-    }
-
-    fn update_object_queue_item(
-        &self,
-        revision_ts: Option<Revision>,
-        object: &CloudPreference,
-    ) -> Option<QueueItem> {
-        Some(QueueItem::UpdateCloudPreferences {
-            model: object.model().clone().into(),
-            id: object.id,
-            revision: revision_ts.or_else(|| object.metadata.revision.clone()),
-        })
     }
 
     fn should_clear_on_unique_key_conflict(&self) -> bool {

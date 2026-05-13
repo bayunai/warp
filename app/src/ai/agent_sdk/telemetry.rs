@@ -42,10 +42,6 @@ pub(super) enum CliTelemetryEvent {
     TaskList,
     /// Executing `warp task get`
     TaskGet,
-    /// Executing `warp run conversation get`
-    ConversationGet,
-    /// Executing `warp run get <id> --conversation`
-    RunConversationGet,
     /// Executing `warp run message watch`
     RunMessageWatch { harness: &'static str },
     /// Executing `warp run message send`
@@ -58,8 +54,6 @@ pub(super) enum CliTelemetryEvent {
     RunMessageMarkDelivered { harness: &'static str },
     /// Executing `warp login`
     Login,
-    /// Executing `warp logout`
-    Logout,
     /// Executing `warp whoami`
     Whoami,
     /// Executing `warp provider setup`
@@ -78,20 +72,6 @@ pub(super) enum CliTelemetryEvent {
     ArtifactGet,
     /// Executing `warp artifact download`
     ArtifactDownload,
-    /// Executing `warp schedule create`
-    ScheduleCreate,
-    /// Executing `warp schedule list`
-    ScheduleList,
-    /// Executing `warp schedule get`
-    ScheduleGet,
-    /// Executing `warp schedule pause`
-    SchedulePause,
-    /// Executing `warp schedule unpause`
-    ScheduleUnpause,
-    /// Executing `warp schedule update`
-    ScheduleUpdate,
-    /// Executing `warp schedule delete`
-    ScheduleDelete,
     /// Executing `warp secret create`
     SecretCreate,
     /// Executing `warp secret delete`
@@ -147,8 +127,6 @@ impl TelemetryEvent for CliTelemetryEvent {
             CliTelemetryEvent::ModelList => None,
             CliTelemetryEvent::TaskList => None,
             CliTelemetryEvent::TaskGet => None,
-            CliTelemetryEvent::ConversationGet => None,
-            CliTelemetryEvent::RunConversationGet => None,
             CliTelemetryEvent::RunMessageWatch { harness } => Some(json!({ "harness": harness })),
             CliTelemetryEvent::RunMessageSend { harness } => Some(json!({ "harness": harness })),
             CliTelemetryEvent::RunMessageList { harness } => Some(json!({ "harness": harness })),
@@ -157,7 +135,6 @@ impl TelemetryEvent for CliTelemetryEvent {
                 Some(json!({ "harness": harness }))
             }
             CliTelemetryEvent::Login => None,
-            CliTelemetryEvent::Logout => None,
             CliTelemetryEvent::Whoami => None,
             CliTelemetryEvent::ProviderSetup => None,
             CliTelemetryEvent::ProviderList => None,
@@ -167,13 +144,6 @@ impl TelemetryEvent for CliTelemetryEvent {
             CliTelemetryEvent::ArtifactUpload => None,
             CliTelemetryEvent::ArtifactGet => None,
             CliTelemetryEvent::ArtifactDownload => None,
-            CliTelemetryEvent::ScheduleCreate => None,
-            CliTelemetryEvent::ScheduleList => None,
-            CliTelemetryEvent::ScheduleGet => None,
-            CliTelemetryEvent::SchedulePause => None,
-            CliTelemetryEvent::ScheduleUnpause => None,
-            CliTelemetryEvent::ScheduleUpdate => None,
-            CliTelemetryEvent::ScheduleDelete => None,
             CliTelemetryEvent::SecretCreate => None,
             CliTelemetryEvent::SecretDelete => None,
             CliTelemetryEvent::SecretUpdate => None,
@@ -227,10 +197,6 @@ impl TelemetryEventDesc for CliTelemetryEventDiscriminants {
             CliTelemetryEventDiscriminants::ModelList => "CLI.Execute.Model.List",
             CliTelemetryEventDiscriminants::TaskList => "CLI.Execute.Task.List",
             CliTelemetryEventDiscriminants::TaskGet => "CLI.Execute.Task.Get",
-            CliTelemetryEventDiscriminants::ConversationGet => "CLI.Execute.Conversation.Get",
-            CliTelemetryEventDiscriminants::RunConversationGet => {
-                "CLI.Execute.Run.Conversation.Get"
-            }
             CliTelemetryEventDiscriminants::RunMessageWatch => "CLI.Execute.Run.Message.Watch",
             CliTelemetryEventDiscriminants::RunMessageSend => "CLI.Execute.Run.Message.Send",
             CliTelemetryEventDiscriminants::RunMessageList => "CLI.Execute.Run.Message.List",
@@ -239,7 +205,6 @@ impl TelemetryEventDesc for CliTelemetryEventDiscriminants {
                 "CLI.Execute.Run.Message.MarkDelivered"
             }
             CliTelemetryEventDiscriminants::Login => "CLI.Execute.Login",
-            CliTelemetryEventDiscriminants::Logout => "CLI.Execute.Logout",
             CliTelemetryEventDiscriminants::Whoami => "CLI.Execute.Whoami",
             CliTelemetryEventDiscriminants::ProviderSetup => "CLI.Execute.Provider.Setup",
             CliTelemetryEventDiscriminants::ProviderList => "CLI.Execute.Provider.List",
@@ -249,13 +214,6 @@ impl TelemetryEventDesc for CliTelemetryEventDiscriminants {
             CliTelemetryEventDiscriminants::ArtifactUpload => "CLI.Execute.Artifact.Upload",
             CliTelemetryEventDiscriminants::ArtifactGet => "CLI.Execute.Artifact.Get",
             CliTelemetryEventDiscriminants::ArtifactDownload => "CLI.Execute.Artifact.Download",
-            CliTelemetryEventDiscriminants::ScheduleCreate => "CLI.Execute.Schedule.Create",
-            CliTelemetryEventDiscriminants::ScheduleList => "CLI.Execute.Schedule.List",
-            CliTelemetryEventDiscriminants::ScheduleGet => "CLI.Execute.Schedule.Get",
-            CliTelemetryEventDiscriminants::SchedulePause => "CLI.Execute.Schedule.Pause",
-            CliTelemetryEventDiscriminants::ScheduleUnpause => "CLI.Execute.Schedule.Unpause",
-            CliTelemetryEventDiscriminants::ScheduleUpdate => "CLI.Execute.Schedule.Update",
-            CliTelemetryEventDiscriminants::ScheduleDelete => "CLI.Execute.Schedule.Delete",
             CliTelemetryEventDiscriminants::SecretCreate => "CLI.Execute.Secret.Create",
             CliTelemetryEventDiscriminants::SecretDelete => "CLI.Execute.Secret.Delete",
             CliTelemetryEventDiscriminants::SecretUpdate => "CLI.Execute.Secret.Update",
@@ -309,12 +267,6 @@ impl TelemetryEventDesc for CliTelemetryEventDiscriminants {
             CliTelemetryEventDiscriminants::ModelList => "Listed models from the Warp CLI",
             CliTelemetryEventDiscriminants::TaskList => "Listed tasks from the Warp CLI",
             CliTelemetryEventDiscriminants::TaskGet => "Got status of task from the Warp CLI",
-            CliTelemetryEventDiscriminants::ConversationGet => {
-                "Got conversation by ID from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::RunConversationGet => {
-                "Got run conversation from the Warp CLI"
-            }
             CliTelemetryEventDiscriminants::RunMessageWatch => {
                 "Watched run messages from the Warp CLI"
             }
@@ -331,7 +283,6 @@ impl TelemetryEventDesc for CliTelemetryEventDiscriminants {
                 "Marked a run message as delivered from the Warp CLI"
             }
             CliTelemetryEventDiscriminants::Login => "Logged in via the Warp CLI",
-            CliTelemetryEventDiscriminants::Logout => "Logged out via the Warp CLI",
             CliTelemetryEventDiscriminants::Whoami => "Printed current user info from the Warp CLI",
             CliTelemetryEventDiscriminants::ProviderSetup => "Set up a provider via the Warp CLI",
             CliTelemetryEventDiscriminants::ProviderList => "Listed providers from the Warp CLI",
@@ -352,27 +303,6 @@ impl TelemetryEventDesc for CliTelemetryEventDiscriminants {
             }
             CliTelemetryEventDiscriminants::ArtifactDownload => {
                 "Downloaded an artifact from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::ScheduleCreate => {
-                "Created a scheduled agent from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::ScheduleList => {
-                "Listed scheduled agents from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::ScheduleGet => {
-                "Got scheduled agent configuration from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::SchedulePause => {
-                "Paused a scheduled agent from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::ScheduleUnpause => {
-                "Unpaused a scheduled agent from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::ScheduleUpdate => {
-                "Updated a scheduled agent from the Warp CLI"
-            }
-            CliTelemetryEventDiscriminants::ScheduleDelete => {
-                "Deleted a scheduled agent from the Warp CLI"
             }
             CliTelemetryEventDiscriminants::SecretCreate => "Created a secret from the Warp CLI",
             CliTelemetryEventDiscriminants::SecretDelete => "Deleted a secret from the Warp CLI",

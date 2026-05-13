@@ -1,5 +1,5 @@
-use crate::{
-    auth::auth_state::AuthState,
+﻿use crate::{
+    auth::AuthState,
     send_telemetry_on_executor,
     server::telemetry::{DownloadSource, TelemetryEvent},
 };

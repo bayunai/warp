@@ -4,7 +4,9 @@ pub use telemetry::{SkillOpenOrigin, SkillTelemetryEvent};
 cfg_if::cfg_if! {
     if #[cfg(not(feature = "local_fs"))] {
         mod dummy_skill_manager;
-        pub use dummy_skill_manager::SkillManager;
+        pub use dummy_skill_manager::{
+            SkillInventoryDuplicate, SkillInventoryItem, SkillManager, SkillManagerEvent,
+        };
     }
 }
 
@@ -28,6 +30,10 @@ pub use resolve_skill_spec::{
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
         mod skill_manager;
-        pub use skill_manager::{SkillManager, SkillWatcher};
+        pub use skill_manager::{
+            SkillInventoryDuplicate, SkillInventoryItem, SkillManager, SkillManagerEvent,
+        };
+        #[allow(unused_imports)]
+        pub use skill_manager::SkillWatcher;
     }
 }

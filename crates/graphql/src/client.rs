@@ -63,12 +63,14 @@ pub struct RequestOptions {
     pub path_prefix: Option<String>,
 }
 
+#[allow(dead_code)]
 pub(crate) struct Request {
     req: http_client::Request,
     operation_name: String,
 }
 
 /// Builds a [`Request`] that can be sent using [`send_graphql_request`].
+#[allow(dead_code)]
 pub(crate) fn build_graphql_request<Q, V>(
     client: &http_client::Client,
     operation: cynic::Operation<Q, V>,
@@ -110,6 +112,7 @@ where
 }
 
 /// Sends a [`Request`] to the server and returns the response.
+#[allow(dead_code)]
 pub(crate) async fn send_graphql_request<Q>(
     client: &http_client::Client,
     req: Request,
@@ -209,6 +212,7 @@ pub fn get_user_facing_error_message(e: UserFacingError) -> String {
 ///     ['a] do_operation(OperationVariables<'a>) -> Operation;
 /// }
 /// ```
+#[allow(unused_macros)]
 macro_rules! define_operation {
     { $([$($generics:tt)*])? $func:ident($vars:ty) -> $query:ty; } => {
         impl<$($($generics)*)?> $crate::client::Operation<$query>
@@ -232,4 +236,5 @@ macro_rules! define_operation {
         }
     };
 }
+#[allow(unused_imports)]
 pub(crate) use define_operation;

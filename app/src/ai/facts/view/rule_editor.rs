@@ -5,7 +5,6 @@ use crate::editor::{
     EditorOptions, EditorView, EnterAction, EnterSettings, Event as EditorEvent,
     PropagateAndNoOpNavigationKeys, SingleLineEditorOptions, TextOptions,
 };
-use crate::network::NetworkStatus;
 use crate::server::ids::SyncId;
 use crate::ui_components::buttons::icon_button;
 use crate::view_components::action_button::{ActionButton, DangerSecondaryTheme, PrimaryTheme};
@@ -24,8 +23,8 @@ use warpui::{
     ViewHandle,
 };
 
-use super::{is_delete_allowed, style, AIFact, CloudAIFact, CloudAIFactModel};
-use crate::ai::facts::AIMemory;
+use super::style;
+use crate::ai::facts::{AIFact, AIMemory, CloudAIFact, CloudAIFactModel};
 use crate::ui_components::icons::Icon;
 
 #[derive(Debug, Clone, Copy)]
@@ -74,11 +73,8 @@ pub struct RuleEditorView {
 
 impl RuleEditorView {
     pub fn new(ctx: &mut ViewContext<Self>) -> Self {
-        let network_status = NetworkStatus::handle(ctx);
-        ctx.subscribe_to_model(&network_status, |_me, _, _event, ctx| {
-            ctx.notify();
-        });
-
+        // OpenWarp(本地化,Phase 2d-1):原 NetworkStatus 订阅用于在线/离线状态变化时重绘
+        // (联动 `is_delete_allowed` 谓词),本地化后该谓词永为真,订阅为死代码,移除。
         let appearance = Appearance::as_ref(ctx);
         let font_family = appearance.ui_font_family();
         let text = TextOptions {
@@ -381,10 +377,10 @@ impl View for RuleEditorView {
             .with_child(self.render_header(appearance))
             .with_child(self.render_form(appearance));
 
-        if let Some(ai_fact) = &self.ai_fact {
-            if is_delete_allowed(ai_fact.clone(), app) {
-                col.add_child(ChildView::new(&self.delete_button).finish());
-            }
+        // OpenWarp(本地化,Phase 2d-1):原 `is_delete_allowed` 依赖网络在线+server_id,
+        // 本地化后只要在编辑已有规则就可删除,谓词取消。
+        if self.ai_fact.is_some() {
+            col.add_child(ChildView::new(&self.delete_button).finish());
         }
         col.finish()
     }

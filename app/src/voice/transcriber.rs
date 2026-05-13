@@ -35,6 +35,13 @@ impl VoiceTranscriber {
         }
     }
 
+    /// OpenWarp(本地化,Phase 4):创建一个禁用的 transcriber。原语义上 `Some(...)`
+    /// 代表云端 STT 后端可用,`None` 代表 "transcriber disabled";本地化后云端
+    /// `ServerVoiceTranscriber`(调 server_api.transcribe 发 Wispr STT)不可用,改走该构造子。
+    pub fn disabled() -> Self {
+        Self { transcriber: None }
+    }
+
     /// Returns the transcriber if one is set.
     pub fn transcriber(&self) -> Option<&Arc<dyn Transcriber>> {
         self.transcriber.as_ref()

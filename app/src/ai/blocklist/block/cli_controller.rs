@@ -216,54 +216,55 @@ impl CLISubagentController {
                     Some((block_id.clone(), conversation_id))
                 });
 
-                let upgraded_task_id = if let Some((block_id, conversation_id)) =
-                    upgrade_target.as_ref()
-                {
-                    let history_model = BlocklistAIHistoryModel::handle(ctx);
-                    let block_id_for_create = block_id.clone();
-                    let conversation_id = *conversation_id;
-                    match history_model.update(ctx, |history_model, _| {
-                        history_model.create_silent_cli_subagent_task_for_conversation(
-                            block_id_for_create,
-                            conversation_id,
-                        )
-                    }) {
-                        Ok(task_id) => {
-                            log::info!(
-                                "[byop] BYOP LRC monitor fallback: silent subtask created \
+                let upgraded_task_id =
+                    if let Some((block_id, conversation_id)) = upgrade_target.as_ref() {
+                        let history_model = BlocklistAIHistoryModel::handle(ctx);
+                        let block_id_for_create = block_id.clone();
+                        let conversation_id = *conversation_id;
+                        match history_model.update(ctx, |history_model, _| {
+                            history_model.create_silent_cli_subagent_task_for_conversation(
+                                block_id_for_create,
+                                conversation_id,
+                            )
+                        }) {
+                            Ok(task_id) => {
+                                log::info!(
+                                    "[byop] BYOP LRC monitor fallback: silent subtask created \
                                  block={block_id:?} task={task_id:?} \
                                  conversation={conversation_id:?}"
-                            );
-                            Some(task_id)
-                        }
-                        Err(e) => {
-                            log::error!(
-                                "[byop] BYOP LRC monitor fallback create_silent_subagent_task \
+                                );
+                                Some(task_id)
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "[byop] BYOP LRC monitor fallback create_silent_subagent_task \
                                  failed: {e:?}"
-                            );
-                            None
+                                );
+                                None
+                            }
                         }
-                    }
-                } else {
-                    None
-                };
+                    } else {
+                        None
+                    };
 
                 let mut terminal_model = me.terminal_model.lock();
-                let mut emit_spawn_event_for:
-                    Option<(BlockId, TaskId, AIConversationId, Option<AIAgentActionId>)> = None;
+                let mut emit_spawn_event_for: Option<(
+                    BlockId,
+                    TaskId,
+                    AIConversationId,
+                    Option<AIAgentActionId>,
+                )> = None;
                 if let (Some((block_id, conversation_id)), Some(task_id)) =
                     (upgrade_target.as_ref(), upgraded_task_id.as_ref())
                 {
-                    if let Some(block) =
-                        terminal_model.block_list_mut().mut_block_from_id(block_id)
+                    if let Some(block) = terminal_model.block_list_mut().mut_block_from_id(block_id)
                     {
                         match block.set_agent_interaction_mode_for_agent_monitored_command(
                             task_id,
                             *conversation_id,
                         ) {
                             Ok(()) => {
-                                let action_id =
-                                    block.requested_command_action_id().cloned();
+                                let action_id = block.requested_command_action_id().cloned();
                                 emit_spawn_event_for = Some((
                                     block_id.clone(),
                                     task_id.clone(),
@@ -314,8 +315,7 @@ impl CLISubagentController {
                 // SpawnedSubagent → terminal_view::handle_cli_subagent_controller_event
                 // → CLISubagentView::new 同步内部还会再 lock terminal_model 之类导致
                 // FairMutex 重入)。
-                if let Some((block_id, task_id, conversation_id, action_id)) =
-                    emit_spawn_event_for
+                if let Some((block_id, task_id, conversation_id, action_id)) = emit_spawn_event_for
                 {
                     me.active_subagents_by_block
                         .entry(block_id.clone())

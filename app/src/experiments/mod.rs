@@ -1,4 +1,4 @@
-//! A framework for running A/B tests within Warp.
+﻿//! A framework for running A/B tests within Warp.
 //!
 //! Before starting, please read the usage guide on Notion. The guide explains
 //! some important constraints that are required for proper use of the framework
@@ -10,10 +10,10 @@ mod login_layer;
 mod rendering;
 pub use block_onboarding_layer::{BlockOnboarding, BLOCK_ONBOARDING_LAYER};
 pub use improved_palette_search_layer::{ImprovedPaletteSearch, IMPROVED_PALETTE_SEARCH_LAYER};
-pub use login_layer::{AuthFlowInstructions, LOGIN_LAYER};
+pub use login_layer::LOGIN_LAYER;
 use warp_core::user_preferences::GetUserPreferences as _;
 
-use crate::auth::auth_state::AuthStateProvider;
+use crate::auth::AuthStateProvider;
 use crate::channel::{Channel, ChannelState};
 use anyhow::Result;
 use dashmap::DashMap;

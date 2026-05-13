@@ -14,14 +14,13 @@ pub(super) mod code_diff_pane;
 pub(super) mod code_diff_pane_model;
 pub(super) mod code_pane;
 pub(super) mod env_var_collection_pane;
-pub(crate) mod environment_management_pane;
+// OpenWarp Wave 7-3:`environment_management_pane` 随 Cloud Mode UI 子系统物理删。
 pub(super) mod execution_profile_editor_pane;
 pub(super) mod file_pane;
 pub(super) mod get_started_pane;
 pub(super) mod get_started_view;
 #[cfg(not(target_family = "wasm"))]
 pub(super) mod local_harness_launch;
-pub(super) mod network_log_pane;
 pub(super) mod notebook_pane;
 pub(super) mod settings_pane;
 pub(crate) mod ssh_server_pane;
@@ -47,9 +46,8 @@ use crate::{
     env_vars::view::env_var_collection::EnvVarCollectionView,
     menu::MenuItem,
     notebooks::{file::FileNotebookView, notebook::NotebookView},
-    server::network_log_view::NetworkLogView,
     settings::PaneSettings,
-    settings_view::{environments_page::EnvironmentsPageView, SettingsView},
+    settings_view::SettingsView,
     terminal::{available_shells::AvailableShell, TerminalView},
     workflows::workflow_view::WorkflowView,
 };
@@ -142,14 +140,14 @@ pub(crate) enum IPaneType {
     Code,
     CodeDiff,
     EnvVarCollection,
-    EnvironmentManagement,
+    // OpenWarp Wave 7-3:`EnvironmentManagement` IPaneType 随 Cloud Mode UI 子系统
+    // 物理删。
     Workflow,
     Settings,
     AIFact,
     AIDocument,
     ExecutionProfileEditor,
     GetStarted,
-    NetworkLog,
     SshServer,
     Welcome,
     DeferredPlaceholder,
@@ -167,14 +165,13 @@ impl Display for IPaneType {
             IPaneType::Code => write!(f, "Code"),
             IPaneType::CodeDiff => write!(f, "Code Diff"),
             IPaneType::EnvVarCollection => write!(f, "Environment Variable Collection"),
-            IPaneType::EnvironmentManagement => write!(f, "Environment Management"),
+            // OpenWarp Wave 7-3:`EnvironmentManagement` Display arm 随 variant 物理删。
             IPaneType::Workflow => write!(f, "Workflow"),
             IPaneType::Settings => write!(f, "Settings"),
             IPaneType::AIFact => write!(f, "AI Fact"),
             IPaneType::AIDocument => write!(f, "AI Document"),
             IPaneType::ExecutionProfileEditor => write!(f, "Execution Profile Editor"),
             IPaneType::GetStarted => write!(f, "GetStarted"),
-            IPaneType::NetworkLog => write!(f, "Network Log"),
             IPaneType::SshServer => write!(f, "SSH Server"),
             IPaneType::Welcome => write!(f, "Welcome"),
             IPaneType::DeferredPlaceholder => write!(f, "Placeholder"),
@@ -221,12 +218,8 @@ impl PaneId {
         Self::new_from_ctx(IPaneType::EnvVarCollection, ctx)
     }
 
-    /// Creates a [`PaneId`] from a [`ViewContext<PaneView<EnvironmentsPageView>>`]
-    pub fn from_environment_management_pane_ctx(
-        ctx: &ViewContext<PaneView<EnvironmentsPageView>>,
-    ) -> Self {
-        Self::new_from_ctx(IPaneType::EnvironmentManagement, ctx)
-    }
+    // OpenWarp Wave 7-3:`from_environment_management_pane_ctx` 随 Cloud Mode UI 子系统
+    // 物理删。
 
     /// Creates a [`PaneId`] from a [`ViewContext<PaneView<WorkflowView>>`]
     pub fn from_workflow_pane_ctx(ctx: &ViewContext<PaneView<WorkflowView>>) -> Self {
@@ -277,11 +270,6 @@ impl PaneId {
         Self::new_from_ctx(IPaneType::SshServer, ctx)
     }
 
-    /// Creates a [`PaneId`] from a [`ViewContext<PaneView<NetworkLogView>>`].
-    pub fn from_network_log_pane_ctx(ctx: &ViewContext<PaneView<NetworkLogView>>) -> Self {
-        Self::new_from_ctx(IPaneType::NetworkLog, ctx)
-    }
-
     /// Creates a [`PaneId`] from a [`PaneView<TerminalView>`] entity ID.
     pub fn from_terminal_pane_view(
         terminal_pane_view: &ViewHandle<terminal_pane::TerminalPaneView>,
@@ -320,15 +308,8 @@ impl PaneId {
         Self::new(IPaneType::EnvVarCollection, env_var_collection_view)
     }
 
-    /// Creates a [`PaneId`] from a [`PaneView<EnvironmentsPageView>`] entity ID.
-    pub fn from_environment_management_pane_view(
-        environment_management_pane_view: &ViewHandle<PaneView<EnvironmentsPageView>>,
-    ) -> Self {
-        Self::new(
-            IPaneType::EnvironmentManagement,
-            environment_management_pane_view,
-        )
-    }
+    // OpenWarp Wave 7-3:`from_environment_management_pane_view` 随 Cloud Mode UI 子系统
+    // 物理删。
 
     /// Creates a [`PaneId`] from a [`PaneView<WorkflowView>`] entity ID.
     pub fn from_workflow_pane_view(
@@ -380,13 +361,6 @@ impl PaneId {
 
     pub fn from_welcome_pane_view(welcome_pane_view: &ViewHandle<PaneView<WelcomeView>>) -> Self {
         Self::new(IPaneType::Welcome, welcome_pane_view)
-    }
-
-    /// Creates a [`PaneId`] from a [`PaneView<NetworkLogView>`] entity ID.
-    pub fn from_network_log_pane_view(
-        network_log_pane_view: &ViewHandle<PaneView<NetworkLogView>>,
-    ) -> Self {
-        Self::new(IPaneType::NetworkLog, network_log_pane_view)
     }
 
     #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
@@ -444,7 +418,9 @@ impl PaneId {
     }
 
     pub fn is_environment_management_pane(&self) -> bool {
-        matches!(self.0.pane_type, IPaneType::EnvironmentManagement)
+        // OpenWarp Wave 7-3:Cloud Mode UI 子系统物理删,任意 pane 都不是
+        // environment management pane。调用者为渐进式清理保留、返回 false。
+        false
     }
 
     /// Returns true if this pane contains a Warp Drive object (notebook, workflow, etc.).
@@ -479,9 +455,7 @@ impl PaneId {
             IPaneType::EnvVarCollection => {
                 ChildView::<PaneView<EnvVarCollectionView>>::with_id(self.0.pane_view_id).finish()
             }
-            IPaneType::EnvironmentManagement => {
-                ChildView::<PaneView<EnvironmentsPageView>>::with_id(self.0.pane_view_id).finish()
-            }
+            // OpenWarp Wave 7-3:`EnvironmentManagement` render arm 随 variant 物理删。
             IPaneType::Workflow => {
                 ChildView::<PaneView<WorkflowView>>::with_id(self.0.pane_view_id).finish()
             }
@@ -500,9 +474,6 @@ impl PaneId {
             }
             IPaneType::GetStarted => {
                 ChildView::<PaneView<GetStartedView>>::with_id(self.0.pane_view_id).finish()
-            }
-            IPaneType::NetworkLog => {
-                ChildView::<PaneView<NetworkLogView>>::with_id(self.0.pane_view_id).finish()
             }
             IPaneType::SshServer => {
                 ChildView::<PaneView<SshServerView>>::with_id(self.0.pane_view_id).finish()

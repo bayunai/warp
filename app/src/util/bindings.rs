@@ -87,7 +87,8 @@ pub enum CustomAction {
     CopyBlock,
     CopyBlockCommand,
     CopyBlockOutput,
-    ViewSharedBlocks,
+    // OpenWarp Wave 6-8:`ViewSharedBlocks` 随 `ShowBlocksView` 设置页与
+    // `workspace:show_settings_shared_blocks_page` keybinding 一同物理删。
     CloseTab,
     CloseOtherTabs,
     CloseTabsRight,
@@ -453,7 +454,6 @@ pub fn custom_tag_to_keystroke(custom: CustomTag) -> Option<Keystroke> {
         | CustomAction::CloseOtherTabs
         | CustomAction::CloseTabsRight
         | CustomAction::ReferAFriend
-        | CustomAction::ViewSharedBlocks
         | CustomAction::ShowAccount
         | CustomAction::ShowAppearance
         | CustomAction::SaveCurrentConfig

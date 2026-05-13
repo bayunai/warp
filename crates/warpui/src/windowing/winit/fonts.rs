@@ -199,7 +199,7 @@ pub struct TextLayoutSystem {
     /// However, the `FontDB` trait for text layout is _immutable_ and cannot be easily changed to
     /// mutable. Therefore, we use an [`RwLock`] for internal mutability. `FontDB` is Sync and Send,
     /// so we can't use a `RefCell`.
-    font_store: RwLock<cosmic_text::FontSystem>,
+    font_store: std::sync::Arc<RwLock<cosmic_text::FontSystem>>,
     font_id_map: RwLock<BiMap<FontId, fontdb::ID>>,
     font_selections: DashMap<(FamilyId, Properties), FontId>,
     loaded_fonts: DashMap<FontKey, FontId>,
@@ -223,13 +223,19 @@ pub struct FontDB {
 
 impl FontDB {
     pub fn new() -> Self {
-        Self {
+        let db = Self {
             text_layout_system: TextLayoutSystem::new(),
             #[cfg(feature = "fontkit-rasterizer")]
             font_kit_rasterizer: crate::fonts::font_kit::Rasterizer::new(),
             #[cfg(not(feature = "fontkit-rasterizer"))]
             swash_cache: RwLock::new(cosmic_text::SwashCache::new()),
-        }
+        };
+        // 添加预热仅限 Windows:PR #62 仅在 Windows 路径接入 locale-aware CJK 回退,
+        // 该回归(zerx-lab/warp#68)也仅出现在 Windows。macOS/Linux 走各自的 fallback 路径,
+        // 不需预热。
+        #[cfg(target_os = "windows")]
+        db.text_layout_system.warm_up_preferred_cjk_families();
+        db
     }
 
     /// Inserts the given font family into the DB, returning a [`FamilyId`]
@@ -298,16 +304,64 @@ impl Default for TextLayoutSystem {
     }
 }
 
+/// Rebuild the cosmic-text `FontSystem` in-place with a new locale, reusing the existing
+/// `fontdb::Database` so no font data is reloaded. `cosmic_text::FontSystem` exposes no public
+/// `set_locale`, so we swap the whole struct via `std::mem::replace` and reattach the db.
+///
+/// Cost: `into_locale_and_db` only carries `(locale, db)` across the swap. The new
+/// `FontSystem` rebuilds its per-instance caches from scratch — `font_cache`,
+/// `monospace_font_ids`, `per_script_monospace_font_ids`, `font_codepoint_support_info_cache`,
+/// `font_matches_cache`, `shape_plan_cache`, and (with the `shape-run-cache` feature)
+/// `shape_run_cache`. The constructor also re-runs `cache_fonts` over the monospace set,
+/// which on Windows-with-many-system-fonts can take a few hundred ms to ~1 s on the first
+/// post-rebuild render. The mmap-backed font *file data* itself is not reread.
+///
+/// This is acceptable because UI locale switches are rare (driven by Settings → Language
+/// + a "restart Warp" prompt today) and the user already expects a discontinuity. If
+/// hot-reload latency ever matters, the hook lives in `app::i18n::set_locale`.
+fn rebuild_font_system_for_locale(
+    store: &std::sync::Arc<RwLock<cosmic_text::FontSystem>>,
+    locale: &str,
+) {
+    let mut guard = store.write();
+    let old = std::mem::replace(
+        &mut *guard,
+        cosmic_text::FontSystem::new_with_locale_and_db("en".into(), Default::default()),
+    );
+    let (_, db) = old.into_locale_and_db();
+    *guard = cosmic_text::FontSystem::new_with_locale_and_db(locale.to_string(), db);
+}
+
 impl TextLayoutSystem {
     pub fn new() -> Self {
+        let initial_locale = crate::current_ui_locale();
+        let font_store = std::sync::Arc::new(RwLock::new(
+            cosmic_text::FontSystem::new_with_locale_and_db(
+                initial_locale.clone(),
+                Default::default(),
+            ),
+        ));
+        // Subscribe to UI-locale changes so cosmic-text's `FontSystem` is rebuilt with the new
+        // locale (it has no public `set_locale` and locale biases CJK Han glyph fallback). We
+        // capture a `Weak` to allow this `TextLayoutSystem` to be dropped without leaking the
+        // listener.
+        let weak: std::sync::Weak<RwLock<cosmic_text::FontSystem>> =
+            std::sync::Arc::downgrade(&font_store);
+        crate::on_ui_locale_changed(std::sync::Arc::new(move |locale: &str| {
+            if let Some(store) = weak.upgrade() {
+                rebuild_font_system_for_locale(&store, locale);
+            }
+        }));
+        // Race compensation: `set_ui_locale` may have fired between `current_ui_locale()` and
+        // the listener registration above, in which case we'd miss that notification. Re-read
+        // and rebuild if it diverged.
+        let post_register_locale = crate::current_ui_locale();
+        if post_register_locale != initial_locale {
+            rebuild_font_system_for_locale(&font_store, &post_register_locale);
+        }
         Self {
             families: Default::default(),
-            font_store: RwLock::new(cosmic_text::FontSystem::new_with_locale_and_db(
-                // Locale is needed for font fallback. For now, we hardcode this to "en" to match
-                // our mac implementation https://github.com/warpdotdev/warp-internal/blob/bf33d651a9fcece70df8eac35f89b0393ca5189a/ui/src/platform/mac/fonts.rs#L383.
-                "en".into(),
-                Default::default(),
-            )),
+            font_store,
             font_id_map: Default::default(),
             font_selections: Default::default(),
             loaded_fonts: Default::default(),

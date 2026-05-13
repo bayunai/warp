@@ -4,6 +4,7 @@ import I18nScript from '../components/I18nScript.astro';
 import Banner from '../components/Banner.astro';
 import LandingNav from '../components/LandingNav.astro';
 import LandingFooter from '../components/LandingFooter.astro';
+import Analytics from '../components/Analytics.astro';
 
 interface Props {
   title?: string;
@@ -25,12 +26,13 @@ const {
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <Analytics />
   </head>
   <body data-locale="en">
     <I18nScript />
     <Banner
       en="Early development · Unofficial fork of Warp · Not affiliated with Warp Inc."
-      zh="早期开发 · Warp 的非官方 fork · 与 Warp Inc. 无任何关联"
+      zh="早期开发阶段 · Warp 的非官方社区分支 · 与 Warp Inc. 无隶属关系"
     />
     <LandingNav />
 
@@ -41,14 +43,19 @@ const {
     <script>
       // Locale switching, lang pill, in-page nav, tab + copy widgets, scroll fade-in
       (function () {
-        function setLocale(l: string) {
+        function applyLocale(l: string) {
           document.body.dataset.locale = l;
           document.documentElement.lang = l === 'zh' ? 'zh-CN' : 'en';
-          localStorage.setItem('openwarp:locale', l);
           document.querySelectorAll('.lang button').forEach((b) => {
             b.classList.toggle('active', (b as HTMLElement).getAttribute('data-set-lang') === l);
           });
           positionPill();
+        }
+        function setLocale(l: string) {
+          // Only persist when the user explicitly chose a language; auto-detection
+          // should keep following the OS / browser on subsequent visits.
+          localStorage.setItem('openwarp:locale', l);
+          applyLocale(l);
         }
         function positionPill() {
           document.querySelectorAll<HTMLElement>('.lang').forEach((lang) => {
@@ -59,7 +66,7 @@ const {
           });
         }
         const initialLocale = (document.body.dataset.locale as string) || 'en';
-        setLocale(initialLocale);
+        applyLocale(initialLocale);
         window.addEventListener('load', positionPill);
         window.addEventListener('resize', positionPill);
         document.querySelectorAll<HTMLButtonElement>('.lang button').forEach((b) => {
@@ -101,12 +108,28 @@ const {
           });
         });
 
-        // Provider tabs
-        document.querySelectorAll<HTMLElement>('.catch-tabs').forEach((tabs) => {
-          tabs.querySelectorAll<HTMLButtonElement>('button').forEach((b) => {
+        // Provider tabs (animated rail)
+        document.querySelectorAll<HTMLElement>('.prov-tabs').forEach((tabs) => {
+          const rail = tabs.querySelector<HTMLElement>('[data-prov-rail]');
+          const moveRail = (b: HTMLButtonElement) => {
+            if (!rail) return;
+            const r = b.getBoundingClientRect();
+            const t = tabs.getBoundingClientRect();
+            rail.style.width = `${r.width}px`;
+            rail.style.transform = `translateX(${r.left - t.left - 4}px)`;
+          };
+          const buttons = tabs.querySelectorAll<HTMLButtonElement>('button');
+          const initial = tabs.querySelector<HTMLButtonElement>('button.active') ?? buttons[0];
+          if (initial) requestAnimationFrame(() => moveRail(initial));
+          window.addEventListener('resize', () => {
+            const a = tabs.querySelector<HTMLButtonElement>('button.active');
+            if (a) moveRail(a);
+          });
+          buttons.forEach((b) => {
             b.addEventListener('click', () => {
               const name = b.getAttribute('data-pf');
-              tabs.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+              buttons.forEach((x) => x.classList.toggle('active', x === b));
+              moveRail(b);
               document.querySelectorAll<HTMLElement>('[data-pf-pane]').forEach((p) => {
                 p.hidden = p.getAttribute('data-pf-pane') !== name;
               });

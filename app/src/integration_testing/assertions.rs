@@ -3,10 +3,7 @@ use crate::{
         model::persistence::CloudModel, CloudObjectEventEntrypoint, CloudObjectLocation, Space,
     },
     network::{NetworkStatus, NetworkStatusKind},
-    server::{
-        cloud_objects::{listener::Listener, update_manager::UpdateManager},
-        ids::ClientId,
-    },
+    server::{cloud_objects::update_manager::UpdateManager, ids::ClientId},
     util::bindings::keybinding_name_to_display_string,
     workflows::workflow::Workflow,
     workspaces::{team::Team, user_workspaces::UserWorkspaces, workspace::Workspace},
@@ -143,30 +140,5 @@ pub fn assert_binding_display_string(
     )
 }
 
-pub fn assert_websocket_has_started() -> TestStep {
-    TestStep::new("Assert a websocket has started").add_named_assertion(
-        "subscription abort handle should exist",
-        move |app, _| {
-            Listener::handle(app).read(app, |listener, _| {
-                async_assert!(
-                    listener.has_current_subscription_abort_handle(),
-                    "subscription has started"
-                )
-            })
-        },
-    )
-}
-
-pub fn assert_websocket_has_not_started() -> TestStep {
-    TestStep::new("Assert a websocket has not started").add_named_assertion(
-        "subscription abort handle should not exist",
-        move |app, _| {
-            Listener::handle(app).read(app, |listener, _| {
-                async_assert!(
-                    !listener.has_current_subscription_abort_handle(),
-                    "subscription has not started"
-                )
-            })
-        },
-    )
-}
+// OpenWarp(本地化,Phase 2d-4a-1):原 `assert_websocket_has_started` / `assert_websocket_has_not_started`
+// 断言依赖物理删除的 `Listener` singleton,无调用方,一并移除。

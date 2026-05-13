@@ -1,17 +1,35 @@
-// We don't directly run agent harnesses on WASM, so this code is unused.
+// OpenWarp:HarnessSupportClient impl 已本地化为 stub。
+// 历史职责:通过 warp.dev 后端 `/public_api/harness-support/*` REST 端点支撑
+// "cloud agent harness"——即在远端机房跑 Claude Code/Gemini/Codex CLI 的 BYOH
+// 协议(create_external_conversation / get_transcript_upload_target / resolve_prompt /
+// report_artifact / notify_user / finish_task / get_snapshot_upload_targets /
+// fetch_transcript)。OpenWarp 只跑本地 BYOP harness,无云端 harness 需求。
+//
+// 保留:
+//   - `HarnessSupportClient` trait 本身、所有方法签名、相关 request/response 数据类型
+//     (`UploadTarget`、`SnapshotUploadRequest`、`SnapshotFileInfo`、`SnapshotUploadResponse`、
+//     `ResolvePromptAttachedSkill`、`ResolvePromptRequest`、`ResolvedHarnessPrompt`、
+//     `ReportArtifactResponse`):被 agent_sdk/driver/{snapshot,harness/*}、agent_sdk/harness_support.rs
+//     等多处导入使用,trait 路径不可断。
+//   - 顶层 `upload_to_target` 包装:维持公共 API 供 agent_sdk/driver/{harness,snapshot}
+//     调用,内部委托给 presigned_upload(同样已 stub 返回错误)。
+// 改造:
+//   - `HarnessSupportClient for ServerApi` 所有方法返回
+//     "Cloud harness support disabled in OpenWarp" 错误。
+//   - 删 fetch_transcript 中的 with_bounded_retry 重试逻辑(已永远失败,无重试意义);
+//     同时不再 import `with_bounded_retry`。
+
 #![cfg_attr(target_family = "wasm", expect(dead_code))]
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 #[cfg(test)]
 use mockall::automock;
 
 use super::ServerApi;
 use crate::ai::agent::conversation::AIConversationId;
-#[cfg(not(target_family = "wasm"))]
-use crate::ai::agent_sdk::retry::with_bounded_retry;
 use crate::ai::artifacts::Artifact;
 
 /// A presigned upload target returned by the server.
@@ -39,27 +57,10 @@ pub struct SnapshotFileInfo {
 ///
 /// The `uploads` list is aligned by index with the [`SnapshotUploadRequest::files`]
 /// list in the request, so callers match each upload target back to the filename
-/// they requested by position. The server does not include filenames on the
-/// response entries — see the `UploadSnapshotResponse` schema in
-/// `warp-server`'s `public_api/openapi.yaml`.
+/// they requested by position.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct SnapshotUploadResponse {
     pub uploads: Vec<UploadTarget>,
-}
-
-#[derive(serde::Serialize)]
-struct CreateExternalConversationRequest {
-    format: String,
-}
-
-#[derive(serde::Deserialize)]
-struct CreateExternalConversationResponse {
-    conversation_id: String,
-}
-
-#[derive(serde::Serialize)]
-struct GetUploadTargetRequest {
-    conversation_id: String,
 }
 
 /// Skill attached to a resolve-prompt request,
@@ -86,10 +87,7 @@ pub struct ResolvedHarnessPrompt {
     pub prompt: String,
     #[serde(default)]
     pub system_prompt: Option<String>,
-    /// Optional user-turn preamble for resumed third-party harness sessions. The harness
-    /// decides how to surface this — Claude Code prepends it to the user-turn prompt fed
-    /// into the CLI so the agent treats it as immediate intent rather than background
-    /// system context. Empty when no resumption is in effect.
+    /// Optional user-turn preamble for resumed third-party harness sessions.
     #[serde(default)]
     pub resumption_prompt: Option<String>,
 }
@@ -97,17 +95,6 @@ pub struct ResolvedHarnessPrompt {
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct ReportArtifactResponse {
     pub artifact_uid: String,
-}
-
-#[derive(serde::Serialize)]
-struct NotifyUserRequest {
-    message: String,
-}
-
-#[derive(serde::Serialize)]
-struct FinishTaskRequest {
-    success: bool,
-    summary: String,
 }
 
 /// Trait for API endpoints used to support third-party agent harnesses in Oz.
@@ -139,14 +126,10 @@ pub trait HarnessSupportClient: 'static + Send + Sync {
     /// Send a progress notification to the task's originating platform.
     async fn notify_user(&self, message: &str) -> Result<()>;
 
-    /// Report task completion or failure. The server derives PR links/branches from
-    /// artifacts already reported via `report_artifact`.
+    /// Report task completion or failure.
     async fn finish_task(&self, success: bool, summary: &str) -> Result<()>;
 
     /// Get presigned upload targets for a workspace state snapshot.
-    ///
-    /// The returned list is aligned by index with `request.files`. See
-    /// [`SnapshotUploadResponse`] for details on the server contract.
     async fn get_snapshot_upload_targets(
         &self,
         request: &SnapshotUploadRequest,
@@ -154,14 +137,6 @@ pub trait HarnessSupportClient: 'static + Send + Sync {
 
     /// Download the raw third-party harness transcript bytes for the current task's
     /// conversation.
-    ///
-    /// Hits `GET /harness-support/transcript`, which redirects to a signed GCS URL.
-    /// The conversation is resolved from the task's `agent_conversation_id` server-side,
-    /// so callers do not pass a conversation id. Each harness deserializes the returned
-    /// bytes into its own envelope shape (e.g. Claude Code parses
-    /// `ClaudeTranscriptEnvelope`). Transient failures retry with bounded exponential
-    /// backoff; permanent 4xx (e.g. 404 "no transcript") fail fast so the caller can
-    /// surface a resume-specific error.
     async fn fetch_transcript(&self) -> Result<bytes::Bytes>;
 
     /// Get an HTTP client to use with [`UploadTarget`]s for saving blobs.
@@ -171,107 +146,52 @@ pub trait HarnessSupportClient: 'static + Send + Sync {
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 impl HarnessSupportClient for ServerApi {
-    async fn create_external_conversation(&self, format: &str) -> Result<AIConversationId> {
-        let response: CreateExternalConversationResponse = self
-            .post_public_api(
-                "harness-support/external-conversation",
-                &CreateExternalConversationRequest {
-                    format: format.to_string(),
-                },
-            )
-            .await?;
-
-        AIConversationId::try_from(response.conversation_id)
-            .context("Server returned an invalid conversation ID")
+    async fn create_external_conversation(&self, _format: &str) -> Result<AIConversationId> {
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
     async fn get_transcript_upload_target(
         &self,
-        conversation_id: &AIConversationId,
+        _conversation_id: &AIConversationId,
     ) -> Result<UploadTarget> {
-        self.post_public_api(
-            "harness-support/transcript",
-            &GetUploadTargetRequest {
-                conversation_id: conversation_id.to_string(),
-            },
-        )
-        .await
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
     async fn get_block_snapshot_upload_target(
         &self,
-        conversation_id: &AIConversationId,
+        _conversation_id: &AIConversationId,
     ) -> Result<UploadTarget> {
-        self.post_public_api(
-            "harness-support/block-snapshot",
-            &GetUploadTargetRequest {
-                conversation_id: conversation_id.to_string(),
-            },
-        )
-        .await
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
-    async fn resolve_prompt(&self, request: ResolvePromptRequest) -> Result<ResolvedHarnessPrompt> {
-        self.post_public_api("harness-support/resolve-prompt", &request)
-            .await
+    async fn resolve_prompt(
+        &self,
+        _request: ResolvePromptRequest,
+    ) -> Result<ResolvedHarnessPrompt> {
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
-    async fn report_artifact(&self, artifact: &Artifact) -> Result<ReportArtifactResponse> {
-        self.post_public_api("harness-support/report-artifact", artifact)
-            .await
+    async fn report_artifact(&self, _artifact: &Artifact) -> Result<ReportArtifactResponse> {
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
-    async fn notify_user(&self, message: &str) -> Result<()> {
-        self.post_public_api_unit(
-            "harness-support/notify-user",
-            &NotifyUserRequest {
-                message: message.to_string(),
-            },
-        )
-        .await
+    async fn notify_user(&self, _message: &str) -> Result<()> {
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
-    async fn finish_task(&self, success: bool, summary: &str) -> Result<()> {
-        self.post_public_api_unit(
-            "harness-support/finish-task",
-            &FinishTaskRequest {
-                success,
-                summary: summary.to_string(),
-            },
-        )
-        .await
+    async fn finish_task(&self, _success: bool, _summary: &str) -> Result<()> {
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
     async fn get_snapshot_upload_targets(
         &self,
-        request: &SnapshotUploadRequest,
+        _request: &SnapshotUploadRequest,
     ) -> Result<Vec<UploadTarget>> {
-        let response: SnapshotUploadResponse = self
-            .post_public_api("harness-support/upload-snapshot", request)
-            .await?;
-        Ok(response.uploads)
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
     async fn fetch_transcript(&self) -> Result<bytes::Bytes> {
-        #[cfg(not(target_family = "wasm"))]
-        {
-            with_bounded_retry("fetch harness-support transcript", || async {
-                let response = self
-                    .get_public_api_response("harness-support/transcript")
-                    .await?;
-                response
-                    .bytes()
-                    .await
-                    .context("Failed to read harness-support transcript body")
-            })
-            .await
-        }
-        #[cfg(target_family = "wasm")]
-        {
-            unreachable!(
-                "fetch_transcript is not supported on wasm; agent_sdk is not built on this target"
-            );
-        }
+        Err(anyhow!("Cloud harness support disabled in OpenWarp"))
     }
 
     fn http_client(&self) -> &http_client::Client {
@@ -280,6 +200,11 @@ impl HarnessSupportClient for ServerApi {
 }
 
 /// Upload a blob to a presigned upload target.
+///
+/// OpenWarp:转发到已 stub 化的 `presigned_upload::upload_to_target`,返回
+/// "Presigned upload disabled in OpenWarp" 错误。保留入口以维持 agent_sdk
+/// 内 `harness::*` / `snapshot.rs` 等模块对 `harness_support::upload_to_target`
+/// 的 import 路径。
 pub async fn upload_to_target(
     http_client: &http_client::Client,
     target: &UploadTarget,

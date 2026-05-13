@@ -1,26 +1,23 @@
 //! Common utilities for agent SDK commands.
 
-use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::TryFutureExt;
-use inquire::{InquireError, Select};
+
 use warp_cli::agent::Harness;
-use warp_cli::environment::{EnvironmentCreateArgs, EnvironmentUpdateArgs};
 use warpui::r#async::FutureExt;
 use warpui::{AppContext, GetSingletonModelHandle, SingletonEntity as _, UpdateModel};
 
 use crate::ai::agent::conversation::ServerAIConversationMetadata;
 use crate::ai::agent_sdk::driver::{AgentDriverError, WARP_DRIVE_SYNC_TIMEOUT};
 use crate::ai::ambient_agents::AmbientAgentTaskId;
-use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
+
 use crate::ai::llms::{LLMId, LLMPreferences};
-use crate::auth::auth_state::AuthStateProvider;
-use crate::cloud_object::{CloudObject, Owner};
-use crate::server::cloud_objects::update_manager::UpdateManager;
-use crate::server::ids::{ServerId, SyncId};
+use crate::auth::AuthStateProvider;
+use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::Owner;
 use crate::server::server_api::ai::AIClient;
 use crate::server::server_api::ServerApiProvider;
 use crate::workspaces::update_manager::TeamUpdateManager;
@@ -71,7 +68,7 @@ pub(super) fn set_ambient_task_context_from_run_id(
     let task_id = parse_ambient_task_id(run_id, "Invalid run ID")?;
     ServerApiProvider::handle(ctx)
         .as_ref(ctx)
-        .get()
+        .get_local_client()
         .set_ambient_agent_task_id(Some(task_id));
     Ok(task_id)
 }
@@ -138,7 +135,7 @@ where
 pub fn refresh_warp_drive(
     ctx: &AppContext,
 ) -> impl Future<Output = anyhow::Result<()>> + Send + 'static {
-    UpdateManager::as_ref(ctx)
+    CloudModel::as_ref(ctx)
         .initial_load_complete()
         .with_timeout(WARP_DRIVE_SYNC_TIMEOUT)
         .map_err(|_| anyhow::anyhow!("Timed out waiting for Warp Drive to sync"))
@@ -186,131 +183,6 @@ pub enum ResolveConfigurationError {
     ObjectNotFound { id: String, kind: &'static str },
     #[error(transparent)]
     Other(anyhow::Error),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum EnvironmentChoice {
-    /// The user explicitly chose not to use an environment.
-    None,
-    /// The user chose a specific environment.
-    Environment { id: String, name: String },
-}
-
-impl EnvironmentChoice {
-    /// Resolve the environment to use when creating an agent integration.
-    /// Warp Drive *must* have been synced first.
-    pub fn resolve_for_create(
-        args: EnvironmentCreateArgs,
-        ctx: &AppContext,
-    ) -> Result<Self, ResolveConfigurationError> {
-        if args.no_environment {
-            Ok(EnvironmentChoice::None)
-        } else if let Some(id) = args.environment {
-            Self::get_by_id(id, ctx)
-        } else {
-            let all_environments = CloudAmbientAgentEnvironment::get_all(ctx);
-            let mut synced_environments: Vec<(ServerId, &CloudAmbientAgentEnvironment)> =
-                all_environments
-                    .iter()
-                    .filter_map(|env| {
-                        if let SyncId::ServerId(server_id) = env.sync_id() {
-                            Some((server_id, env))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-            synced_environments
-                .sort_by_key(|(_, env)| env.model().string_model.name.to_lowercase());
-
-            let environments: Vec<EnvironmentChoice> = synced_environments
-                .into_iter()
-                .map(|(server_id, env)| EnvironmentChoice::Environment {
-                    id: server_id.to_string(),
-                    name: env.model().string_model.name.clone(),
-                })
-                .collect();
-
-            let mut options = vec![EnvironmentChoice::None];
-            options.extend(environments);
-
-            // If there are no synced environments, require the user to create one or use --no-environment.
-            if options.len() == 1 {
-                let cli_name = warp_cli::binary_name().unwrap_or_else(|| "warp".to_string());
-                return Err(ResolveConfigurationError::Other(anyhow::anyhow!(
-                    "No environments are configured for this account.\n\
-You can create an environment with `{cli_name} environment create`.\n\
-Or, re-run this command with `--no-environment` to not use an environment.\n\
-Without an environment, the agent will not be able to access private repositories or create pull requests.",
-                )));
-            }
-
-            let prompt = "Select an environment to run the agent in (or 'No environment'):";
-
-            let choice = Select::new(prompt, options).prompt();
-
-            match choice {
-                Ok(choice) => Ok(choice),
-                Err(InquireError::OperationCanceled | InquireError::OperationInterrupted) => {
-                    Err(ResolveConfigurationError::Canceled)
-                }
-                Err(err) => Err(ResolveConfigurationError::Other(anyhow::anyhow!(
-                    "Error selecting environment: {err}"
-                ))),
-            }
-        }
-    }
-
-    /// Resolve the environment to use when updating an agent integration. If the user did not
-    /// request any changes to the environment, this returns `Ok(None)`.
-    /// Warp Drive *must* have been synced first.
-    pub fn resolve_for_update(
-        args: EnvironmentUpdateArgs,
-        ctx: &AppContext,
-    ) -> Result<Option<Self>, ResolveConfigurationError> {
-        if args.remove_environment {
-            Ok(Some(EnvironmentChoice::None))
-        } else if let Some(id) = args.environment {
-            Self::get_by_id(id, ctx).map(Some)
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn get_by_id(id: String, ctx: &AppContext) -> Result<Self, ResolveConfigurationError> {
-        let sync_id = SyncId::ServerId(ServerId::try_from(id.as_str()).map_err(|_| {
-            ResolveConfigurationError::InvalidId {
-                id: id.clone(),
-                kind: "environment",
-            }
-        })?);
-
-        let environment =
-            CloudAmbientAgentEnvironment::get_by_id(&sync_id, ctx).ok_or_else(|| {
-                ResolveConfigurationError::ObjectNotFound {
-                    id: id.clone(),
-                    kind: "environment",
-                }
-            })?;
-
-        Ok(EnvironmentChoice::Environment {
-            id,
-            name: environment.model().string_model.name.clone(),
-        })
-    }
-}
-
-impl fmt::Display for EnvironmentChoice {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EnvironmentChoice::None => write!(
-                f,
-                "No environment (agent will not be able to access private repositories or create pull requests)",
-            ),
-            EnvironmentChoice::Environment { id, name } => write!(f, "{name} ({id})"),
-        }
-    }
 }
 
 #[cfg(test)]

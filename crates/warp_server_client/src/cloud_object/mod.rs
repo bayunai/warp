@@ -161,8 +161,6 @@ pub enum JsonObjectType {
     AIExecutionProfile,
     TemplatableMCPServer,
     CloudEnvironment,
-    ScheduledAmbientAgent,
-    CloudAgentConfig,
 }
 
 impl JsonObjectType {
@@ -176,8 +174,6 @@ impl JsonObjectType {
             JsonObjectType::AIExecutionProfile => "AIEXECUTIONPROFILE",
             JsonObjectType::TemplatableMCPServer => "TEMPLATABLEMCPSERVER",
             JsonObjectType::CloudEnvironment => "CLOUDENVIRONMENT",
-            JsonObjectType::ScheduledAmbientAgent => "SCHEDULEDAMBIENTAGENT",
-            JsonObjectType::CloudAgentConfig => "CLOUDAGENTCONFIG",
         }
     }
 }
@@ -195,8 +191,6 @@ impl TryFrom<&str> for JsonObjectType {
             "AIEXECUTIONPROFILE" => Ok(JsonObjectType::AIExecutionProfile),
             "TEMPLATABLEMCPSERVER" => Ok(JsonObjectType::TemplatableMCPServer),
             "CLOUDENVIRONMENT" => Ok(JsonObjectType::CloudEnvironment),
-            "SCHEDULEDAMBIENTAGENT" => Ok(JsonObjectType::ScheduledAmbientAgent),
-            "CLOUDAGENTCONFIG" => Ok(JsonObjectType::CloudAgentConfig),
             _ => Err(anyhow!("could not convert unknown json object type")),
         }
     }
@@ -418,8 +412,8 @@ pub enum CloudObjectSyncStatus {
 
 const SYNC_ICON_DIMENSIONS: f32 = 16.;
 
-const SYNC_STATUS_TOOLTIP_LOCAL_ONLY: &str = "Saved locally";
-const SYNC_STATUS_TOOLTIP_INFLIGHT: &str = "Saving";
+// OpenWarp: 云端同步已下线,本地写入即最终状态。
+// 因此不再展示 "Saved locally" / "Saving" 指示,只在真出错时给警示。
 const SYNC_STATUS_TOOLTIP_ERROR: &str = "Failed to save";
 
 #[derive(Debug, Clone, PartialEq)]
@@ -689,35 +683,21 @@ impl CloudObjectStatuses {
 
     pub fn render_icon(
         &self,
-        sync_queue_is_dequeueing: bool,
+        _sync_queue_is_dequeueing: bool,
         hover_state: MouseStateHandle,
         appearance: &Appearance,
     ) -> Option<Box<dyn Element>> {
         let theme = appearance.theme();
-        let has_in_flight_requests = match &self.content_sync_status {
-            CloudObjectSyncStatus::InFlight(reqs) => reqs.0 > 0,
-            _ => false,
-        };
 
-        // OpenWarp: 云端同步已下线,所有对象都仅保存在本地,
-        // 因此不再展示 "Saved locally" 指示;只保留正在同步/出错时的反馈。
-        let _ = sync_queue_is_dequeueing;
-        let _ = SYNC_STATUS_TOOLTIP_LOCAL_ONLY;
-        let should_show_syncing_indicator = has_in_flight_requests
-            || self.has_pending_metadata_change
-            || self.has_pending_permissions_change
-            || self.pending_untrash;
+        // OpenWarp: 云端同步已下线,本地写入即最终状态。
+        // 不再为 InFlight / 待同步 metadata / 待同步 permissions / pending_untrash 显示
+        // 旋转中的 "Saving" 指示;只在真出错(Errored / InConflict)时显示警示三角。
         let should_show_error_indicator = matches!(
             self.content_sync_status,
             CloudObjectSyncStatus::Errored | CloudObjectSyncStatus::InConflict
         );
 
-        let icon_and_tooltip_text = if should_show_syncing_indicator {
-            Some((
-                Icon::Refresh.to_warpui_icon(theme.sub_text_color(theme.surface_2())),
-                SYNC_STATUS_TOOLTIP_INFLIGHT,
-            ))
-        } else if should_show_error_indicator {
+        let icon_and_tooltip_text = if should_show_error_indicator {
             Some((
                 Icon::AlertTriangle.to_warpui_icon(Fill::Solid(theme.ui_error_color())),
                 SYNC_STATUS_TOOLTIP_ERROR,
@@ -811,12 +791,6 @@ impl From<GenericStringObjectFormat>
             }
             GenericStringObjectFormat::Json(JsonObjectType::CloudEnvironment) => {
                 GraphQLFormat::JsonCloudEnvironment
-            }
-            GenericStringObjectFormat::Json(JsonObjectType::ScheduledAmbientAgent) => {
-                GraphQLFormat::JsonScheduledAmbientAgent
-            }
-            GenericStringObjectFormat::Json(JsonObjectType::CloudAgentConfig) => {
-                unreachable!("JsonCloudAgentConfig is no longer present in GraphQL schema")
             }
         }
     }

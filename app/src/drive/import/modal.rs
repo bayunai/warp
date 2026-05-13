@@ -1,7 +1,7 @@
 use crate::{
     appearance::Appearance,
     cloud_object::{model::persistence::CloudModel, CloudObject, Owner},
-    server::{ids::SyncId, sync_queue::SyncQueue},
+    server::ids::SyncId,
     themes::theme::WarpTheme,
     workspaces::user_workspaces::UserWorkspaces,
 };
@@ -90,7 +90,7 @@ impl ImportModal {
         let window_id = ctx.window_id();
         let import_body_id = self.import_modal.id();
 
-        let sync_queue_is_dequeueing = SyncQueue::as_ref(ctx).is_dequeueing();
+        let sync_queue_is_dequeueing = false;
 
         let allowed_file_types = vec![FileType::Yaml, FileType::Markdown];
 

@@ -9,18 +9,13 @@ use warp_core::telemetry::TelemetryEvent;
 use super::{command_requires_auth, command_to_telemetry_event};
 
 #[test]
-fn logout_does_not_require_auth() {
-    assert!(!command_requires_auth(&CliCommand::Logout));
-}
-
-#[test]
 fn login_does_not_require_auth() {
     assert!(!command_requires_auth(&CliCommand::Login));
 }
 
 #[test]
-fn artifact_download_requires_auth() {
-    assert!(command_requires_auth(&CliCommand::Artifact(
+fn artifact_download_does_not_require_auth() {
+    assert!(!command_requires_auth(&CliCommand::Artifact(
         ArtifactCommand::Download(DownloadArtifactArgs {
             artifact_uid: "artifact-123".to_string(),
             out: None,
@@ -41,8 +36,8 @@ fn run_message_send_requires_auth() {
 }
 
 #[test]
-fn artifact_get_requires_auth() {
-    assert!(command_requires_auth(&CliCommand::Artifact(
+fn artifact_get_does_not_require_auth() {
+    assert!(!command_requires_auth(&CliCommand::Artifact(
         ArtifactCommand::Get(GetArtifactArgs {
             artifact_uid: "artifact-123".to_string(),
         },)
@@ -50,8 +45,8 @@ fn artifact_get_requires_auth() {
 }
 
 #[test]
-fn artifact_upload_requires_auth() {
-    assert!(command_requires_auth(&CliCommand::Artifact(
+fn artifact_upload_does_not_require_auth() {
+    assert!(!command_requires_auth(&CliCommand::Artifact(
         ArtifactCommand::Upload(UploadArtifactArgs {
             path: "artifact.txt".into(),
             run_id: Some("run-123".to_string()),

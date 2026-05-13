@@ -42,8 +42,6 @@ use warpui::elements::{
 use warpui::prelude::{vec2f, ChildView, Container, Hoverable};
 use warpui::text_layout::ClipConfig;
 use warpui::ui_components::components::UiComponent;
-#[cfg(not(target_arch = "wasm32"))]
-use warpui::ui_components::components::UiComponentStyles;
 use warpui::WeakModelHandle;
 use warpui::{AppContext, Element, ModelHandle, SingletonEntity, TypedActionView, ViewContext};
 
@@ -372,15 +370,6 @@ impl TerminalView {
                 && ambient_agent_model.is_waiting_for_session()
             {
                 Some(self.render_ambient_agent_cancel_button(app))
-            } else if self.can_show_cloud_mode_details_ui(app) {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    Some(self.render_cloud_mode_details_toggle_button(app))
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    None
-                }
             } else {
                 None
             };
@@ -679,58 +668,6 @@ impl TerminalView {
             );
         })
         .finish()
-    }
-
-    /// Render the info button for toggling the cloud mode details panel.
-    /// Only available on non-WASM platforms (WASM uses a per-window button instead).
-    #[cfg(not(target_arch = "wasm32"))]
-    fn render_cloud_mode_details_toggle_button(&self, app: &AppContext) -> Box<dyn Element> {
-        let appearance = Appearance::as_ref(app);
-        let theme = appearance.theme();
-        let is_open = self.is_cloud_mode_details_panel_open;
-        let ui_builder = appearance.ui_builder().clone();
-
-        // Use main text color when panel is open (hover-like appearance), sub color when closed
-        let icon_color = if is_open {
-            blended_colors::text_main(theme, theme.background()).into()
-        } else {
-            blended_colors::text_sub(theme, theme.background()).into()
-        };
-
-        let button = icon_button_with_color(
-            appearance,
-            icons::Icon::Info,
-            is_open, // show active background when panel is open
-            self.cloud_mode_details_panel_toggle_mouse_state.clone(),
-            icon_color,
-        );
-
-        // Add explicit background when panel is open
-        let button = if is_open {
-            button.with_style(UiComponentStyles::default().set_background(theme.surface_2().into()))
-        } else {
-            button
-        };
-
-        button
-            .with_tooltip(move || {
-                let tooltip_text = if is_open {
-                    "Hide details"
-                } else {
-                    "Show details"
-                };
-                ui_builder
-                    .tool_tip(tooltip_text.to_string())
-                    .build()
-                    .finish()
-            })
-            .build()
-            .on_click(|ctx, _, _| {
-                ctx.dispatch_typed_action::<PaneHeaderAction<TerminalAction, TerminalAction>>(
-                    PaneHeaderAction::CustomAction(TerminalAction::ToggleCloudModeDetailsPanel),
-                );
-            })
-            .finish()
     }
 
     /// Render the agent indicator icon for when a conversation is selected.

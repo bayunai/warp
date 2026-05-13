@@ -5,7 +5,7 @@ use anyhow::{anyhow, Result};
 use warpui::r#async::Timer;
 
 use crate::server::server_api::integrations::IntegrationsClient;
-use warp_graphql::queries::get_oauth_connect_tx_status::OauthConnectTxStatus;
+use crate::server::server_api::integrations::OauthConnectTxStatus;
 
 /// Shared helpers for OAuth-based connect flows (txId + polling).
 ///

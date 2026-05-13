@@ -1,9 +1,9 @@
-use warp_core::ui::appearance::Appearance;
+﻿use warp_core::ui::appearance::Appearance;
 use warpui::{platform::WindowStyle, App};
 
 use crate::{
     ai::blocklist::BlocklistAIHistoryModel,
-    auth::{auth_manager::AuthManager, AuthStateProvider},
+    auth::{AuthManager, AuthStateProvider},
     cloud_object::{
         model::{persistence::CloudModel, view::CloudViewModel},
         Space,
@@ -12,7 +12,7 @@ use crate::{
     network::NetworkStatus,
     server::{
         cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-        sync_queue::SyncQueue, telemetry::context_provider::AppTelemetryContextProvider,
+        telemetry::context_provider::AppTelemetryContextProvider,
     },
     settings_view::keybindings::KeybindingChangedNotifier,
     terminal::{
@@ -33,7 +33,6 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| Appearance::mock());
-    app.add_singleton_model(SyncQueue::mock);
     app.add_singleton_model(|_| ResizableData::default());
     app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);
