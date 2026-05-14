@@ -1,29 +1,29 @@
 use crate::{
     cloud_object::{
         breadcrumbs::ContainingObject,
-        model::{persistence::CloudModelEvent, view::CloudViewModel},
-        CloudObject, Owner, Revision, Space,
+        model::{persistence::ObjectStoreEvent, view::ObjectStoreViewModel},
+        Owner, Revision, Space, StoredObject,
     },
     drive::sharing::{ContentEditability, SharingAccessLevel},
-    env_vars::CloudEnvVarCollection,
+    env_vars::EnvVarCollectionObject,
     server::ids::{ClientId, SyncId},
-    AppContext, CloudModel,
+    AppContext, ObjectStoreModel,
 };
 
 use warpui::{Entity, ModelContext, SingletonEntity};
 
-use super::CloudEnvVarCollectionModel;
+use super::EnvVarCollectionObjectModel;
 
 #[derive(Default, Clone)]
 pub enum ActiveEnvVarCollection {
     #[default]
     None,
-    // An EnvVarCollection already stored in CloudModel, all relevant data should be queried
-    // from CloudModel directly
+    // An EnvVarCollection already stored in ObjectStoreModel, all relevant data should be queried
+    // from ObjectStoreModel directly
     CommittedEnvVarCollection(SyncId),
     // An EnvVarCollection that has been created and displayed in the view, but is not yet
-    // committed to CloudModel
-    NewEnvVarCollection(Box<CloudEnvVarCollection>),
+    // committed to ObjectStoreModel
+    NewEnvVarCollection(Box<EnvVarCollectionObject>),
 }
 
 #[derive(Default, PartialEq, Debug)]
@@ -46,11 +46,11 @@ impl ActiveEnvVarCollectionData {
         // OpenWarp:原 `UpdateManager` 订阅用于接收云端同步完成事件(Create/Update/Trash
         // /Untrash::Success),无云 = 永不触发;`trash_object`/`untrash_object` 已本地化
         // 不 emit `ObjectOperationComplete`。Phase 2c‑1 删除订阅 + handler。
-        // `CloudModel` 订阅保留(本地对象变更仍需 breadcrumbs 刷新)。
-        let cloud_model = CloudModel::handle(ctx);
+        // `ObjectStoreModel` 订阅保留(本地对象变更仍需 breadcrumbs 刷新)。
+        let object_store_model = ObjectStoreModel::handle(ctx);
 
-        ctx.subscribe_to_model(&cloud_model, |me, event, ctx| {
-            me.handle_cloud_model_event(event, ctx);
+        ctx.subscribe_to_model(&object_store_model, |me, event, ctx| {
+            me.handle_object_store_event(event, ctx);
         });
 
         Self {
@@ -58,8 +58,12 @@ impl ActiveEnvVarCollectionData {
         }
     }
 
-    fn handle_cloud_model_event(&mut self, event: &CloudModelEvent, ctx: &mut ModelContext<Self>) {
-        if let CloudModelEvent::ObjectMoved { type_and_id, .. } = event {
+    fn handle_object_store_event(
+        &mut self,
+        event: &ObjectStoreEvent,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        if let ObjectStoreEvent::ObjectMoved { type_and_id, .. } = event {
             if let Some(env_var_collection_id) = type_and_id.as_generic_string_object_id() {
                 if self.is_active_env_var_collection(env_var_collection_id) {
                     ctx.emit(ActiveEnvVarCollectionDataEvent::BreadcrumbsChanged)
@@ -84,8 +88,8 @@ impl ActiveEnvVarCollectionData {
 
         // Set the active env var collection to be an uncommitted collection
         self.active_env_var_collection = ActiveEnvVarCollection::NewEnvVarCollection(Box::new(
-            CloudEnvVarCollection::new_local(
-                CloudEnvVarCollectionModel::default(),
+            EnvVarCollectionObject::new_local(
+                EnvVarCollectionObjectModel::default(),
                 owner,
                 initial_folder_id,
                 new_id,
@@ -120,7 +124,7 @@ impl ActiveEnvVarCollectionData {
     pub fn access_level(&self, app: &AppContext) -> SharingAccessLevel {
         match &self.active_env_var_collection {
             ActiveEnvVarCollection::CommittedEnvVarCollection(sync_id) => {
-                CloudViewModel::as_ref(app).access_level(&sync_id.uid(), app)
+                ObjectStoreViewModel::as_ref(app).access_level(&sync_id.uid(), app)
             }
             ActiveEnvVarCollection::None | ActiveEnvVarCollection::NewEnvVarCollection(_) => {
                 SharingAccessLevel::Full
@@ -131,7 +135,7 @@ impl ActiveEnvVarCollectionData {
     pub fn editability(&self, app: &AppContext) -> ContentEditability {
         match &self.active_env_var_collection {
             ActiveEnvVarCollection::CommittedEnvVarCollection(sync_id) => {
-                CloudViewModel::as_ref(app).object_editability(&sync_id.uid(), app)
+                ObjectStoreViewModel::as_ref(app).object_editability(&sync_id.uid(), app)
             }
             ActiveEnvVarCollection::None | ActiveEnvVarCollection::NewEnvVarCollection(_) => {
                 ContentEditability::Editable
@@ -144,7 +148,7 @@ impl ActiveEnvVarCollectionData {
         match &self.active_env_var_collection {
             ActiveEnvVarCollection::None => None,
             ActiveEnvVarCollection::CommittedEnvVarCollection(sync_id) => {
-                CloudViewModel::as_ref(app).object_space(&sync_id.uid(), app)
+                ObjectStoreViewModel::as_ref(app).object_space(&sync_id.uid(), app)
             }
             ActiveEnvVarCollection::NewEnvVarCollection(env_var_collection) => {
                 Some(env_var_collection.space(app))
@@ -172,7 +176,7 @@ impl ActiveEnvVarCollectionData {
         let cloud_env_var_collection = match &self.active_env_var_collection {
             ActiveEnvVarCollection::None => None,
             ActiveEnvVarCollection::CommittedEnvVarCollection(id) => {
-                CloudModel::as_ref(ctx).get_env_var_collection(id)
+                ObjectStoreModel::as_ref(ctx).get_env_var_collection(id)
             }
             ActiveEnvVarCollection::NewEnvVarCollection(env_var_collection) => {
                 Some(env_var_collection.as_ref())
@@ -189,10 +193,10 @@ impl ActiveEnvVarCollectionData {
                 TrashStatus::Active
             }
             ActiveEnvVarCollection::CommittedEnvVarCollection(id) => {
-                let cloud_model = CloudModel::as_ref(ctx);
-                match cloud_model.get_env_var_collection(id) {
+                let object_store_model = ObjectStoreModel::as_ref(ctx);
+                match object_store_model.get_env_var_collection(id) {
                     Some(env_var_collection) => {
-                        if env_var_collection.is_trashed(cloud_model) {
+                        if env_var_collection.is_trashed(object_store_model) {
                             TrashStatus::Trashed
                         } else {
                             TrashStatus::Active

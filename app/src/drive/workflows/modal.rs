@@ -1,6 +1,6 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::{cmp::Ordering, sync::Arc};
 
 use itertools::Itertools;
 use pathfinder_geometry::vector::vec2f;
@@ -33,12 +33,13 @@ use crate::{
     appearance::Appearance,
     cloud_object::{
         breadcrumbs::{ContainingObject, ContainingObjectKind},
-        model::persistence::{CloudModel, CloudModelEvent},
-        CloudObject, CloudObjectEventEntrypoint, ObjectType, Owner, Revision,
+        model::persistence::{ObjectStoreEvent, ObjectStoreModel},
+        update_manager::UpdateManager,
+        ObjectType, Owner, Revision, StoredObject, StoredObjectEventEntrypoint,
     },
     drive::{
-        cloud_object_styling::warp_drive_icon_color, items::WarpDriveItemId, CloudObjectTypeAndId,
-        DriveObjectType,
+        cloud_object_styling::warp_drive_icon_color, items::WarpDriveItemId, DriveObjectType,
+        ObjectTypeAndId,
     },
     editor::{
         EditorOptions, EditorView, EnterAction, EnterSettings, Event as EditorEvent,
@@ -47,11 +48,7 @@ use crate::{
     },
     menu::{Event, Menu, MenuItem, MenuItemFields},
     network::NetworkStatus,
-    server::{
-        cloud_objects::update_manager::UpdateManager,
-        ids::{ClientId, ServerId, SyncId},
-        server_api::ai::AIClient,
-    },
+    server::ids::{ClientId, ServerId, SyncId},
     themes::theme::AnsiColorIdentifier,
     ui_components::{
         blended_colors,
@@ -63,7 +60,7 @@ use crate::{
     },
     workflows::{
         workflow::{Argument, Workflow},
-        CloudWorkflow,
+        WorkflowObject,
     },
 };
 
@@ -152,7 +149,6 @@ pub struct WorkflowModal {
     pub(super) arguments_rows: Vec<ArgumentEditorRow>,
     show_unsaved_changes_dialog: bool,
     revision_ts: Option<Revision>,
-    pub(super) ai_client: Arc<dyn AIClient>,
     pub(super) ai_metadata_assist_state: AiAssistState,
     breadcrumbs: Option<Vec<BreadcrumbState<ContainingObject>>>,
     /// ID of the breadcrumb space/folder a user clicked on before the unsaved dialog popped up
@@ -213,7 +209,7 @@ impl WorkflowEditorErrorState {
 }
 
 impl WorkflowModal {
-    pub fn new(ai_client: Arc<dyn AIClient>, ctx: &mut ViewContext<Self>) -> Self {
+    pub fn new(ctx: &mut ViewContext<Self>) -> Self {
         let appearance = Appearance::as_ref(ctx);
         let header_font_size = appearance.header_font_size();
         let ui_font_family = appearance.ui_font_family();
@@ -257,9 +253,9 @@ impl WorkflowModal {
             me.handle_content_editor_event(event, ctx);
         });
 
-        let cloud_model = CloudModel::handle(ctx);
-        ctx.subscribe_to_model(&cloud_model, |me, _, event, ctx| {
-            me.handle_cloud_model_event(event, ctx);
+        let object_store_model = ObjectStoreModel::handle(ctx);
+        ctx.subscribe_to_model(&object_store_model, |me, _, event, ctx| {
+            me.handle_object_store_event(event, ctx);
         });
 
         let menu = ctx.add_typed_action_view(|_ctx| {
@@ -292,7 +288,6 @@ impl WorkflowModal {
             arguments_rows: Vec::new(),
             show_unsaved_changes_dialog: false,
             revision_ts: None,
-            ai_client,
             ai_metadata_assist_state: AiAssistState::PreRequest,
             breadcrumbs: Default::default(),
             clicked_breadcrumb: None,
@@ -637,13 +632,13 @@ impl WorkflowModal {
     // Identical to logic in DriveIndexAction::CopyObjectToClipboard
     fn copy_object_to_clipboard(&mut self, ctx: &mut ViewContext<Self>) {
         if let Some(workflow_id) = self.workflow_id {
-            let cloud_model = CloudModel::as_ref(ctx);
-            let object = cloud_model.get_by_uid(&workflow_id.uid());
+            let object_store_model = ObjectStoreModel::as_ref(ctx);
+            let object = object_store_model.get_by_uid(&workflow_id.uid());
 
             if let Some(object) = object {
                 match object.object_type() {
                     ObjectType::Workflow => {
-                        let workflow: Option<&CloudWorkflow> = object.into();
+                        let workflow: Option<&WorkflowObject> = object.into();
                         if let Some(workflow) = workflow {
                             let content = workflow.model().data.content().to_owned();
                             ctx.clipboard().write(ClipboardContent::plain_text(content));
@@ -668,7 +663,7 @@ impl WorkflowModal {
 
             UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
                 update_manager.trash_object(
-                    CloudObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
+                    ObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
                     ctx,
                 );
             });
@@ -748,7 +743,7 @@ impl WorkflowModal {
                         owner,
                         self.initial_folder_id,
                         ClientId::default(),
-                        CloudObjectEventEntrypoint::Unknown,
+                        StoredObjectEventEntrypoint::Unknown,
                         true,
                         ctx,
                     );
@@ -796,7 +791,7 @@ impl WorkflowModal {
     fn save_argument_objects(&self, ctx: &mut ViewContext<Self>) {
         let mut sent_requests: HashSet<SyncId> = HashSet::new();
         let owner = match (self.workflow_id, self.owner) {
-            (Some(workflow_id), None) => CloudModel::as_ref(ctx)
+            (Some(workflow_id), None) => ObjectStoreModel::as_ref(ctx)
                 .get_workflow(&workflow_id)
                 .map(|workflow| workflow.permissions.owner),
             (None, Some(owner)) => Some(owner),
@@ -884,10 +879,10 @@ impl WorkflowModal {
     }
 
     // This method computes the breadcrumb data for the workflow editor. It should be called
-    // every time either the cloud model or workflow ID changes.
+    // every time either the object store or workflow ID changes.
     fn compute_breadcrumbs(&mut self, ctx: &mut ViewContext<Self>) {
         self.breadcrumbs = self.workflow_id.and_then(|workflow_id| {
-            CloudModel::as_ref(ctx)
+            ObjectStoreModel::as_ref(ctx)
                 .get_workflow(&workflow_id)
                 .map(|workflow| {
                     workflow
@@ -900,30 +895,29 @@ impl WorkflowModal {
         ctx.notify()
     }
 
-    fn handle_cloud_model_event(&mut self, event: &CloudModelEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_object_store_event(&mut self, event: &ObjectStoreEvent, ctx: &mut ViewContext<Self>) {
         match event {
-            CloudModelEvent::ObjectMoved { type_and_id, .. }
-            | CloudModelEvent::ObjectPermissionsUpdated { type_and_id, .. } => {
+            ObjectStoreEvent::ObjectMoved { type_and_id, .. }
+            | ObjectStoreEvent::ObjectPermissionsUpdated { type_and_id, .. } => {
                 // Update breadcrumbs if a teammate has moved the workflow elsewhere, or if it's
                 // been shared.
                 if let Some(workflow_id) = self.workflow_id {
                     // Check that it's the currently active/open workflow
                     if *type_and_id
-                        == CloudObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow)
+                        == ObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow)
                     {
                         self.compute_breadcrumbs(ctx);
                     }
                 }
             }
-            CloudModelEvent::NotebookEditorChangedFromServer { .. }
-            | CloudModelEvent::ObjectUpdated { .. }
-            | CloudModelEvent::ObjectTrashed { .. }
-            | CloudModelEvent::ObjectUntrashed { .. }
-            | CloudModelEvent::ObjectCreated { .. }
-            | CloudModelEvent::ObjectDeleted { .. }
-            | CloudModelEvent::ObjectForceExpanded { .. }
-            | CloudModelEvent::ObjectSynced { .. }
-            | CloudModelEvent::InitialLoadCompleted => {}
+            ObjectStoreEvent::NotebookEditorChangedExternally { .. }
+            | ObjectStoreEvent::ObjectUpdated { .. }
+            | ObjectStoreEvent::ObjectTrashed { .. }
+            | ObjectStoreEvent::ObjectUntrashed { .. }
+            | ObjectStoreEvent::ObjectCreated { .. }
+            | ObjectStoreEvent::ObjectDeleted { .. }
+            | ObjectStoreEvent::ObjectForceExpanded { .. }
+            | ObjectStoreEvent::InitialLoadCompleted => {}
         }
     }
 

@@ -1,6 +1,6 @@
 pub(super) mod chips;
 pub mod editor;
-// OpenWarp Wave 7-3:`environment_selector` 随 Cloud Mode UI 子系统物理删。
+// OpenWarp Wave 7-3:`environment_selector` was removed with the hosted-mode footer.
 mod reasoning_depth_selector;
 pub mod toolbar_item;
 
@@ -8,7 +8,7 @@ use crate::{
     ai::{
         blocklist::{
             history_model::{BlocklistAIHistoryEvent, BlocklistAIHistoryModel},
-            prompt::prompt_alert::{PromptAlertEvent, PromptAlertView},
+            prompt::prompt_alert::PromptAlertView,
             usage::icon_for_context_window_usage,
             BlocklistAIInputModel,
         },
@@ -16,7 +16,6 @@ use crate::{
         AIRequestUsageModel,
     },
     appearance::Appearance,
-    auth::{AuthManager, AuthStateProvider},
     completer::SessionContext,
     context_chips::{
         self,
@@ -57,16 +56,16 @@ use crate::{
     workspaces::user_workspaces::UserWorkspaces,
 };
 use toolbar_item::AgentToolbarItemKind;
-// OpenWarp Wave 7-3:`warp_cli::agent::Harness` import 随 `render_cloud_mode_v2_footer` 物理删。
+// OpenWarp Wave 7-3:`warp_cli::agent::Harness` import was removed with the hosted-mode footer.
 
 use std::sync::Arc;
 
-#[cfg(feature = "voice_input")]
-use crate::server::server_api::TranscribeError;
 #[cfg(not(target_family = "wasm"))]
 use crate::terminal::local_shell::LocalShellState;
 #[cfg(not(target_family = "wasm"))]
 use crate::terminal::ShellLaunchData;
+#[cfg(feature = "voice_input")]
+use crate::voice::transcriber::TranscribeError;
 use ai::document::{AIDocumentId, AIDocumentVersion};
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
@@ -85,11 +84,10 @@ use tokio::fs;
 use voice_input::{StartListeningError, VoiceSessionResult};
 
 use warp_core::{
-    context_flag::ContextFlag,
     report_if_error,
     ui::{
         color::{blend::Blend, contrast::MinimumAllowedContrast, ContrastingColor},
-        theme::{color::internal_colors, AnsiColorIdentifier, Fill},
+        theme::{color::internal_colors, Fill},
     },
 };
 #[cfg(feature = "voice_input")]
@@ -109,8 +107,8 @@ use warpui::{
 #[cfg(not(target_family = "wasm"))]
 use warpui::r#async::Timer;
 
-// OpenWarp Wave 7-3:`EnvironmentSelector` / `EnvironmentSelectorEvent` re-export 随
-// Cloud Mode UI 子系统物理删。
+// OpenWarp Wave 7-3:`EnvironmentSelector` / `EnvironmentSelectorEvent` re-export was removed
+// with the hosted-mode footer.
 pub(crate) use self::reasoning_depth_selector::{
     ReasoningDepthSelector, ReasoningDepthSelectorEvent,
 };
@@ -126,8 +124,7 @@ use crate::view_components::ToastLink;
 #[cfg(not(target_family = "wasm"))]
 use crate::workspace::WorkspaceAction;
 
-// OpenWarp Wave 7-3:`CLOUD_MODE_V2_FOOTER_GAP` 随 `render_cloud_mode_v2_footer` /
-// Cloud Mode UI 子系统物理删。
+// OpenWarp Wave 7-3: removed the hosted-mode footer gap constant with the old footer.
 
 /// Voice input state for the CLI agent footer. Unlike the editor-based voice
 /// flow (which goes through Input → EditorView), this state is self-contained
@@ -186,12 +183,10 @@ pub struct AgentInputFooter {
     mic_button: ViewHandle<ActionButton>,
     nld_button: ViewHandle<ActionButton>,
     file_button: ViewHandle<ActionButton>,
-    start_remote_control_button: ViewHandle<ActionButton>,
-    stop_remote_control_button: ViewHandle<ActionButton>,
     context_window_button: ViewHandle<ActionButton>,
     model_selector: ViewHandle<ProfileModelSelector>,
     ftu_callout_close_button: ViewHandle<ActionButton>,
-    // OpenWarp Wave 7-3:`environment_selector` field 随 Cloud Mode UI 子系统物理删。
+    // OpenWarp Wave 7-3:`environment_selector` field was removed with the hosted-mode footer.
     reasoning_depth_selector: ViewHandle<ReasoningDepthSelector>,
     prompt_alert: ViewHandle<PromptAlertView>,
     ambient_agent_view_model: ModelHandle<AmbientAgentViewModel>,
@@ -553,29 +548,6 @@ impl AgentInputFooter {
             },
         );
 
-        let start_remote_control_button = ctx.add_typed_action_view(|_ctx| {
-            ActionButton::new("/remote-control", AgentInputButtonTheme)
-                .with_icon(Icon::Phone01)
-                .with_tooltip(crate::t!("ai-footer-start-remote-control"))
-                .with_size(cli_button_size)
-                .with_tooltip_alignment(TooltipAlignment::Left)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(AgentInputFooterAction::StartRemoteControl);
-                })
-        });
-
-        let stop_remote_control_button = ctx.add_typed_action_view(|_ctx| {
-            ActionButton::new(crate::t!("terminal-stop-sharing"), AgentInputButtonTheme)
-                .with_icon(Icon::StopFilled)
-                .with_icon_ansi_color(AnsiColorIdentifier::Red)
-                .with_tooltip(crate::t!("terminal-stop-sharing"))
-                .with_size(cli_button_size)
-                .with_tooltip_alignment(TooltipAlignment::Left)
-                .on_click(|ctx| {
-                    ctx.dispatch_typed_action(AgentInputFooterAction::StopRemoteControl);
-                })
-        });
-
         let context_window_button = ctx.add_typed_action_view(|_ctx| {
             ActionButton::new("", AgentInputButtonTheme)
                 .with_icon(Icon::ConversationContext0)
@@ -603,7 +575,7 @@ impl AgentInputFooter {
         });
 
         // OpenWarp Wave 7-3:`EnvironmentSelector` 初始化 + 订阅 + ambient_agent
-        // 状态重渲染订阅随 Cloud Mode UI 子系统物理删。
+        // Status rerender subscription was removed with the hosted-mode footer.
 
         let reasoning_depth_selector = ctx.add_typed_action_view(|ctx| {
             ReasoningDepthSelector::new(menu_positioning_provider.clone(), terminal_view_id, ctx)
@@ -615,9 +587,6 @@ impl AgentInputFooter {
         });
 
         let prompt_alert = ctx.add_typed_action_view(PromptAlertView::new);
-        ctx.subscribe_to_view(&prompt_alert, |_, _, event, ctx| {
-            ctx.emit(AgentInputFooterEvent::PromptAlert(event.clone()));
-        });
 
         ctx.subscribe_to_model(&NetworkStatus::handle(ctx), |_, _, _, ctx| {
             ctx.notify();
@@ -637,13 +606,6 @@ impl AgentInputFooter {
             if let ModelEvent::AgentTaggedInChanged { .. } = event {
                 me.update_ftu_callout_render_state(ctx);
             }
-        });
-
-        // Keep the remote-control chip in sync with login state so we can
-        // disable it and swap the tooltip when the user is anonymous or
-        // logged out.
-        ctx.subscribe_to_model(&AuthManager::handle(ctx), |me, _, _, ctx| {
-            me.sync_remote_control_button(ctx);
         });
 
         let prompt_for_session_settings = prompt.clone();
@@ -706,7 +668,7 @@ impl AgentInputFooter {
             me.update_display_chips(&model, ctx);
         });
 
-        let v2_model_selector = if FeatureFlag::CloudModeInputV2.is_enabled() {
+        let v2_model_selector = if false {
             Some(ctx.add_typed_action_view(|ctx| {
                 ModelSelector::new(menu_positioning_provider.clone(), terminal_view_id, ctx)
             }))
@@ -723,8 +685,6 @@ impl AgentInputFooter {
             file_explorer_button,
             rich_input_button,
             settings_button,
-            start_remote_control_button,
-            stop_remote_control_button,
             install_plugin_button,
             plugin_instructions_button,
             update_plugin_button,
@@ -734,7 +694,7 @@ impl AgentInputFooter {
             plugin_chip_ready: false,
             context_window_button,
             model_selector: profile_model_selector_full,
-            // OpenWarp Wave 7-3:`environment_selector` field init 随 Cloud Mode UI
+            // OpenWarp Wave 7-3:`environment_selector` field init was removed with hosted-mode UI.
             // 子系统物理删。
             reasoning_depth_selector,
             prompt_alert,
@@ -760,7 +720,6 @@ impl AgentInputFooter {
             v2_model_selector,
         };
         me.sync_fast_forward_button(ctx);
-        me.sync_remote_control_button(ctx);
         me.update_context_window_button(ctx);
         me.update_display_chips(&prompt, ctx);
         me.update_ftu_callout_render_state(ctx);
@@ -784,9 +743,7 @@ impl AgentInputFooter {
             .is_some_and(|s| s.as_ref(app).is_menu_open())
     }
 
-    // OpenWarp Wave 7-3:`should_render_cloud_mode_v2` / `render_cloud_mode_v2_footer` 随
-    // Cloud Mode UI 子系统物理删 (CloudModeInputV2 / CloudMode flag 在 OpenWarp
-    // 中强制返回 false,上游源 if branch 不可达)。
+    // OpenWarp Wave 7-3: hosted-mode footer rendering was removed.
 
     fn all_display_chips(&self) -> impl Iterator<Item = &ViewHandle<DisplayChip>> {
         self.left_display_chips
@@ -1247,19 +1204,8 @@ impl AgentInputFooter {
                 None
             }
             AgentToolbarItemKind::ShareSession => {
-                let enabled = FeatureFlag::CreatingSharedSessions.is_enabled()
-                    && FeatureFlag::HOARemoteControl.is_enabled()
-                    && ContextFlag::CreateSharedSession.is_enabled();
-                if !enabled {
-                    return None;
-                }
-
-                let button = if shared_status.is_sharer() {
-                    &self.stop_remote_control_button
-                } else {
-                    &self.start_remote_control_button
-                };
-                Some(ChildView::new(button).finish())
+                let _ = shared_status;
+                None
             }
             AgentToolbarItemKind::Settings => Some(ChildView::new(&self.settings_button).finish()),
             // Handled by the available_in() guard above; included for exhaustiveness.
@@ -1389,7 +1335,7 @@ impl AgentInputFooter {
     }
 
     pub fn has_open_chip_menu(&self, app: &AppContext) -> bool {
-        // OpenWarp Wave 7-3:`environment_selector` is_menu_open() 检查随 Cloud Mode UI
+        // OpenWarp Wave 7-3:`environment_selector` is_menu_open() check was removed with hosted-mode UI.
         // 子系统物理删。
         self.all_display_chips()
             .any(|chip| chip.as_ref(app).display_chip_kind().has_open_menu())
@@ -1739,24 +1685,6 @@ impl AgentInputFooter {
         });
     }
 
-    /// Disable the start-remote-control chip and swap its tooltip when the
-    /// user is anonymous or logged out, since session sharing requires a
-    /// real account.
-    fn sync_remote_control_button(&self, ctx: &mut ViewContext<Self>) {
-        let login_required = AuthStateProvider::as_ref(ctx)
-            .get()
-            .is_anonymous_or_logged_out();
-        let tooltip = if login_required {
-            crate::t!("ai-footer-login-required-remote-control")
-        } else {
-            crate::t!("ai-footer-start-remote-control")
-        };
-        self.start_remote_control_button.update(ctx, |button, ctx| {
-            button.set_disabled(login_required, ctx);
-            button.set_tooltip(Some(tooltip), ctx);
-        });
-    }
-
     fn update_context_window_button(&mut self, ctx: &mut ViewContext<Self>) {
         if let Some(conversation) =
             BlocklistAIHistoryModel::as_ref(ctx).active_conversation(self.terminal_view_id)
@@ -1779,10 +1707,8 @@ impl AgentInputFooter {
         shared_status: &SharedSessionStatus,
         app: &AppContext,
     ) -> Option<Box<dyn Element>> {
-        let is_cloud_mode = FeatureFlag::CloudModeImageContext.is_enabled()
-            && self.ambient_agent_view_model.as_ref(app).is_ambient_agent();
         if !item.available_in().is_available_for_agent_view()
-            || !item.available_to_session_viewer(shared_status, is_cloud_mode)
+            || !item.available_to_session_viewer(shared_status, false)
         {
             return None;
         }
@@ -1835,18 +1761,8 @@ impl AgentInputFooter {
                 has_conversation.then(|| ChildView::new(&self.context_window_button).finish())
             }
             AgentToolbarItemKind::ShareSession => {
-                let enabled = FeatureFlag::CreatingSharedSessions.is_enabled()
-                    && FeatureFlag::HOARemoteControl.is_enabled()
-                    && ContextFlag::CreateSharedSession.is_enabled();
-                if !enabled {
-                    return None;
-                }
-                let button = if shared_status.is_sharer() {
-                    &self.stop_remote_control_button
-                } else {
-                    &self.start_remote_control_button
-                };
-                Some(ChildView::new(button).finish())
+                let _ = shared_status;
+                None
             }
             AgentToolbarItemKind::FastForwardToggle => FeatureFlag::FastForwardAutoexecuteButton
                 .is_enabled()
@@ -1897,8 +1813,7 @@ impl View for AgentInputFooter {
     }
 
     fn render(&self, app: &warpui::AppContext) -> Box<dyn warpui::Element> {
-        // OpenWarp Wave 7-3:`should_render_cloud_mode_v2` / `render_cloud_mode_v2_footer`
-        // 随 Cloud Mode UI 子系统物理删。
+        // OpenWarp Wave 7-3: hosted-mode footer rendering was removed.
         // When a CLI agent session is active, render the CLI agent toolbar instead.
         if self.is_cli_agent_session_active(app) {
             return self.render_cli_mode_footer(app);
@@ -1915,8 +1830,7 @@ impl View for AgentInputFooter {
             .with_run_spacing(4.)
             .with_spacing(4.);
 
-        // OpenWarp Wave 7-3:`environment_selector` ambient_agent chip 注入 随 Cloud Mode UI
-        // 子系统物理删 (CloudMode flag 在 OpenWarp 中强制返回 false)。
+        // OpenWarp Wave 7-3: removed environment-selector ambient-agent chip injection.
 
         let terminal_model = self.terminal_model.lock();
         let shared_status = terminal_model.shared_session_status();
@@ -2099,8 +2013,6 @@ pub enum AgentInputFooterAction {
     OpenPluginInstallInstructionsPane,
     OpenPluginUpdateInstructionsPane,
     DismissPluginChip,
-    StartRemoteControl,
-    StopRemoteControl,
     OpenCodingAgentSettings,
     ShowContextMenu {
         position: Vector2F,
@@ -2285,12 +2197,6 @@ impl TypedActionView for AgentInputFooter {
                 }
                 ctx.notify();
             }
-            AgentInputFooterAction::StartRemoteControl => {
-                ctx.emit(AgentInputFooterEvent::StartRemoteControl);
-            }
-            AgentInputFooterAction::StopRemoteControl => {
-                ctx.emit(AgentInputFooterEvent::StopRemoteControl);
-            }
             AgentInputFooterAction::OpenCodingAgentSettings => {
                 #[cfg(not(target_family = "wasm"))]
                 ctx.dispatch_typed_action_deferred(WorkspaceAction::ScrollToSettingsWidget {
@@ -2316,15 +2222,12 @@ pub enum AgentInputFooterEvent {
     InsertIntoCLIRichInput(String),
     ToggleCodeReviewPane(CLIAgent),
     ToggleFileExplorer(CLIAgent),
-    StartRemoteControl,
-    StopRemoteControl,
     OpenRichInput,
     HideRichInput,
     ToggledChipMenu {
         open: bool,
     },
     TryExecuteChipCommand(String),
-    PromptAlert(PromptAlertEvent),
     ModelSelectorOpened,
     ModelSelectorClosed,
     ToggleInlineModelSelector {
@@ -2339,7 +2242,7 @@ pub enum AgentInputFooterEvent {
     ShowContextMenu {
         position: Vector2F,
     },
-    // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` event 随 Cloud Mode UI 子系统
+    // OpenWarp Wave 7-3:`OpenEnvironmentManagementPane` event was removed with hosted-mode UI.
     // 物理删。
     PluginInstalled(CLIAgent),
     #[cfg(not(target_family = "wasm"))]
@@ -2390,7 +2293,7 @@ impl ActionButtonTheme for AgentInputButtonTheme {
     }
 
     fn font_properties(&self) -> Option<warpui::fonts::Properties> {
-        if crate::features::FeatureFlag::CloudModeInputV2.is_enabled() {
+        if false {
             Some(warpui::fonts::Properties {
                 weight: warpui::fonts::Weight::Semibold,
                 ..Default::default()

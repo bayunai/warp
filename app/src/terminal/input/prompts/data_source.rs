@@ -7,7 +7,7 @@ use warpui::text_layout::ClipConfig;
 use warpui::{AppContext, Element, Entity, ModelContext, ModelHandle, SingletonEntity as _};
 
 use crate::appearance::Appearance;
-use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::search::command_palette::warp_drive;
 use crate::search::data_source::{DataSourceSearchError, Query, QueryResult};
 use crate::search::mixer::DataSourceRunErrorWrapper;
@@ -19,7 +19,7 @@ use crate::terminal::input::inline_menu::{
     default_navigation_message_items, InlineMenuAction, InlineMenuMessageArgs, InlineMenuType,
 };
 use crate::terminal::input::message_bar::Message;
-use crate::workflows::CloudWorkflow;
+use crate::workflows::WorkflowObject;
 
 #[derive(Clone, Debug)]
 pub struct AcceptPrompt {
@@ -62,7 +62,7 @@ impl SyncDataSource for PromptsMenuDataSource {
         let query_text = query.text.trim();
 
         if query_text.is_empty() {
-            let cloud_workflows = CloudModel::as_ref(app).get_all_active_workflows();
+            let cloud_workflows = ObjectStoreModel::as_ref(app).get_all_active_workflows();
 
             return Ok(cloud_workflows
                 .filter(|workflow| !workflow.model().data.is_command_workflow())
@@ -74,7 +74,7 @@ impl SyncDataSource for PromptsMenuDataSource {
         // search to avoid missing valid results while still filtering the list.
         if query_text.chars().count() == 1 {
             let query_char = query_text.chars().next().unwrap();
-            let cloud_workflows = CloudModel::as_ref(app).get_all_active_workflows();
+            let cloud_workflows = ObjectStoreModel::as_ref(app).get_all_active_workflows();
 
             return Ok(cloud_workflows
                 .filter(|workflow| {
@@ -98,7 +98,7 @@ impl SyncDataSource for PromptsMenuDataSource {
                         let score = result.score();
                         // Avoid spamming results with extremely weak matches.
                         (score > OrderedFloat(25.0)).then(|| {
-                            let workflow = result.cloud_workflow;
+                            let workflow = result.workflow;
                             if workflow.model().data.is_command_workflow() {
                                 return None;
                             }
@@ -133,7 +133,7 @@ struct PromptSearchItem {
 }
 
 impl PromptSearchItem {
-    fn from_workflow(workflow: &CloudWorkflow) -> Self {
+    fn from_workflow(workflow: &WorkflowObject) -> Self {
         Self {
             id: workflow.id,
             name: workflow.model().data.name().to_owned(),

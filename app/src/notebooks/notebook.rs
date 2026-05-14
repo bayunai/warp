@@ -43,15 +43,16 @@ use crate::{
     cloud_object::{
         grab_edit_access_modal::{GrabEditAccessModal, GrabEditAccessModalEvent},
         model::{
-            persistence::{CloudModel, CloudModelEvent, UpdateSource},
+            persistence::{ObjectStoreEvent, ObjectStoreModel, UpdateSource},
             view::{Editor, EditorState},
         },
-        CloudObject, CloudObjectEventEntrypoint, ObjectType, Owner, Space,
+        update_manager::{FetchSingleObjectOption, UpdateManager},
+        ObjectType, Owner, Space, StoredObject, StoredObjectEventEntrypoint,
     },
     cmd_or_ctrl_shift,
     drive::{
         drive_helpers::has_feature_gated_anonymous_user_reached_notebook_limit,
-        export::ExportManager, items::WarpDriveItemId, CloudObjectTypeAndId,
+        export::ExportManager, items::WarpDriveItemId, ObjectTypeAndId,
         OpenWarpDriveObjectSettings,
     },
     editor::{
@@ -63,7 +64,7 @@ use crate::{
     network::{NetworkStatus, NetworkStatusEvent},
     notebooks::{
         editor::{model::NotebooksEditorModel, rich_text_styles},
-        CloudNotebook,
+        NotebookObject,
     },
     pane_group::{
         focus_state::{PaneFocusHandle, PaneGroupFocusEvent},
@@ -72,11 +73,10 @@ use crate::{
     },
     report_if_error, safe_info, send_telemetry_from_ctx,
     server::{
-        cloud_objects::update_manager::{FetchSingleObjectOption, UpdateManager},
         ids::{ClientId, ServerId, SyncId},
         telemetry::{
-            CloudObjectTelemetryMetadata, NotebookActionEvent, NotebookTelemetryMetadata,
-            TelemetryCloudObjectType, TelemetryEvent,
+            NotebookActionEvent, NotebookTelemetryMetadata, ObjectTelemetryMetadata,
+            TelemetryEvent, TelemetryObjectType,
         },
     },
     settings::{
@@ -113,7 +113,7 @@ use super::{
     manager::NotebookManager,
     styles,
     telemetry::NotebookTelemetryAction,
-    CloudNotebookModel, NotebookId, NotebookLocation,
+    NotebookId, NotebookLocation, NotebookObjectModel,
 };
 
 mod details_bar;
@@ -269,7 +269,7 @@ pub enum NotebookEvent {
     ViewInWarpDrive(WarpDriveItemId),
     Pane(PaneEvent),
     MoveToSpace {
-        cloud_object_type_and_id: CloudObjectTypeAndId,
+        object_type_and_id: ObjectTypeAndId,
         new_space: Space,
     },
     AttachPlanAsContext(AIDocumentId),
@@ -294,7 +294,7 @@ pub enum NotebookAction {
     ViewInWarpDrive(WarpDriveItemId),
     ContextMenu(ContextMenuAction), // right click context menu
     MoveToSpace {
-        cloud_object_type_and_id: CloudObjectTypeAndId,
+        object_type_and_id: ObjectTypeAndId,
         new_space: Space,
     },
     Duplicate,
@@ -406,9 +406,9 @@ impl NotebookView {
         let user_workspaces = UserWorkspaces::handle(ctx);
         ctx.observe(&user_workspaces, Self::on_user_workspaces_update);
 
-        let cloud_model = CloudModel::handle(ctx);
-        ctx.subscribe_to_model(&cloud_model, |notebook, _handle, event, ctx| {
-            notebook.handle_cloud_model_event(event, ctx);
+        let object_store_model = ObjectStoreModel::handle(ctx);
+        ctx.subscribe_to_model(&object_store_model, |notebook, _handle, event, ctx| {
+            notebook.handle_object_store_event(event, ctx);
         });
 
         let (save_tx, save_rx) = async_channel::unbounded();
@@ -708,7 +708,7 @@ impl NotebookView {
     }
 
     /// Reload an updated notebook.
-    fn handle_notebook_updated(&mut self, notebook: &CloudNotebook, ctx: &mut ViewContext<Self>) {
+    fn handle_notebook_updated(&mut self, notebook: &NotebookObject, ctx: &mut ViewContext<Self>) {
         self.set_title(&notebook.model().title, ctx);
         self.input.update(ctx, |input_editor, ctx| {
             input_editor.system_clear_buffer(ctx);
@@ -719,11 +719,11 @@ impl NotebookView {
 
     /// Given a cloud object ID, check if it's the ID of the active notebook.
     ///
-    /// This is a helper for handling [`CloudModelEvent`]s, which should be ignored if they're not
+    /// This is a helper for handling [`ObjectStoreEvent`]s, which should be ignored if they're not
     /// for the active notebook.
     fn as_active_notebook_id(
         &self,
-        id: &CloudObjectTypeAndId,
+        id: &ObjectTypeAndId,
         ctx: &mut ViewContext<Self>,
     ) -> Option<SyncId> {
         id.as_notebook_id().filter(|id| {
@@ -733,21 +733,23 @@ impl NotebookView {
         })
     }
 
-    fn handle_cloud_model_event(&mut self, event: &CloudModelEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_object_store_event(&mut self, event: &ObjectStoreEvent, ctx: &mut ViewContext<Self>) {
         match event {
-            CloudModelEvent::ObjectUpdated {
+            ObjectStoreEvent::ObjectUpdated {
                 type_and_id,
-                source: UpdateSource::Server,
+                source: UpdateSource::External,
             } => {
                 if let Some(updated_notebook) = self
                     .as_active_notebook_id(type_and_id, ctx)
-                    .and_then(|notebook_id| CloudModel::as_ref(ctx).get_notebook(&notebook_id))
+                    .and_then(|notebook_id| {
+                        ObjectStoreModel::as_ref(ctx).get_notebook(&notebook_id)
+                    })
                     .cloned()
                 {
                     self.handle_notebook_updated(&updated_notebook, ctx);
                 }
             }
-            CloudModelEvent::ObjectTrashed { .. } | CloudModelEvent::ObjectDeleted { .. } => {
+            ObjectStoreEvent::ObjectTrashed { .. } | ObjectStoreEvent::ObjectDeleted { .. } => {
                 // Check is_trashed rather than the event ID, since this notebook could have been
                 // indirectly trashed.
                 if !self
@@ -759,7 +761,7 @@ impl NotebookView {
                     self.give_up_edit_access_and_start_viewing(ctx)
                 }
             }
-            CloudModelEvent::ObjectUntrashed { .. } => {
+            ObjectStoreEvent::ObjectUntrashed { .. } => {
                 // Re-render if this notebook was potentially untrashed. See the ObjectTrashed case
                 // for why we can't rely on the event ID.
                 if self
@@ -771,7 +773,7 @@ impl NotebookView {
                     ctx.notify();
                 }
             }
-            CloudModelEvent::ObjectMoved { type_and_id, .. } => {
+            ObjectStoreEvent::ObjectMoved { type_and_id, .. } => {
                 if self.as_active_notebook_id(type_and_id, ctx).is_some() {
                     if let Some(space) = self.active_notebook_data.as_ref(ctx).space(ctx) {
                         self.input
@@ -779,7 +781,7 @@ impl NotebookView {
                     }
                 }
             }
-            CloudModelEvent::ObjectCreated { type_and_id, .. } => {
+            ObjectStoreEvent::ObjectCreated { type_and_id, .. } => {
                 if self.as_active_notebook_id(type_and_id, ctx).is_some() {
                     // Re-render to update the status bar.
                     ctx.notify();
@@ -839,13 +841,13 @@ impl NotebookView {
                             client_id,
                             notebook.permissions.owner,
                             notebook.metadata.folder_id,
-                            CloudNotebookModel {
+                            NotebookObjectModel {
                                 title: notebook.model().title.clone(),
                                 data: content.to_string(),
                                 ai_document_id: notebook.model().ai_document_id,
                                 conversation_id: notebook.model().conversation_id.clone(),
                             },
-                            CloudObjectEventEntrypoint::Unknown,
+                            StoredObjectEventEntrypoint::Unknown,
                             true,
                             ctx,
                         );
@@ -1074,10 +1076,10 @@ impl NotebookView {
     }
 
     #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
-    fn generic_telemetry_metadata(&self, ctx: &ViewContext<Self>) -> CloudObjectTelemetryMetadata {
+    fn generic_telemetry_metadata(&self, ctx: &ViewContext<Self>) -> ObjectTelemetryMetadata {
         let notebook_data = self.active_notebook_data.as_ref(ctx);
-        CloudObjectTelemetryMetadata {
-            object_type: TelemetryCloudObjectType::Notebook,
+        ObjectTelemetryMetadata {
+            object_type: TelemetryObjectType::Notebook,
             object_uid: notebook_data.id().and_then(SyncId::into_server),
             space: notebook_data.space(ctx).map(Into::into),
             team_uid: notebook_data.owner(ctx).and_then(Into::into),
@@ -1175,7 +1177,7 @@ impl NotebookView {
         });
     }
 
-    fn set_content(&mut self, notebook: &CloudNotebook, ctx: &mut ViewContext<Self>) {
+    fn set_content(&mut self, notebook: &NotebookObject, ctx: &mut ViewContext<Self>) {
         // Initialize the content length so we can get a delta when editing.
         self.last_content_length = notebook.model().data.len();
         self.input.update(ctx, |input, ctx| {
@@ -1207,12 +1209,12 @@ impl NotebookView {
 
     fn move_to_team_owner(
         &mut self,
-        cloud_object_type_and_id: CloudObjectTypeAndId,
+        object_type_and_id: ObjectTypeAndId,
         new_space: Space,
         ctx: &mut ViewContext<Self>,
     ) {
         ctx.emit(NotebookEvent::MoveToSpace {
-            cloud_object_type_and_id,
+            object_type_and_id,
             new_space,
         });
     }
@@ -1221,7 +1223,7 @@ impl NotebookView {
         if let Some(notebook_id) = self.notebook_id(ctx) {
             UpdateManager::handle(ctx).update(ctx, |update_manager, ctx| {
                 update_manager.duplicate_object(
-                    &CloudObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
+                    &ObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
                     ctx,
                 );
             });
@@ -1235,7 +1237,7 @@ impl NotebookView {
 
             UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
                 update_manager.trash_object(
-                    CloudObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
+                    ObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
                     ctx,
                 );
             });
@@ -1250,7 +1252,7 @@ impl NotebookView {
 
             UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
                 update_manager.untrash_object(
-                    CloudObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
+                    ObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
                     ctx,
                 );
             });
@@ -1264,7 +1266,7 @@ impl NotebookView {
             ExportManager::handle(ctx).update(ctx, |export_manager, ctx| {
                 export_manager.export(
                     window_id,
-                    &[CloudObjectTypeAndId::from_id_and_type(
+                    &[ObjectTypeAndId::from_id_and_type(
                         notebook_id,
                         ObjectType::Notebook,
                     )],
@@ -1290,7 +1292,7 @@ impl NotebookView {
         let active_notebook = self.active_notebook_data.as_ref(ctx).active_notebook();
 
         let ai_document_id = match active_notebook {
-            ActiveNotebook::CommittedNotebook(id) => CloudModel::as_ref(ctx)
+            ActiveNotebook::CommittedNotebook(id) => ObjectStoreModel::as_ref(ctx)
                 .get_notebook(&id)
                 .and_then(|n| n.model().ai_document_id),
             ActiveNotebook::NewNotebook(notebook) => notebook.model().ai_document_id,
@@ -1310,13 +1312,13 @@ impl NotebookView {
                 copy_client_id,
                 personal_drive,
                 None,
-                CloudNotebookModel {
+                NotebookObjectModel {
                     title: title.clone(),
                     data: content,
                     ai_document_id,
                     conversation_id: None,
                 },
-                CloudObjectEventEntrypoint::Unknown,
+                StoredObjectEventEntrypoint::Unknown,
                 true,
                 ctx,
             );
@@ -1349,12 +1351,12 @@ impl NotebookView {
 
     fn online_only_operation_allowed(
         &self,
-        cloud_object_type_and_id: CloudObjectTypeAndId,
+        object_type_and_id: ObjectTypeAndId,
         app: &AppContext,
     ) -> bool {
-        if let Some(object) = CloudModel::as_ref(app).get_by_uid(&cloud_object_type_and_id.uid()) {
+        if let Some(object) = ObjectStoreModel::as_ref(app).get_by_uid(&object_type_and_id.uid()) {
             return self.is_online(app)
-                && cloud_object_type_and_id.has_server_id()
+                && object_type_and_id.has_server_id()
                 && !object.metadata().has_pending_online_only_change();
         }
 
@@ -1364,7 +1366,7 @@ impl NotebookView {
     pub fn notebook_link(&self, ctx: &AppContext) -> Option<String> {
         let id = self.notebook_id(ctx)?;
 
-        if let Some(notebook) = CloudModel::as_ref(ctx).get_notebook(&id) {
+        if let Some(notebook) = ObjectStoreModel::as_ref(ctx).get_notebook(&id) {
             return notebook.object_link();
         }
 
@@ -1390,7 +1392,7 @@ impl NotebookView {
             (active_notebook_data.space(ctx), active_notebook_data.id())
         {
             let cloud_object_type =
-                CloudObjectTypeAndId::from_id_and_type(cloud_id, ObjectType::Notebook);
+                ObjectTypeAndId::from_id_and_type(cloud_id, ObjectType::Notebook);
             let can_move = self.online_only_operation_allowed(cloud_object_type, ctx);
 
             if can_move {
@@ -1402,7 +1404,7 @@ impl NotebookView {
                                 space = space.name(ctx)
                             ))
                             .with_on_select_action(NotebookAction::MoveToSpace {
-                                cloud_object_type_and_id: cloud_object_type,
+                                object_type_and_id: cloud_object_type,
                                 new_space: *space,
                             })
                             .with_icon(Icon::Move)
@@ -1518,17 +1520,23 @@ impl NotebookView {
         ctx: &mut ViewContext<Self>,
     ) {
         let initial_load_complete =
-            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+            crate::cloud_object::model::persistence::ObjectStoreModel::as_ref(ctx)
                 .initial_load_complete();
         // TODO @ianhodge CLD-2002: it could be nice to have a loading screen here while we wait for the load
         let settings = settings.clone();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
-            let notebook = CloudModel::as_ref(ctx).get_notebook(&notebook_id).cloned();
+            let notebook = ObjectStoreModel::as_ref(ctx)
+                .get_notebook(&notebook_id)
+                .cloned();
             let fetch_needed = notebook.is_none()
                 || settings
                     .focused_folder_id
                     .map(SyncId::ServerId)
-                    .map(|folder_id| CloudModel::as_ref(ctx).get_folder(&folder_id).is_none())
+                    .map(|folder_id| {
+                        ObjectStoreModel::as_ref(ctx)
+                            .get_folder(&folder_id)
+                            .is_none()
+                    })
                     .unwrap_or(false);
             if fetch_needed {
                 if let Some(server_id) = notebook_id.into_server() {
@@ -1541,7 +1549,7 @@ impl NotebookView {
             } else {
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                     toast_stack.add_ephemeral_toast_by_type(
-                        ToastType::CloudObjectNotFound,
+                        ToastType::StoredObjectNotFound,
                         window_id,
                         ctx,
                     );
@@ -1570,7 +1578,7 @@ impl NotebookView {
             });
         let settings = settings.clone();
         ctx.spawn(fetch_cloud_object_rx, move |me, _, ctx| {
-            if let Some(notebook) = CloudModel::as_ref(ctx)
+            if let Some(notebook) = ObjectStoreModel::as_ref(ctx)
                 .get_notebook(&SyncId::ServerId(notebook_id))
                 .cloned()
             {
@@ -1578,7 +1586,7 @@ impl NotebookView {
             } else {
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                     toast_stack.add_ephemeral_toast_by_type(
-                        ToastType::CloudObjectNotFound,
+                        ToastType::StoredObjectNotFound,
                         window_id,
                         ctx,
                     );
@@ -1588,7 +1596,7 @@ impl NotebookView {
         });
     }
 
-    /// Takes a `CloudNotebook` and loads it into the view.
+    /// Takes a `NotebookObject` and loads it into the view.
     ///
     /// Namely, we reset the title and body's undo stack and we set the buffer to be
     /// that of the cloud notebook's content.
@@ -1597,7 +1605,7 @@ impl NotebookView {
     /// editing if there is not already an editor.
     pub fn load(
         &mut self,
-        notebook: CloudNotebook,
+        notebook: NotebookObject,
         settings: &OpenWarpDriveObjectSettings,
         ctx: &mut ViewContext<Self>,
     ) -> SpawnedFutureHandle {
@@ -1623,7 +1631,7 @@ impl NotebookView {
         );
 
         // Once we've received metadata from the server, check if we can eagerly edit the notebook.
-        let has_metadata = crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+        let has_metadata = crate::cloud_object::model::persistence::ObjectStoreModel::as_ref(ctx)
             .initial_load_complete();
         let baton_future = ctx.spawn(has_metadata, |me, _, ctx| {
             let active_notebook_data = me.active_notebook_data.as_ref(ctx);
@@ -1674,7 +1682,7 @@ impl NotebookView {
         // OpenWarp Phase 2a: invitee-driven sharing dialog removed.
         if let Some(focused_folder_id) = settings.focused_folder_id.map(SyncId::ServerId) {
             self.view_in_warp_drive(
-                WarpDriveItemId::Object(CloudObjectTypeAndId::Folder(focused_folder_id)),
+                WarpDriveItemId::Object(ObjectTypeAndId::Folder(focused_folder_id)),
                 ctx,
             );
         }
@@ -1758,13 +1766,13 @@ impl NotebookView {
                             client_id,
                             notebook.permissions.owner,
                             notebook.metadata.folder_id,
-                            CloudNotebookModel {
+                            NotebookObjectModel {
                                 title: title.to_string(),
                                 data: notebook.model().data.to_owned(),
                                 ai_document_id: notebook.model().ai_document_id,
                                 conversation_id: notebook.model().conversation_id.clone(),
                             },
-                            CloudObjectEventEntrypoint::Unknown,
+                            StoredObjectEventEntrypoint::Unknown,
                             true,
                             ctx,
                         );
@@ -1842,9 +1850,9 @@ impl NotebookView {
             update_manager.replace_object_with_conflict(&id.uid(), ctx);
         });
 
-        // Load the server's version of the notebook now that the cloud model has been updated.
+        // Load the server's version of the notebook now that the object store has been updated.
         // This will also switch back to edit mode if there isn't an active editor.
-        if let Some(notebook) = CloudModel::as_ref(ctx).get_notebook(&id) {
+        if let Some(notebook) = ObjectStoreModel::as_ref(ctx).get_notebook(&id) {
             self.load(
                 notebook.clone(),
                 &OpenWarpDriveObjectSettings::default(),
@@ -2320,13 +2328,13 @@ impl TypedActionView for NotebookView {
                 });
             }
             NotebookAction::MoveToSpace {
-                cloud_object_type_and_id,
+                object_type_and_id,
                 new_space,
-            } => self.move_to_team_owner(*cloud_object_type_and_id, *new_space, ctx),
+            } => self.move_to_team_owner(*object_type_and_id, *new_space, ctx),
             #[cfg(target_family = "wasm")]
             NotebookAction::OpenLinkOnDesktop(url) => {
                 send_telemetry_from_ctx!(
-                    TelemetryEvent::WebCloudObjectOpenedOnDesktop {
+                    TelemetryEvent::WebObjectOpenedOnDesktop {
                         object_metadata: self.generic_telemetry_metadata(ctx)
                     },
                     ctx

@@ -1,5 +1,4 @@
-﻿use warp_core::ui::appearance::Appearance;
-use warp_server_client::cloud_object::ServerPermissions;
+use warp_core::ui::appearance::Appearance;
 use warpui::{
     platform::WindowStyle, AddSingletonModel, App, SingletonEntity, TypedActionView, ViewHandle,
 };
@@ -8,26 +7,21 @@ use crate::{
     ai::blocklist::BlocklistAIHistoryModel,
     auth::{AuthManager, AuthStateProvider},
     cloud_object::{
-        model::{actions::ObjectActions, persistence::CloudModel, view::CloudViewModel},
-        CloudObjectSyncStatus, ObjectIdType, ObjectType, Owner, ServerCreationInfo, Space,
+        model::{
+            actions::ObjectActions, persistence::ObjectStoreModel, view::ObjectStoreViewModel,
+        },
+        update_manager::UpdateManager,
+        ObjectType, Owner, Space, StoredObjectSyncStatus,
     },
-    drive::{items::WarpDriveItemId, CloudObjectTypeAndId},
+    drive::{items::WarpDriveItemId, ObjectTypeAndId},
     menu::MenuItem,
     network::NetworkStatus,
-    notebooks::{CloudNotebook, CloudNotebookModel},
-    server::{
-        cloud_objects::update_manager::UpdateManager,
-        ids::{ClientId, ServerIdAndType, SyncId},
-        server_api::ServerApiProvider,
-        telemetry::context_provider::AppTelemetryContextProvider,
-    },
+    notebooks::{NotebookObject, NotebookObjectModel},
+    server::ids::{ClientId, SyncId},
     settings_view::keybindings::KeybindingChangedNotifier,
-    terminal::shared_session::permissions_manager::SessionPermissionsManager,
     test_util::settings::initialize_settings_for_tests,
-    workflows::{workflow::Workflow, CloudWorkflow, CloudWorkflowModel},
-    workspaces::{
-        team_tester::TeamTesterStatus, user_profiles::UserProfiles, user_workspaces::UserWorkspaces,
-    },
+    workflows::{workflow::Workflow, WorkflowObject, WorkflowObjectModel},
+    workspaces::{user_profiles::UserProfiles, user_workspaces::UserWorkspaces},
     Assets,
 };
 
@@ -36,20 +30,16 @@ use super::{DriveIndex, DriveIndexAction};
 fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);
 
-    app.add_singleton_model(CloudModel::mock);
+    app.add_singleton_model(ObjectStoreModel::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| Appearance::mock());
-    app.add_singleton_model(|_| ServerApiProvider::new_for_test());
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
-    app.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
     app.add_singleton_model(AuthManager::new_for_test);
-    app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);
-    app.add_singleton_model(CloudViewModel::mock);
+    app.add_singleton_model(ObjectStoreViewModel::mock);
     app.add_singleton_model(|_| ObjectActions::new(Vec::new()));
     app.add_singleton_model(|_| UserProfiles::new(Vec::new()));
-    app.add_singleton_model(SessionPermissionsManager::new);
     app.add_singleton_model(|_| KeybindingChangedNotifier::mock());
     app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
     #[cfg(feature = "voice_input")]
@@ -62,14 +52,14 @@ fn create_index(app: &mut App) -> ViewHandle<DriveIndex> {
 }
 
 fn create_workflow(app: &mut App) -> SyncId {
-    CloudModel::handle(app).update(app, |cloud_model, ctx| {
+    ObjectStoreModel::handle(app).update(app, |object_store_model, ctx| {
         let client_id = ClientId::new();
         let sync_id = SyncId::ClientId(client_id);
         let workflow = Workflow::new("my workflow", "my command");
-        cloud_model.create_object(
+        object_store_model.create_object(
             sync_id,
-            CloudWorkflow::new_local(
-                CloudWorkflowModel::new(workflow),
+            WorkflowObject::new_local(
+                WorkflowObjectModel::new(workflow),
                 Owner::mock_current_user(),
                 None,
                 client_id,
@@ -81,13 +71,13 @@ fn create_workflow(app: &mut App) -> SyncId {
 }
 
 fn create_notebook(app: &mut App) -> SyncId {
-    CloudModel::handle(app).update(app, |cloud_model, ctx| {
+    ObjectStoreModel::handle(app).update(app, |object_store_model, ctx| {
         let client_id = ClientId::new();
         let sync_id = SyncId::ClientId(client_id);
-        cloud_model.create_object(
+        object_store_model.create_object(
             sync_id,
-            CloudNotebook::new_local(
-                CloudNotebookModel::default(),
+            NotebookObject::new_local(
+                NotebookObjectModel::default(),
                 Owner::mock_current_user(),
                 None,
                 client_id,
@@ -98,12 +88,12 @@ fn create_notebook(app: &mut App) -> SyncId {
     })
 }
 
-fn set_object_in_error(app: &mut App, cloud_object_type_and_id: &CloudObjectTypeAndId) {
-    CloudModel::handle(app).update(
+fn set_object_in_error(app: &mut App, object_type_and_id: &ObjectTypeAndId) {
+    ObjectStoreModel::handle(app).update(
         app,
-        |cloud_model, _ctx: &mut warpui::ModelContext<'_, CloudModel>| {
-            if let Some(object) = cloud_model.get_mut_by_uid(&cloud_object_type_and_id.uid()) {
-                object.set_pending_content_changes_status(CloudObjectSyncStatus::Errored);
+        |object_store_model, _ctx: &mut warpui::ModelContext<'_, ObjectStoreModel>| {
+            if let Some(object) = object_store_model.get_mut_by_uid(&object_type_and_id.uid()) {
+                object.set_pending_content_changes_status(StoredObjectSyncStatus::Errored);
             }
         },
     );
@@ -123,9 +113,9 @@ fn test_retry_menu_item_visibility() {
         initialize_app(&mut app);
         let index = create_index(&mut app);
         let sync_id = create_workflow(&mut app);
-        let cloud_object_type_and_id: CloudObjectTypeAndId =
-            CloudObjectTypeAndId::from_id_and_type(sync_id, ObjectType::Workflow);
-        let warp_drive_item_id = WarpDriveItemId::Object(cloud_object_type_and_id);
+        let object_type_and_id: ObjectTypeAndId =
+            ObjectTypeAndId::from_id_and_type(sync_id, ObjectType::Workflow);
+        let warp_drive_item_id = WarpDriveItemId::Object(object_type_and_id);
 
         // by default, it doesn't show up
         index.update(&mut app, |index, ctx| {
@@ -139,7 +129,7 @@ fn test_retry_menu_item_visibility() {
         });
 
         // when the object is in error, it should show up
-        set_object_in_error(&mut app, &cloud_object_type_and_id);
+        set_object_in_error(&mut app, &object_type_and_id);
         index.update(&mut app, |index, ctx| {
             let menu_items = index.menu_items(&Space::Personal, &warp_drive_item_id, ctx);
             assert_eq!(menu_items.len(), 6);
@@ -173,55 +163,24 @@ fn test_retry_menu_item_logic() {
         initialize_app(&mut app);
         let index = create_index(&mut app);
         let sync_id = create_workflow(&mut app);
-        let cloud_object_type_and_id: CloudObjectTypeAndId =
-            CloudObjectTypeAndId::from_id_and_type(sync_id, ObjectType::Workflow);
+        let object_type_and_id: ObjectTypeAndId =
+            ObjectTypeAndId::from_id_and_type(sync_id, ObjectType::Workflow);
 
         // OpenWarp(Wave 4):SyncQueue 整删,原本验证 SyncQueue 队列变化的
         // 断言全部变为无意义。跳过留下调用流程本身以验证不报 panic。
 
         index.update(&mut app, |index, ctx| {
-            index.retry_failed_object(&cloud_object_type_and_id, ctx);
+            index.retry_failed_object(&object_type_and_id, ctx);
         });
 
         // the item is now in flight
-        CloudModel::handle(&app).update(&mut app, |cloud_model, _ctx| {
-            if let Some(object) = cloud_model.get_mut_by_uid(&cloud_object_type_and_id.uid()) {
+        ObjectStoreModel::handle(&app).update(&mut app, |object_store_model, _ctx| {
+            if let Some(object) = object_store_model.get_mut_by_uid(&object_type_and_id.uid()) {
                 let _ = object;
             }
         });
 
         // OpenWarp(Wave 4):原验证 SyncQueue 队头是 CreateWorkflow,SyncQueue 整删后不适用。
-
-        let new_sync_id: SyncId = SyncId::ServerId(1.into());
-
-        // make the object known to the server (by giving it a server id instead)
-        CloudModel::handle(&app).update(&mut app, |cloud_model, ctx| {
-            if let CloudObjectTypeAndId::Workflow(SyncId::ClientId(client_id)) =
-                cloud_object_type_and_id
-            {
-                if let SyncId::ServerId(server_id) = new_sync_id {
-                    let server_creation_info = ServerCreationInfo {
-                        server_id_and_type: ServerIdAndType {
-                            id: server_id,
-                            id_type: ObjectIdType::Workflow,
-                        },
-                        creator_uid: None,
-                        permissions: ServerPermissions::mock_personal(),
-                    };
-                    cloud_model.update_object_after_server_creation(
-                        client_id,
-                        server_creation_info,
-                        ctx,
-                    );
-                }
-            }
-        });
-
-        index.update(&mut app, |index, ctx| {
-            let new_cloud_object_type_and_id: CloudObjectTypeAndId =
-                CloudObjectTypeAndId::from_id_and_type(new_sync_id, ObjectType::Workflow);
-            index.retry_failed_object(&new_cloud_object_type_and_id, ctx);
-        });
 
         // OpenWarp(Wave 4):原验证 SyncQueue 队列长度 + UpdateWorkflow tag,SyncQueue 整删后不适用。
     })
@@ -234,8 +193,8 @@ fn test_warp_drive_navigation_states() {
         initialize_app(&mut app);
         let index = create_index(&mut app);
         let sync_id = create_notebook(&mut app);
-        let cloud_object_type_and_id: CloudObjectTypeAndId =
-            CloudObjectTypeAndId::from_id_and_type(sync_id, ObjectType::Notebook);
+        let object_type_and_id: ObjectTypeAndId =
+            ObjectTypeAndId::from_id_and_type(sync_id, ObjectType::Notebook);
 
         index.read(&app, |index, _| {
             assert_eq!(index.selected, None, "Expect selected to be None");
@@ -247,13 +206,13 @@ fn test_warp_drive_navigation_states() {
         });
 
         index.update(&mut app, |index, ctx| {
-            index.handle_action(&DriveIndexAction::OpenObject(cloud_object_type_and_id), ctx);
+            index.handle_action(&DriveIndexAction::OpenObject(object_type_and_id), ctx);
         });
 
         index.read(&app, |index, _| {
             assert_eq!(
                 index.selected,
-                Some(WarpDriveItemId::Object(cloud_object_type_and_id)),
+                Some(WarpDriveItemId::Object(object_type_and_id)),
                 "Expect selected to have correct value"
             );
         });

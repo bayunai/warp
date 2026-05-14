@@ -7,9 +7,9 @@ use warpui::{
 
 use crate::{
     appearance::Appearance,
-    cloud_object::CloudObjectMetadata,
-    drive::{index::DriveIndexAction, CloudObjectTypeAndId, DriveObjectType},
-    notebooks::CloudNotebook,
+    cloud_object::StoredObjectMetadata,
+    drive::{index::DriveIndexAction, DriveObjectType, ObjectTypeAndId},
+    notebooks::NotebookObject,
     themes::theme::Fill,
 };
 
@@ -17,13 +17,13 @@ use super::{WarpDriveItem, WarpDriveItemId};
 
 #[derive(Clone)]
 pub struct WarpDriveNotebook {
-    id: CloudObjectTypeAndId,
-    notebook: CloudNotebook,
+    id: ObjectTypeAndId,
+    notebook: NotebookObject,
     is_ai_document: bool,
 }
 
 impl WarpDriveNotebook {
-    pub fn new(id: CloudObjectTypeAndId, notebook: CloudNotebook, is_ai_document: bool) -> Self {
+    pub fn new(id: ObjectTypeAndId, notebook: NotebookObject, is_ai_document: bool) -> Self {
         Self {
             id,
             notebook,
@@ -41,7 +41,7 @@ impl WarpDriveItem for WarpDriveNotebook {
         }
     }
 
-    fn metadata(&self) -> Option<&CloudObjectMetadata> {
+    fn metadata(&self) -> Option<&StoredObjectMetadata> {
         Some(&self.notebook.metadata)
     }
 

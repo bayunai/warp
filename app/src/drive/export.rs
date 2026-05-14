@@ -21,20 +21,20 @@ use warpui::{
     AppContext, Entity, ModelContext, SingletonEntity, WindowId,
 };
 
+#[cfg(feature = "local_fs")]
 use crate::{
-    cloud_object::{model::persistence::CloudModel, Space},
+    cloud_object::update_manager::get_duplicate_object_name, notebooks::export_notebook,
+    view_components::ToastLink, workflows::export_workflow::export_serialize,
+    workspace::WorkspaceAction,
+};
+use crate::{
+    cloud_object::{model::persistence::ObjectStoreModel, Space},
     safe_warn,
     view_components::DismissibleToast,
     workspace::{active_terminal_in_window, ToastStack},
 };
-#[cfg(feature = "local_fs")]
-use crate::{
-    notebooks::export_notebook, server::cloud_objects::update_manager::get_duplicate_object_name,
-    view_components::ToastLink, workflows::export_workflow::export_serialize,
-    workspace::WorkspaceAction,
-};
 
-use super::CloudObjectTypeAndId;
+use super::ObjectTypeAndId;
 
 /// Singleton model for exporting from Warp Drive.
 pub struct ExportManager {
@@ -43,7 +43,7 @@ pub struct ExportManager {
 
 /// Identifier for an export.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ExportId(CloudObjectTypeAndId, Space);
+pub struct ExportId(ObjectTypeAndId, Space);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExportEvent {
@@ -97,7 +97,7 @@ impl ExportManager {
     pub fn export(
         &mut self,
         window_id: WindowId,
-        objects: &[CloudObjectTypeAndId],
+        objects: &[ObjectTypeAndId],
         ctx: &mut ModelContext<Self>,
     ) {
         let shell_family =
@@ -106,7 +106,7 @@ impl ExportManager {
         let is_bulk = objects.len() > 1;
         let mut ids = Vec::new();
         for object in objects {
-            match CloudModel::as_ref(ctx).get_by_uid(&object.uid()) {
+            match ObjectStoreModel::as_ref(ctx).get_by_uid(&object.uid()) {
                 None => log::warn!("Tried to export unknown object {object:?}"),
                 Some(obj) if !obj.can_export() => {
                     log::warn!("Tried to export un-exportable object {object:?}")
@@ -210,7 +210,7 @@ impl ExportManager {
     fn handle_object_export(
         &mut self,
         id: ExportId,
-        object: CloudObjectTypeAndId,
+        object: ObjectTypeAndId,
         path: anyhow::Result<PathBuf>,
         ctx: &mut ModelContext<Self>,
     ) {
@@ -265,14 +265,14 @@ impl ExportManager {
         id: ExportId,
         is_bulk: bool,
         parent_path: &Path,
-        object: CloudObjectTypeAndId,
+        object: ObjectTypeAndId,
         shell_family: ShellFamily,
         ctx: &mut ModelContext<Self>,
     ) -> anyhow::Result<SpawnedFutureHandle> {
-        let cloud_model = CloudModel::as_ref(ctx);
+        let object_store_model = ObjectStoreModel::as_ref(ctx);
         let (name, extension, data) = match object {
-            CloudObjectTypeAndId::Workflow(workflow_id) => {
-                let workflow = cloud_model
+            ObjectTypeAndId::Workflow(workflow_id) => {
+                let workflow = object_store_model
                     .get_workflow(&workflow_id)
                     .ok_or_else(|| anyhow!("no workflow for {workflow_id}"))?;
 
@@ -282,8 +282,8 @@ impl ExportManager {
 
                 (workflow.model().data.name().to_owned(), "yaml", data)
             }
-            CloudObjectTypeAndId::Notebook(notebook_id) => {
-                let notebook = cloud_model
+            ObjectTypeAndId::Notebook(notebook_id) => {
+                let notebook = object_store_model
                     .get_notebook(&notebook_id)
                     .ok_or_else(|| anyhow!("no notebook for {notebook_id}"))?;
                 let internal_data = &notebook.model().data;
@@ -294,8 +294,8 @@ impl ExportManager {
                     .into_bytes();
                 (notebook.model().title.clone(), "md", data)
             }
-            CloudObjectTypeAndId::GenericStringObject { object_type, id } => {
-                if let Some(env_var_collection) = cloud_model.get_env_var_collection(&id) {
+            ObjectTypeAndId::GenericStringObject { object_type, id } => {
+                if let Some(env_var_collection) = object_store_model.get_env_var_collection(&id) {
                     let env_var_collection_model = env_var_collection.model();
 
                     let exported_variables = env_var_collection_model
@@ -346,7 +346,7 @@ impl ExportManager {
         _id: ExportId,
         _is_bulk: bool,
         _parent_path: &Path,
-        _object: CloudObjectTypeAndId,
+        _object: ObjectTypeAndId,
         _shell_family: ShellFamily,
         _ctx: &mut ModelContext<Self>,
     ) -> anyhow::Result<SpawnedFutureHandle> {
@@ -367,10 +367,7 @@ impl ExportManager {
         ctx: &mut ModelContext<Self>,
     ) {
         let id = *export.key();
-        // Don't send the error to Sentry, since it likely includes a user file path and their Warp
-        // Drive object name. Also don't report this as an error, since the most likely failure
-        // reason is an I/O issue on the user's machine (like being out of disk space, or exporting
-        // to a directory they can't write to).
+        // 导出失败可能包含用户文件路径或对象名,只写本地安全日志;最常见原因也是本机 I/O 问题。
         safe_warn!(
             safe: ("Exporting {id:?} failed"),
             full: ("Exporting {id:?} failed: {error:#}")
@@ -452,7 +449,7 @@ impl Drop for Export {
 impl ExportId {
     /// Display name for the root object being exported.
     pub fn display_name(self, ctx: &AppContext) -> Option<String> {
-        CloudModel::as_ref(ctx)
+        ObjectStoreModel::as_ref(ctx)
             .get_by_uid(&self.0.uid())
             .map(|object| {
                 let mut name = object.display_name();

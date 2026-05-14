@@ -15,23 +15,21 @@ use crate::{
         block_context::BlockContext,
         blocklist::BlocklistAIContextModel,
         document::ai_document_model::{AIDocumentId, AIDocumentModel},
-        facts::CloudAIFactModel,
+        facts::AIFactObjectModel,
         skills::list_skills,
     },
     cloud_object::{
         model::{
-            generic_string_model::{CloudStringObject, GenericStringObjectId},
-            persistence::CloudModel,
+            generic_string_model::{GenericStringObjectId, StoredStringObject},
+            persistence::ObjectStoreModel,
         },
-        GenericCloudObject, GenericStringObjectFormat, JsonObjectType, ObjectType,
+        GenericStoredObject, GenericStringObjectFormat, JsonObjectType, ObjectType,
     },
     terminal::{
         model::{block::BlockId, session::active_session::ActiveSession},
         TerminalView,
     },
 };
-use warp_graphql::generic_string_object::GenericStringObjectFormat as GraphQLFormat;
-
 lazy_static! {
     // Regex to match <block:[block_id]> patterns
     pub static ref BLOCK_CONTEXT_ATTACHMENT_REGEX: Regex = Regex::new(r"<block:([^>]+)>")
@@ -132,12 +130,12 @@ pub(super) fn parse_context_attachments(
                 };
 
                 // Prefer live editor content from AIDocumentModel (picks up unsaved user edits).
-                // Fall back to the synced CloudModel notebook if the document isn't loaded in
+                // Fall back to the synced ObjectStoreModel notebook if the document isn't loaded in
                 // the current session.
                 let content = AIDocumentModel::as_ref(ctx)
                     .get_document_content(&ai_doc_id, ctx)
                     .or_else(|| {
-                        CloudModel::as_ref(ctx)
+                        ObjectStoreModel::as_ref(ctx)
                             .get_all_active_notebooks()
                             .find(|nb| nb.model().ai_document_id.as_ref() == Some(&ai_doc_id))
                             .map(|nb| nb.model().data.clone())
@@ -164,7 +162,7 @@ pub(super) fn parse_context_attachments(
                     _ => continue, // Skip unknown object types
                 };
 
-                // Try to get the object data from CloudModel
+                // Try to get the object data from ObjectStoreModel
                 let payload = get_object_attachment_payload(id_str, object_type, ctx);
 
                 // Create a DriveObject attachment with the object UID and payload
@@ -192,7 +190,7 @@ pub(super) fn parse_context_attachments(
 
     // Add pending file attachments as FilePathReference.
     // Duplicate basenames get a (1), (2), ... suffix to avoid collisions,
-    // matching the pattern in build_file_attachment_map.
+    // matching the legacy attachment-key pattern.
     for file in context_model.pending_files().iter() {
         let attachment = AIAgentAttachment::FilePathReference {
             file_id: uuid::Uuid::new_v4().to_string(),
@@ -274,7 +272,7 @@ fn find_block_attachment_in_all_terminals(
     None
 }
 
-/// Gets the object payload from CloudModel for the given UID and object type.
+/// Gets the object payload from ObjectStoreModel for the given UID and object type.
 /// Returns None if the object is not found.
 fn get_object_attachment_payload(
     uid: &str,
@@ -282,35 +280,38 @@ fn get_object_attachment_payload(
     ctx: &AppContext,
 ) -> Option<DriveObjectPayload> {
     match object_type {
-        ObjectType::Workflow => CloudModel::as_ref(ctx)
-            .get_workflow_by_uid(uid)
-            .map(|workflow| {
-                let workflow_data = &workflow.model().data;
-                DriveObjectPayload::Workflow {
-                    name: workflow_data.name().to_string(),
-                    description: workflow_data.description().cloned().unwrap_or_default(),
-                    command: workflow_data.content().to_string(),
-                }
-            }),
-        ObjectType::Notebook => CloudModel::as_ref(ctx)
-            .get_notebook_by_uid(uid)
-            .map(|notebook| DriveObjectPayload::Notebook {
-                title: notebook.model().title.clone(),
-                content: notebook.model().data.clone(),
-            }),
+        ObjectType::Workflow => {
+            ObjectStoreModel::as_ref(ctx)
+                .get_workflow_by_uid(uid)
+                .map(|workflow| {
+                    let workflow_data = &workflow.model().data;
+                    DriveObjectPayload::Workflow {
+                        name: workflow_data.name().to_string(),
+                        description: workflow_data.description().cloned().unwrap_or_default(),
+                        command: workflow_data.content().to_string(),
+                    }
+                })
+        }
+        ObjectType::Notebook => {
+            ObjectStoreModel::as_ref(ctx)
+                .get_notebook_by_uid(uid)
+                .map(|notebook| DriveObjectPayload::Notebook {
+                    title: notebook.model().title.clone(),
+                    content: notebook.model().data.clone(),
+                })
+        }
         ObjectType::GenericStringObject(_) => {
             // For generic string objects, we only support AI facts (rules) for now
-            CloudModel::as_ref(ctx)
+            ObjectStoreModel::as_ref(ctx)
                 .get_by_uid(&uid.to_string())
                 .and_then(|object| {
-                    if let Some(ai_fact) = object.as_any().downcast_ref::<GenericCloudObject<GenericStringObjectId, CloudAIFactModel>>() {
-                        let string_object = ai_fact as &dyn CloudStringObject;
-                        // Convert the format to GraphQL format since that's what the server expects
-                        let graphql_format: GraphQLFormat =
-                            string_object.generic_string_object_format().into();
+                    if let Some(ai_fact) = object.as_any().downcast_ref::<GenericStoredObject<GenericStringObjectId, AIFactObjectModel>>() {
+                        let string_object = ai_fact as &dyn StoredStringObject;
+                        let object_type =
+                            generic_string_object_format_name(string_object.generic_string_object_format());
                         Some(DriveObjectPayload::GenericStringObject {
                             payload: string_object.serialized().model_as_str().to_string(),
-                            object_type: graphql_format.to_string(),
+                            object_type,
                         })
                     } else {
                         None
@@ -319,4 +320,21 @@ fn get_object_attachment_payload(
         }
         _ => None, // Other object types not supported for drive object attachments
     }
+}
+
+fn generic_string_object_format_name(format: GenericStringObjectFormat) -> String {
+    match format {
+        GenericStringObjectFormat::Json(JsonObjectType::Preference) => "JsonPreference",
+        GenericStringObjectFormat::Json(JsonObjectType::EnvVarCollection) => "JsonEnvVarCollection",
+        GenericStringObjectFormat::Json(JsonObjectType::WorkflowEnum) => "JsonWorkflowEnum",
+        GenericStringObjectFormat::Json(JsonObjectType::AIFact) => "JsonAIFact",
+        GenericStringObjectFormat::Json(JsonObjectType::MCPServer) => "JsonMCPServer",
+        GenericStringObjectFormat::Json(JsonObjectType::AIExecutionProfile) => {
+            "JsonAIExecutionProfile"
+        }
+        GenericStringObjectFormat::Json(JsonObjectType::TemplatableMCPServer) => {
+            "JsonTemplatableMCPServer"
+        }
+    }
+    .to_string()
 }

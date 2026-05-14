@@ -1,21 +1,21 @@
 use super::{WarpDriveItem, WarpDriveItemId};
 use crate::{
-    ai::mcp::CloudMCPServer,
+    ai::mcp::MCPServerObject,
     appearance::Appearance,
-    cloud_object::CloudObjectMetadata,
-    drive::{index::DriveIndexAction, CloudObjectTypeAndId, DriveObjectType},
+    cloud_object::StoredObjectMetadata,
+    drive::{index::DriveIndexAction, DriveObjectType, ObjectTypeAndId},
     themes::theme::Fill,
 };
 use warpui::{elements::MouseStateHandle, AppContext, Element};
 
 #[derive(Clone)]
 pub struct WarpDriveMCPServer {
-    id: CloudObjectTypeAndId,
-    mcp_server: CloudMCPServer,
+    id: ObjectTypeAndId,
+    mcp_server: MCPServerObject,
 }
 
 impl WarpDriveMCPServer {
-    pub fn new(id: CloudObjectTypeAndId, mcp_server: CloudMCPServer) -> Self {
+    pub fn new(id: ObjectTypeAndId, mcp_server: MCPServerObject) -> Self {
         Self { id, mcp_server }
     }
 }
@@ -24,7 +24,7 @@ impl WarpDriveItem for WarpDriveMCPServer {
     fn display_name(&self) -> Option<String> {
         Some(self.mcp_server.model().string_model.name.clone())
     }
-    fn metadata(&self) -> Option<&CloudObjectMetadata> {
+    fn metadata(&self) -> Option<&StoredObjectMetadata> {
         Some(&self.mcp_server.metadata)
     }
 

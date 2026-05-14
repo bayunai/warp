@@ -6,10 +6,10 @@ use warpui::{
 
 use crate::{
     cloud_object::{
-        model::persistence::{CloudModel, CloudModelEvent},
-        CloudObject as _, GenericStringObjectFormat, JsonObjectType,
+        model::persistence::{ObjectStoreEvent, ObjectStoreModel},
+        GenericStringObjectFormat, JsonObjectType, StoredObject as _,
     },
-    drive::CloudObjectTypeAndId,
+    drive::ObjectTypeAndId,
     server::ids::SyncId,
     view_components::{DropdownItem, FilterableDropdown, FilterableDropdownOrientation},
 };
@@ -34,8 +34,8 @@ const DEFAULT_DROPDOWN_WIDTH: f32 = super::argument_editor::ALIAS_ARGUMENT_EDITO
 
 impl EnvVarSelector {
     pub fn new(ctx: &mut ViewContext<Self>) -> Self {
-        ctx.subscribe_to_model(&CloudModel::handle(ctx), |me, _, event, ctx| {
-            me.handle_cloud_model_event(event, ctx);
+        ctx.subscribe_to_model(&ObjectStoreModel::handle(ctx), |me, _, event, ctx| {
+            me.handle_object_store_event(event, ctx);
         });
 
         let dropdown = ctx.add_typed_action_view(|ctx| {
@@ -81,7 +81,7 @@ impl EnvVarSelector {
     }
 
     fn refresh_dropdown_items(&mut self, ctx: &mut ViewContext<Self>) {
-        let mut env_vars = CloudModel::as_ref(ctx)
+        let mut env_vars = ObjectStoreModel::as_ref(ctx)
             .get_all_active_env_var_collections()
             .map(|collection| (collection.display_name(), collection.sync_id()))
             .collect_vec();
@@ -101,15 +101,15 @@ impl EnvVarSelector {
         ctx.emit(EnvVarSelectorEvent::Refreshed);
     }
 
-    fn handle_cloud_model_event(&mut self, event: &CloudModelEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_object_store_event(&mut self, event: &ObjectStoreEvent, ctx: &mut ViewContext<Self>) {
         match event {
-            CloudModelEvent::ObjectUpdated { type_and_id, .. }
-            | CloudModelEvent::ObjectCreated { type_and_id }
-            | CloudModelEvent::ObjectUntrashed { type_and_id, .. }
-            | CloudModelEvent::ObjectTrashed { type_and_id, .. } => {
+            ObjectStoreEvent::ObjectUpdated { type_and_id, .. }
+            | ObjectStoreEvent::ObjectCreated { type_and_id }
+            | ObjectStoreEvent::ObjectUntrashed { type_and_id, .. }
+            | ObjectStoreEvent::ObjectTrashed { type_and_id, .. } => {
                 if matches!(
                     type_and_id,
-                    CloudObjectTypeAndId::GenericStringObject {
+                    ObjectTypeAndId::GenericStringObject {
                         object_type: GenericStringObjectFormat::Json(
                             JsonObjectType::EnvVarCollection
                         ),

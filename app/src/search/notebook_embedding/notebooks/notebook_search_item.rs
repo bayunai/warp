@@ -12,7 +12,7 @@ use warpui::{
 use crate::search::result_renderer::ItemHighlightState;
 use crate::{
     appearance::Appearance,
-    cloud_object::CloudObject,
+    cloud_object::StoredObject,
     drive::{cloud_object_styling::warp_drive_icon_color, DriveObjectType},
     search::{
         item::IconLocation,
@@ -24,7 +24,7 @@ use crate::{
     themes::theme::Fill,
     ui_components::icons::Icon,
 };
-use crate::{notebooks::CloudNotebook, search::item::SearchItem};
+use crate::{notebooks::NotebookObject, search::item::SearchItem};
 
 /// The size of the object type icons, in pixels.
 const ICON_SIZE: f32 = 16.;
@@ -32,7 +32,7 @@ const ICON_SIZE: f32 = 16.;
 /// Struct designed to be the implementation of CommandSearchItem for notebooks.
 #[derive(Clone, Debug)]
 pub struct NotebookSearchItem {
-    pub cloud_notebook: CloudNotebook,
+    pub notebook: NotebookObject,
     pub fuzzy_matched_notebook: FuzzyMatchEmbeddedObjectResult,
     /// Whether or not this notebook is accessible to all users that have access to the object
     /// being embedded into.
@@ -87,7 +87,7 @@ impl SearchItem for NotebookSearchItem {
         let appearance = Appearance::as_ref(app);
 
         let mut name_text = Text::new_inline(
-            self.cloud_notebook.model().title.to_owned(),
+            self.notebook.model().title.to_owned(),
             appearance.ui_font_family(),
             styles::name_font_size(appearance),
         )
@@ -135,7 +135,7 @@ impl SearchItem for NotebookSearchItem {
         };
 
         let mut breadcrumb_text = Text::new_inline(
-            self.cloud_notebook.breadcrumbs(app),
+            self.notebook.breadcrumbs(app),
             appearance.ui_font_family(),
             appearance.ui_font_size(),
         )
@@ -169,7 +169,7 @@ impl SearchItem for NotebookSearchItem {
     }
 
     fn accept_result(&self) -> EmbeddingSearchItemAction {
-        EmbeddingSearchItemAction::AcceptNotebook(self.cloud_notebook.id)
+        EmbeddingSearchItemAction::AcceptNotebook(self.notebook.id)
     }
 
     fn execute_result(&self) -> EmbeddingSearchItemAction {
@@ -177,7 +177,7 @@ impl SearchItem for NotebookSearchItem {
     }
 
     fn accessibility_label(&self) -> String {
-        format!("Notebook: {}", self.cloud_notebook.model().title)
+        format!("Notebook: {}", self.notebook.model().title)
     }
 }
 

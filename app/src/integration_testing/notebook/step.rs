@@ -8,12 +8,12 @@ use warpui::{
 };
 
 use crate::{
-    cloud_object::{model::persistence::CloudModel, CloudObjectEventEntrypoint, Space},
+    cloud_object::{model::persistence::ObjectStoreModel, Space, StoredObjectEventEntrypoint},
     drive::OpenWarpDriveObjectSettings,
     integration_testing::view_getters::{notebook_view, workspace_view},
     notebooks::manager::NotebookSource,
     server::{
-        cloud_objects::update_manager::UpdateManager,
+        cloud_object::update_manager::UpdateManager,
         ids::{ClientId, SyncId},
     },
     workspaces::user_workspaces::UserWorkspaces,
@@ -45,7 +45,7 @@ pub fn create_a_personal_notebook(key: impl Into<String>, title: impl Into<Strin
                         .expect("User UID must be set in tests"),
                     None,
                     Default::default(),
-                    CloudObjectEventEntrypoint::ManagementUI,
+                    StoredObjectEventEntrypoint::ManagementUI,
                     true,
                     ctx,
                 );
@@ -57,9 +57,9 @@ pub fn create_a_personal_notebook(key: impl Into<String>, title: impl Into<Strin
             data.insert(key.clone(), sync_id);
         })
         .add_assertion(move |app, _| {
-            CloudModel::handle(app).read(app, |cloud_model, ctx| {
+            ObjectStoreModel::handle(app).read(app, |object_store_model, ctx| {
                 async_assert!(
-                    cloud_model
+                    object_store_model
                         .active_cloud_objects_in_space(Space::Personal, ctx)
                         .count()
                         > 0,

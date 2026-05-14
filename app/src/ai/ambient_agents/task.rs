@@ -9,11 +9,7 @@ use warp_core::ui::theme::WarpTheme;
 use warpui::color::ColorU;
 
 use crate::ai::artifacts::{deserialize_artifacts, Artifact};
-use crate::server::server_api::ServerApiProvider;
 use crate::ui_components::icons::Icon;
-use crate::view_components::DismissibleToast;
-use crate::workspace::ToastStack;
-use warpui::{SingletonEntity, View, ViewContext};
 
 use super::AmbientAgentTaskId;
 
@@ -21,7 +17,7 @@ use super::AmbientAgentTaskId;
 ///
 /// This is the merged/resolved config used when spawning or running an agent.
 /// It combines settings from config files and CLI args.
-/// Unlike `AgentConfig` (the cloud model), field names here use the runtime format
+/// Unlike persisted agent profile/config records, field names here use the runtime format
 /// (e.g. `model_id` instead of `base_model_id`).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct AgentConfigSnapshot {
@@ -38,12 +34,12 @@ pub struct AgentConfigSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_servers: Option<serde_json::Map<String, serde_json::Value>>,
     /// Profile ID for local agent runs. This configures the terminal session
-    /// with the specified execution profile. Only used for local runs, not cloud runs.
+    /// with the specified execution profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
-    /// Self-hosted worker ID that should execute this task.
-    /// If None or Some("warp"), the task will be dispatched to Warp-hosted (Namespace) workers.
-    /// Otherwise, the task will only be assigned to a connected self-hosted worker with matching ID.
+    /// Local worker ID that should execute this task.
+    /// If None or Some("warp"), the default local runtime is used.
+    /// Otherwise, the task will only be assigned to a connected local worker with matching ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worker_host: Option<String>,
     /// Skill spec to use as the base prompt for the agent.
@@ -158,7 +154,6 @@ pub enum AgentSource {
     Interactive,
     WebApp,
     GitHubAction,
-    CloudMode,
 }
 
 impl AgentSource {
@@ -174,7 +169,6 @@ impl AgentSource {
             AgentSource::Interactive => "LOCAL",
             AgentSource::WebApp => "WEB_APP",
             AgentSource::GitHubAction => "GITHUB_ACTION",
-            AgentSource::CloudMode => "CLOUD_MODE",
         }
     }
 
@@ -186,9 +180,8 @@ impl AgentSource {
             AgentSource::Cli => "CLI",
             AgentSource::ScheduledAgent => "Scheduled",
             AgentSource::Interactive => "Warp (local agent)",
-            AgentSource::WebApp => "Oz Web",
+            AgentSource::WebApp => "Oz",
             AgentSource::GitHubAction => "GitHub Action",
-            AgentSource::CloudMode => "Warp (cloud agent)",
         }
     }
 
@@ -199,8 +192,7 @@ impl AgentSource {
             AgentSource::Linear
             | AgentSource::Slack
             | AgentSource::Interactive
-            | AgentSource::WebApp
-            | AgentSource::CloudMode => true,
+            | AgentSource::WebApp => true,
             AgentSource::Cli
             | AgentSource::ScheduledAgent
             | AgentSource::AgentWebhook
@@ -226,7 +218,6 @@ where
             "SCHEDULED_AGENT" => Some(AgentSource::ScheduledAgent),
             "WEB_APP" => Some(AgentSource::WebApp),
             "GITHUB_ACTION" => Some(AgentSource::GitHubAction),
-            "CLOUD_MODE" => Some(AgentSource::CloudMode),
             _ => {
                 report_error!(anyhow!("Unknown AmbientAgentSource: {}", s));
                 None
@@ -263,22 +254,18 @@ pub struct AmbientAgentTask {
     #[serde(default, deserialize_with = "deserialize_artifacts")]
     pub artifacts: Vec<Artifact>,
 
-    /// The last event sequence number recorded for this run by the server.
-    /// Used by orchestration event delivery to resume from the correct
-    /// cursor on restart. Populated by `GET /agent/runs/{run_id}` when the
-    /// server supports it; `None` on older servers.
+    /// The last event sequence number recorded for this run.
+    /// Used by local orchestration event delivery to resume from the correct
+    /// cursor on restart. Older locally restored records may leave this unset.
     #[serde(default)]
     pub last_event_sequence: Option<i64>,
 
-    /// The server-recorded `run_id`s of direct children of this run. Used
-    /// by orchestration event-delivery restore to discover children whose
-    /// records may not exist locally (e.g. remote-worker children in the
-    /// driver case). Empty on older servers.
+    /// The recorded `run_id`s of direct children of this run.
     #[serde(default)]
     pub children: Vec<String>,
 }
 
-/// Represents a single attachment input from the client (e.g., file upload)
+/// Represents a single attachment input from the client.
 #[derive(Clone, Debug, Serialize)]
 pub struct AttachmentInput {
     pub file_name: String,
@@ -330,24 +317,6 @@ pub enum AmbientAgentTaskState {
 }
 
 impl AmbientAgentTaskState {
-    /// Returns the query param value for the server API.
-    pub fn as_query_param(&self) -> Option<&str> {
-        match self {
-            AmbientAgentTaskState::Queued => Some("QUEUED"),
-            AmbientAgentTaskState::Pending => Some("PENDING"),
-            AmbientAgentTaskState::Claimed => Some("CLAIMED"),
-            AmbientAgentTaskState::InProgress => Some("INPROGRESS"),
-            AmbientAgentTaskState::Succeeded => Some("SUCCEEDED"),
-            AmbientAgentTaskState::Failed => Some("FAILED"),
-            AmbientAgentTaskState::Error => Some("ERROR"),
-            AmbientAgentTaskState::Blocked => Some("BLOCKED"),
-            AmbientAgentTaskState::Cancelled => Some("CANCELLED"),
-            // Unknown states are only for resilient deserialization and should not be
-            // sent back as filter values.
-            AmbientAgentTaskState::Unknown => None,
-        }
-    }
-
     pub fn is_working(&self) -> bool {
         match self {
             AmbientAgentTaskState::Queued
@@ -450,26 +419,4 @@ pub struct TaskStatusMessage {
 pub struct RequestUsage {
     pub inference_cost: Option<f64>,
     pub compute_cost: Option<f64>,
-}
-
-/// Cancel an ambient agent task and show a toast with the result.
-pub fn cancel_task_with_toast<V: View>(task_id: AmbientAgentTaskId, ctx: &mut ViewContext<V>) {
-    let ai_client = ServerApiProvider::handle(ctx).as_ref(ctx).get_ai_client();
-    let window_id = ctx.window_id();
-    ctx.spawn(
-        async move { ai_client.cancel_ambient_agent_task(&task_id).await },
-        move |_view, result, ctx| {
-            let message = match result {
-                Ok(()) => "Task cancelled".to_string(),
-                Err(e) => {
-                    log::error!("Failed to cancel task: {e}");
-                    format!("Failed to cancel task: {e}")
-                }
-            };
-            ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                let toast = DismissibleToast::default(message);
-                toast_stack.add_ephemeral_toast(toast, window_id, ctx);
-            });
-        },
-    );
 }

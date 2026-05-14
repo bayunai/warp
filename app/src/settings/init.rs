@@ -32,7 +32,7 @@ use warp_core::semantic_selection::SemanticSelection;
 
 use super::{
     app_icon::AppIconSettings, app_installation_detection::UserAppInstallDetectionSettings,
-    cloud_preferences::CloudPreferencesSettings, initializer::SettingsInitializer,
+    cloud_preferences::PreferencesSettings, initializer::SettingsInitializer,
     language::LanguageSettings, native_preference::NativePreferenceSettings, AISettings,
     AccessibilitySettings, AliasExpansionSettings, AppEditorSettings, AutoupdateSettings,
     BlockVisibilitySettings, CodeSettings, DebugSettings, EmacsBindingsSettings, FontSettings,
@@ -72,7 +72,7 @@ pub fn register_all_settings(ctx: &mut AppContext) {
     GPUSettings::register(ctx);
     GeneralSettings::register(ctx);
     AISettings::register_and_subscribe_to_events(ctx);
-    // OpenWarp Wave 7-3:`CloudAgentSettings` 随 Cloud Mode UI 子系统物理删。
+    // OpenWarp Wave 7-3:`AmbientAgentSettings` 随 ambient-agent UI 子系统物理删。
     ScrollSettings::register(ctx);
     SelectionSettings::register(ctx);
     InputModeSettings::register(ctx);
@@ -80,7 +80,7 @@ pub fn register_all_settings(ctx: &mut AppContext) {
     AccessibilitySettings::register(ctx);
     NativePreferenceSettings::register(ctx);
     AutoupdateSettings::register(ctx);
-    CloudPreferencesSettings::register(ctx);
+    PreferencesSettings::register(ctx);
     WarpDrivePrivacySettings::register(ctx);
     UserAppInstallDetectionSettings::register(ctx);
     AppIconSettings::register(ctx);

@@ -386,13 +386,12 @@ fn escape_does_not_exit_local_agent_view_with_long_running_command() {
 }
 
 #[test]
-fn root_cloud_mode_pane_sets_root_cloud_mode_context_key() {
+fn root_ambient_agent_pane_sets_root_ambient_agent_context_key() {
     use crate::settings::import::model::ImportedConfigModel;
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
         app.add_singleton_model(ImportedConfigModel::new);
         FeatureFlag::AgentView.set_enabled(true);
-        FeatureFlag::CloudMode.set_enabled(true);
 
         let terminal = add_window_with_terminal(&mut app, None);
 
@@ -400,7 +399,7 @@ fn root_cloud_mode_pane_sets_root_cloud_mode_context_key() {
             assert!(!view
                 .keymap_context(ctx)
                 .set
-                .contains(init::ROOT_CLOUD_MODE_PANE_KEY));
+                .contains(init::ROOT_AMBIENT_AGENT_PANE_KEY));
         });
 
         terminal.update(&mut app, |view, ctx| {
@@ -413,7 +412,7 @@ fn root_cloud_mode_pane_sets_root_cloud_mode_context_key() {
             assert!(view
                 .keymap_context(ctx)
                 .set
-                .contains(init::ROOT_CLOUD_MODE_PANE_KEY));
+                .contains(init::ROOT_AMBIENT_AGENT_PANE_KEY));
         });
 
         terminal.update(&mut app, |view, ctx| {
@@ -426,19 +425,18 @@ fn root_cloud_mode_pane_sets_root_cloud_mode_context_key() {
             assert!(!view
                 .keymap_context(ctx)
                 .set
-                .contains(init::ROOT_CLOUD_MODE_PANE_KEY));
+                .contains(init::ROOT_AMBIENT_AGENT_PANE_KEY));
         });
     });
 }
 
 #[test]
-fn set_input_mode_agent_does_not_enter_local_agent_from_root_cloud_mode_pane() {
+fn set_input_mode_agent_does_not_enter_local_agent_from_root_ambient_agent_pane() {
     use crate::terminal::shared_session::SharedSessionStatus;
 
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
         FeatureFlag::AgentView.set_enabled(true);
-        FeatureFlag::CloudMode.set_enabled(true);
 
         let terminal = add_window_with_terminal(&mut app, None);
 

@@ -1,15 +1,15 @@
 use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
-use crate::cloud_object::model::persistence::{CloudModel, CloudModelEvent};
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use crate::cloud_object::update_manager::UpdateManager;
 use crate::cloud_object::{
-    CloudObject, GenericStringObjectFormat, JsonObjectType, Owner, Revision,
+    GenericStringObjectFormat, JsonObjectType, Owner, Revision, StoredObject,
 };
-use crate::drive::CloudObjectTypeAndId;
+use crate::drive::ObjectTypeAndId;
 use crate::editor::{
     EditorView, Event as EditorEvent, PropagateAndNoOpNavigationKeys, SingleLineEditorOptions,
     TextOptions,
 };
 use crate::search_bar::SearchBar;
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ClientId, SyncId};
 use crate::settings::{AISettings, AISettingsChangedEvent};
 use crate::ui_components::icons::Icon;
@@ -45,7 +45,7 @@ use warpui::{
 };
 
 use super::style;
-use crate::ai::facts::{AIFact, AIMemory, CloudAIFact, CloudAIFactModel};
+use crate::ai::facts::{AIFact, AIFactObject, AIFactObjectModel, AIMemory};
 
 // 顶部标题保留英文 "Rules"(用户偏好,不译为知识库)。
 pub const HEADER_TEXT: &str = "Rules";
@@ -81,8 +81,8 @@ pub struct MouseStateHandles {
 }
 
 #[derive(Debug, Clone)]
-struct CloudRuleRow {
-    fact: CloudAIFact,
+struct GlobalRuleRow {
+    fact: AIFactObject,
     mouse_states: MouseStateHandles,
 }
 
@@ -94,7 +94,7 @@ struct ProjectScopedRow {
 
 #[derive(Debug, Clone)]
 enum RuleRow {
-    Global(Box<CloudRuleRow>),
+    Global(Box<GlobalRuleRow>),
     ProjectScoped(ProjectScopedRow),
 }
 
@@ -132,7 +132,7 @@ impl RuleRow {
 
 pub struct RuleView {
     owner: Option<Owner>,
-    global_rules: Vec<CloudRuleRow>,
+    global_rules: Vec<GlobalRuleRow>,
     project_rules: Vec<ProjectScopedRow>,
     search_editor: ViewHandle<EditorView>,
     search_bar: ViewHandle<SearchBar>,
@@ -147,12 +147,12 @@ pub struct RuleView {
 impl RuleView {
     pub fn new(ctx: &mut ViewContext<Self>) -> Self {
         // OpenWarp(本地化,Phase 2d-1):原 UpdateManager 订阅用来接收云端创建/更新的 ack
-        // 事件、以及网络状态驱动的面板重绘。本地化后 CloudModelEvent 已覆盖本地写入后的
+        // 事件、以及网络状态驱动的面板重绘。本地化后 ObjectStoreEvent 已覆盖本地写入后的
         // UI 刷新需求(2c-2/2c-3 在 update_object/create_object 里发送),UpdateManager 与
         // NetworkStatus 订阅为死代码,一并移除。
-        let cloud_model = CloudModel::handle(ctx);
-        ctx.subscribe_to_model(&cloud_model, |me, _, event, ctx| {
-            me.handle_cloud_model_event(event, ctx);
+        let object_store_model = ObjectStoreModel::handle(ctx);
+        ctx.subscribe_to_model(&object_store_model, |me, _, event, ctx| {
+            me.handle_object_store_event(event, ctx);
         });
 
         let owner = UserWorkspaces::as_ref(ctx).personal_drive(ctx);
@@ -167,17 +167,17 @@ impl RuleView {
             }
         });
 
-        let ai_rules: Vec<CloudAIFact> = {
-            let cloud_model = CloudModel::handle(ctx);
-            cloud_model
+        let ai_rules: Vec<AIFactObject> = {
+            let object_store_model = ObjectStoreModel::handle(ctx);
+            object_store_model
                 .as_ref(ctx)
-                .get_all_objects_of_type::<GenericStringObjectId, CloudAIFactModel>()
+                .get_all_objects_of_type::<GenericStringObjectId, AIFactObjectModel>()
                 .cloned()
                 .collect()
         };
-        let ai_rules: Vec<CloudRuleRow> = ai_rules
+        let ai_rules: Vec<GlobalRuleRow> = ai_rules
             .into_iter()
-            .map(|fact| CloudRuleRow {
+            .map(|fact| GlobalRuleRow {
                 fact,
                 mouse_states: Default::default(),
             })
@@ -266,13 +266,13 @@ impl RuleView {
         }
     }
 
-    fn handle_cloud_model_event(&mut self, event: &CloudModelEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_object_store_event(&mut self, event: &ObjectStoreEvent, ctx: &mut ViewContext<Self>) {
         match event {
-            CloudModelEvent::ObjectUpdated { .. }
-            | CloudModelEvent::ObjectTrashed { .. }
-            | CloudModelEvent::ObjectUntrashed { .. }
-            | CloudModelEvent::ObjectCreated { .. }
-            | CloudModelEvent::ObjectDeleted { .. } => {
+            ObjectStoreEvent::ObjectUpdated { .. }
+            | ObjectStoreEvent::ObjectTrashed { .. }
+            | ObjectStoreEvent::ObjectUntrashed { .. }
+            | ObjectStoreEvent::ObjectCreated { .. }
+            | ObjectStoreEvent::ObjectDeleted { .. } => {
                 self.fetch_ai_rules(ctx);
             }
             _ => {}
@@ -284,17 +284,17 @@ impl RuleView {
     }
 
     fn fetch_ai_rules(&mut self, ctx: &mut ViewContext<Self>) {
-        let ai_rules: Vec<CloudAIFact> = {
-            let cloud_model = CloudModel::handle(ctx);
-            cloud_model
+        let ai_rules: Vec<AIFactObject> = {
+            let object_store_model = ObjectStoreModel::handle(ctx);
+            object_store_model
                 .as_ref(ctx)
-                .get_all_objects_of_type::<GenericStringObjectId, CloudAIFactModel>()
+                .get_all_objects_of_type::<GenericStringObjectId, AIFactObjectModel>()
                 .cloned()
                 .collect()
         };
         self.global_rules = ai_rules
             .into_iter()
-            .map(|ai_fact| CloudRuleRow {
+            .map(|ai_fact| GlobalRuleRow {
                 fact: ai_fact,
                 mouse_states: Default::default(),
             })
@@ -353,8 +353,8 @@ impl RuleView {
         ctx: &mut ViewContext<Self>,
     ) {
         let update_manager = UpdateManager::handle(ctx);
-        let (is_autogenerated, suggested_logging_id) = CloudModel::as_ref(ctx)
-            .get_object_of_type::<GenericStringObjectId, CloudAIFactModel>(&sync_id)
+        let (is_autogenerated, suggested_logging_id) = ObjectStoreModel::as_ref(ctx)
+            .get_object_of_type::<GenericStringObjectId, AIFactObjectModel>(&sync_id)
             .map(|ai_fact| {
                 let AIFact::Memory(AIMemory {
                     is_autogenerated,
@@ -379,7 +379,7 @@ impl RuleView {
         let update_manager = UpdateManager::handle(ctx);
         update_manager.update(ctx, |update_manager, ctx| {
             update_manager.delete_object_by_user(
-                CloudObjectTypeAndId::GenericStringObject {
+                ObjectTypeAndId::GenericStringObject {
                     object_type: GenericStringObjectFormat::Json(JsonObjectType::AIFact),
                     id,
                 },
@@ -660,7 +660,7 @@ impl RuleView {
 
     fn render_global_rule_row(
         &self,
-        ai_row: CloudRuleRow,
+        ai_row: GlobalRuleRow,
         appearance: &Appearance,
         _app: &AppContext,
     ) -> Box<dyn Element> {

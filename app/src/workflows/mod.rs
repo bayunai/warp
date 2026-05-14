@@ -17,13 +17,13 @@ pub mod workflow_enum;
 pub mod workflow_view;
 
 use crate::appearance::Appearance;
-use crate::cloud_object::model::view::CloudViewModel;
-use crate::cloud_object::{CloudModelType, GenericCloudObject, ObjectType, ServerCloudObject};
+use crate::cloud_object::model::view::ObjectStoreViewModel;
+use crate::cloud_object::{GenericStoredObject, ObjectType, StoredObjectModel};
 
 use crate::cloud_object::SerializedModel;
 use crate::drive::items::workflow::WarpDriveWorkflow;
 use crate::drive::items::WarpDriveItem;
-use crate::drive::CloudObjectTypeAndId;
+use crate::drive::ObjectTypeAndId;
 use crate::notebooks::{NotebookId, NotebookLocation};
 use crate::persistence::ModelEvent;
 use crate::server::ids::{ServerId, SyncId};
@@ -85,7 +85,7 @@ impl WorkflowViewMode {
     pub fn supported_edit_mode(workflow_id: Option<SyncId>, app: &AppContext) -> Self {
         let can_edit = workflow_id
             .map(|id| {
-                CloudViewModel::as_ref(app)
+                ObjectStoreViewModel::as_ref(app)
                     .object_editability(&id.uid(), app)
                     .can_edit()
             })
@@ -105,7 +105,7 @@ impl WorkflowViewMode {
     pub fn supported_view_mode(workflow_id: Option<SyncId>, app: &AppContext) -> Self {
         let can_edit = workflow_id
             .map(|id| {
-                CloudViewModel::as_ref(app)
+                ObjectStoreViewModel::as_ref(app)
                     .object_editability(&id.uid(), app)
                     .can_edit()
             })
@@ -139,13 +139,13 @@ pub enum AIWorkflowOrigin {
     LegacyWarpAI,
 }
 
-/// Wrapper type for a workflow that may be saved locally or using cloud sync.
+/// Wrapper type for a workflow that may be saved locally or in the object store.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorkflowType {
     /// Saved workflows sourced from local, global, project, app collections, saved locally.
     Local(Workflow),
-    /// Saved workflows from personal or team collections, saved using cloud-sync.
-    Cloud(Box<CloudWorkflow>),
+    /// Saved workflows from the local object store.
+    Cloud(Box<WorkflowObject>),
     /// Ephemeral/transient workflows created from Warp AI output
     AIGenerated {
         workflow: Workflow,
@@ -175,11 +175,11 @@ impl WorkflowType {
         }
     }
 
-    /// The object type and ID for the cloud object containing this workflow, if there is
-    /// one. This is currently only supported for cloud workflows, not workflows within notebooks.
-    pub fn object_id(&self) -> Option<CloudObjectTypeAndId> {
+    /// The object type and ID for the object containing this workflow, if there is
+    /// one. This is currently only supported for object-backed workflows, not workflows within notebooks.
+    pub fn object_id(&self) -> Option<ObjectTypeAndId> {
         match self {
-            WorkflowType::Cloud(workflow) => Some(CloudObjectTypeAndId::Workflow(workflow.id)),
+            WorkflowType::Cloud(workflow) => Some(ObjectTypeAndId::Workflow(workflow.id)),
             _ => None,
         }
     }
@@ -193,7 +193,7 @@ impl WorkflowType {
 
     pub fn server_id(&self) -> Option<WorkflowId> {
         match self.object_id() {
-            Some(CloudObjectTypeAndId::Workflow(id)) => id.into_server().map(Into::into),
+            Some(ObjectTypeAndId::Workflow(id)) => id.into_server().map(Into::into),
             _ => None,
         }
     }
@@ -204,23 +204,23 @@ impl WorkflowType {
     }
 }
 
-/// The model for a `CloudWorkflow`.
+/// The model for a `WorkflowObject`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct CloudWorkflowModel {
+pub struct WorkflowObjectModel {
     pub data: Workflow,
 }
 
-impl CloudWorkflowModel {
+impl WorkflowObjectModel {
     pub fn new(workflow: Workflow) -> Self {
         Self { data: workflow }
     }
 }
 
-/// `CloudWorkflow` is a workflow retrieved from the server.
-pub type CloudWorkflow = GenericCloudObject<WorkflowId, CloudWorkflowModel>;
+/// `WorkflowObject` is an object-store backed workflow.
+pub type WorkflowObject = GenericStoredObject<WorkflowId, WorkflowObjectModel>;
 
-impl CloudModelType for CloudWorkflowModel {
-    type CloudObjectType = CloudWorkflow;
+impl StoredObjectModel for WorkflowObjectModel {
+    type StoredObjectType = WorkflowObject;
     type IdType = WorkflowId;
 
     fn model_type_name(&self) -> &'static str {
@@ -235,8 +235,8 @@ impl CloudModelType for CloudWorkflowModel {
         ObjectType::Workflow
     }
 
-    fn cloud_object_type_and_id(&self, id: SyncId) -> CloudObjectTypeAndId {
-        CloudObjectTypeAndId::Workflow(id)
+    fn object_type_and_id(&self, id: SyncId) -> ObjectTypeAndId {
+        ObjectTypeAndId::Workflow(id)
     }
 
     fn display_name(&self) -> String {
@@ -247,13 +247,13 @@ impl CloudModelType for CloudWorkflowModel {
         self.data.set_name(name);
     }
 
-    fn upsert_event(&self, workflow: &CloudWorkflow) -> ModelEvent {
+    fn upsert_event(&self, workflow: &WorkflowObject) -> ModelEvent {
         ModelEvent::UpsertWorkflow {
             workflow: workflow.clone(),
         }
     }
 
-    fn bulk_upsert_event(objects: &[CloudWorkflow]) -> ModelEvent {
+    fn bulk_upsert_event(objects: &[WorkflowObject]) -> ModelEvent {
         ModelEvent::UpsertWorkflows(objects.to_vec())
     }
 
@@ -267,15 +267,6 @@ impl CloudModelType for CloudWorkflowModel {
         )
     }
 
-    fn new_from_server_update(&self, server_cloud_object: &ServerCloudObject) -> Option<Self> {
-        if let ServerCloudObject::Workflow(server_workflow) = server_cloud_object {
-            return Some(CloudWorkflowModel {
-                data: server_workflow.model.data.clone(),
-            });
-        }
-        None
-    }
-
     fn renders_in_warp_drive(&self) -> bool {
         true
     }
@@ -284,10 +275,10 @@ impl CloudModelType for CloudWorkflowModel {
         &self,
         id: SyncId,
         _appearance: &Appearance,
-        workflow: &CloudWorkflow,
+        workflow: &WorkflowObject,
     ) -> Option<Box<dyn WarpDriveItem>> {
         Some(Box::new(WarpDriveWorkflow::new(
-            self.cloud_object_type_and_id(id),
+            self.object_type_and_id(id),
             workflow.clone(),
         )))
     }
@@ -297,27 +288,27 @@ impl CloudModelType for CloudWorkflowModel {
     }
 }
 
-impl PartialEq<Workflow> for CloudWorkflow {
+impl PartialEq<Workflow> for WorkflowObject {
     fn eq(&self, other: &Workflow) -> bool {
         self.model().data == *other
     }
 }
 
-impl PartialEq<CloudWorkflow> for CloudWorkflow {
-    fn eq(&self, other: &CloudWorkflow) -> bool {
+impl PartialEq<WorkflowObject> for WorkflowObject {
+    fn eq(&self, other: &WorkflowObject) -> bool {
         self.model().data == other.model().data && self.id == other.id
     }
 }
 
-impl From<CloudWorkflow> for Workflow {
-    fn from(cloud_workflow: CloudWorkflow) -> Self {
-        cloud_workflow.model().data.clone()
+impl From<WorkflowObject> for Workflow {
+    fn from(workflow: WorkflowObject) -> Self {
+        workflow.model().data.clone()
     }
 }
 
-impl From<&CloudWorkflow> for Workflow {
-    fn from(cloud_workflow: &CloudWorkflow) -> Self {
-        cloud_workflow.model().data.to_owned()
+impl From<&WorkflowObject> for Workflow {
+    fn from(workflow: &WorkflowObject) -> Self {
+        workflow.model().data.to_owned()
     }
 }
 

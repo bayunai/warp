@@ -59,16 +59,9 @@ pub(super) fn run_daemon_app(
         ctx.background_executor()
             .spawn(warp_logging::rotate_log_files())
             .detach();
-
-        use crate::server::telemetry::context_provider::NoopTelemetryContextProvider;
         use repo_metadata::repositories::DetectedRepositories;
         use repo_metadata::watcher::DirectoryWatcher;
         use repo_metadata::RepoMetadataModel;
-
-        // Register a no-op telemetry context so that `send_telemetry_from_ctx!`
-        // calls (e.g. from RepoMetadataModel on ExceededMaxFileLimit) don't
-        // panic due to a missing TelemetryContextModel singleton.
-        ctx.add_singleton_model(NoopTelemetryContextProvider::new_context_provider);
 
         // Order matters: DetectedRepositories must be registered before
         // RepoMetadataModel because LocalRepoMetadataModel::new()
@@ -82,7 +75,7 @@ pub(super) fn run_daemon_app(
     Ok(())
 }
 
-// OpenWarp Wave 6-1:`wire_auth_token_rotation` 函数物理删 — 原订阅
-// `ServerApiEvent::AccessTokenRefreshed` 事件并转发到 `RemoteServerManager::rotate_auth_token`。
-// Wave 3-1 删 auth 子系统后该事件 0 emit 点,Wave 6-1 同步删 variant + 本订阅函数
-// + `lib.rs` 中的调用点。`RemoteServerManager::rotate_auth_token` 函数本体暂保留。
+// OpenWarp Wave 6-1:`wire_auth_token_rotation` 函数物理删 — 原订阅 server API
+// token rotation 事件并转发到 `RemoteServerManager::rotate_auth_token`。Wave 3-1
+// 删 auth 子系统后该事件 0 emit 点,Wave 6-1 同步删事件 + 本订阅函数 + `lib.rs`
+// 中的调用点。`RemoteServerManager::rotate_auth_token` 函数本体暂保留。

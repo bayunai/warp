@@ -14,33 +14,33 @@ use crate::{
             generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
             json_model::{JsonModel, JsonSerializer},
         },
-        GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, ServerCloudObject,
+        GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
+        JsonObjectType,
     },
     drive::items::{env_var_collection::WarpDriveEnvVarCollection, WarpDriveItem},
     external_secrets::ExternalSecret,
     server::ids::SyncId,
     terminal::shell::ShellType,
-    Appearance, CloudObjectTypeAndId,
+    Appearance, ObjectTypeAndId,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EnvVarCollectionType {
-    /// Saved env vars, saved using cloud-sync. Today, we only support cloud
-    Cloud(Box<CloudEnvVarCollection>),
+    /// Saved env vars backed by the local object store.
+    Object(Box<EnvVarCollectionObject>),
 }
 
 impl EnvVarCollectionType {
-    pub fn as_cloud_env_var_collection(&self) -> &CloudEnvVarCollection {
+    pub fn as_env_var_collection_object(&self) -> &EnvVarCollectionObject {
         match self {
-            EnvVarCollectionType::Cloud(cloud_env_var) => cloud_env_var,
+            EnvVarCollectionType::Object(env_var_object) => env_var_object,
         }
     }
 }
 
-pub type CloudEnvVarCollection =
-    GenericCloudObject<GenericStringObjectId, CloudEnvVarCollectionModel>;
-pub type CloudEnvVarCollectionModel = GenericStringModel<EnvVarCollection, JsonSerializer>;
+pub type EnvVarCollectionObject =
+    GenericStoredObject<GenericStringObjectId, EnvVarCollectionObjectModel>;
+pub type EnvVarCollectionObjectModel = GenericStringModel<EnvVarCollection, JsonSerializer>;
 
 /// Defines the data model for a single environment variable
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
@@ -111,7 +111,7 @@ fn get_init_command_for_env_var(value: &EnvVarValue, shell_family: ShellFamily) 
     }
 }
 
-/// Defines the data model for a cloud synced collection of environment variables.
+/// Defines the data model for a saved collection of environment variables.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Default)]
 pub struct EnvVarCollection {
     // Collection title
@@ -146,7 +146,7 @@ impl EnvVarCollection {
 }
 
 impl StringModel for EnvVarCollection {
-    type CloudObjectType = CloudEnvVarCollection;
+    type StoredObjectType = EnvVarCollectionObject;
 
     fn model_type_name(&self) -> &'static str {
         "Environment variables"
@@ -176,13 +176,6 @@ impl StringModel for EnvVarCollection {
         None
     }
 
-    fn new_from_server_update(&self, server_cloud_object: &ServerCloudObject) -> Option<Self> {
-        if let ServerCloudObject::EnvVarCollection(server_envvar_collection) = server_cloud_object {
-            return Some(server_envvar_collection.model.clone().string_model);
-        }
-        None
-    }
-
     fn should_show_activity_toasts() -> bool {
         true
     }
@@ -207,10 +200,10 @@ impl StringModel for EnvVarCollection {
         &self,
         id: SyncId,
         _appearance: &Appearance,
-        env_var_collection: &CloudEnvVarCollection,
+        env_var_collection: &EnvVarCollectionObject,
     ) -> Option<Box<dyn WarpDriveItem>> {
         Some(Box::new(WarpDriveEnvVarCollection::new(
-            CloudObjectTypeAndId::GenericStringObject {
+            ObjectTypeAndId::GenericStringObject {
                 object_type: GenericStringObjectFormat::Json(JsonObjectType::EnvVarCollection),
                 id,
             },
@@ -225,8 +218,8 @@ impl JsonModel for EnvVarCollection {
     }
 }
 
-impl PartialEq<CloudEnvVarCollection> for CloudEnvVarCollection {
-    fn eq(&self, other: &CloudEnvVarCollection) -> bool {
+impl PartialEq<EnvVarCollectionObject> for EnvVarCollectionObject {
+    fn eq(&self, other: &EnvVarCollectionObject) -> bool {
         self.model().string_model == other.model().string_model && self.id == other.id
     }
 }

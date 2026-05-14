@@ -3,15 +3,16 @@ use std::collections::HashMap;
 use warpui::{Entity, ModelContext, SingletonEntity};
 
 use crate::{
-    cloud_object::{model::persistence::CloudModel, CloudObjectEventEntrypoint, Owner},
-    drive::folders::FolderId,
-    notebooks::CloudNotebookModel,
-    server::{
-        cloud_objects::update_manager::{
+    cloud_object::{
+        model::persistence::ObjectStoreModel,
+        update_manager::{
             InitiatedBy, ObjectOperation, OperationSuccessType, UpdateManager, UpdateManagerEvent,
         },
-        ids::{ClientId, SyncId},
+        Owner, StoredObjectEventEntrypoint,
     },
+    drive::folders::FolderId,
+    notebooks::NotebookObjectModel,
+    server::ids::{ClientId, SyncId},
     workflows::{workflow::Workflow, workflow_enum::WorkflowEnum},
 };
 
@@ -207,13 +208,13 @@ impl ImportQueue {
                             client_id,
                             dequeued_item.owner,
                             parent_id,
-                            CloudNotebookModel {
+                            NotebookObjectModel {
                                 title,
                                 data,
                                 ai_document_id: None,
                                 conversation_id: None,
                             },
-                            CloudObjectEventEntrypoint::ImportModal,
+                            StoredObjectEventEntrypoint::ImportModal,
                             false,
                             ctx,
                         );
@@ -232,7 +233,7 @@ impl ImportQueue {
                                 workflow_enum,
                                 dequeued_item.owner,
                                 client_id,
-                                CloudObjectEventEntrypoint::ImportModal,
+                                StoredObjectEventEntrypoint::ImportModal,
                                 false,
                                 ctx,
                             );
@@ -245,7 +246,7 @@ impl ImportQueue {
                                 dequeued_item.owner,
                                 parent_id,
                                 client_id,
-                                CloudObjectEventEntrypoint::ImportModal,
+                                StoredObjectEventEntrypoint::ImportModal,
                                 false,
                                 ctx,
                             );
@@ -293,9 +294,9 @@ impl ImportQueue {
                 return;
             }
 
-            let cloud_model = CloudModel::as_ref(ctx);
+            let object_store_model = ObjectStoreModel::as_ref(ctx);
 
-            let Some(folder_id) = cloud_model
+            let Some(folder_id) = object_store_model
                 .get_folder_by_uid(&result.server_id.expect("Expect id").uid())
                 .and_then(|folder| folder.id.into_server())
             else {

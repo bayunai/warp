@@ -1,8 +1,8 @@
 use crate::appearance::Appearance;
-use crate::cloud_object::CloudObject;
+use crate::cloud_object::StoredObject;
 use crate::drive::cloud_object_styling::warp_drive_icon_color;
-use crate::drive::{CloudObjectTypeAndId, DriveObjectType};
-use crate::env_vars::CloudEnvVarCollection;
+use crate::drive::{DriveObjectType, ObjectTypeAndId};
+use crate::env_vars::EnvVarCollectionObject;
 use crate::search::command_palette::mixer::CommandPaletteItemAction;
 use crate::search::command_palette::render_util::render_search_item_icon;
 use crate::search::command_palette::styles::SEARCH_ITEM_TEXT_PADDING;
@@ -22,7 +22,7 @@ pub const ENV_VAR_NAME_SEPARATOR: &str = ", ";
 #[derive(Debug)]
 pub struct EnvVarCollectionSearchItem {
     pub match_result: FuzzyMatchEnvVarCollectionResult,
-    pub cloud_env_var_collection: CloudEnvVarCollection,
+    pub cloud_env_var_collection: EnvVarCollectionObject,
 }
 
 impl SearchItem for EnvVarCollectionSearchItem {
@@ -152,7 +152,7 @@ impl SearchItem for EnvVarCollectionSearchItem {
 
     fn execute_result(&self) -> Self::Action {
         CommandPaletteItemAction::ViewInWarpDrive {
-            id: CloudObjectTypeAndId::GenericStringObject {
+            id: ObjectTypeAndId::GenericStringObject {
                 object_type: crate::cloud_object::GenericStringObjectFormat::Json(
                     crate::cloud_object::JsonObjectType::EnvVarCollection,
                 ),

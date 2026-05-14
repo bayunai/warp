@@ -20,7 +20,7 @@ use warpui::{
 };
 
 use crate::{
-    cloud_object::{model::persistence::CloudModel, Revision},
+    cloud_object::{model::persistence::ObjectStoreModel, Revision},
     editor::{
         EditorOptions, EditorView, Event, PropagateAndNoOpNavigationKeys, SingleLineEditorOptions,
         TextOptions,
@@ -283,9 +283,9 @@ impl EnumCreationDialog {
     }
 
     // Load an enum from memory
-    pub fn load_from_cloud_model(&mut self, enum_id: SyncId, ctx: &mut ViewContext<Self>) {
-        let cloud_model = CloudModel::as_ref(ctx);
-        let workflow_enum_model = cloud_model.get_workflow_enum(&enum_id);
+    pub fn load_from_object_store_model(&mut self, enum_id: SyncId, ctx: &mut ViewContext<Self>) {
+        let object_store_model = ObjectStoreModel::as_ref(ctx);
+        let workflow_enum_model = object_store_model.get_workflow_enum(&enum_id);
 
         self.revision_ts = workflow_enum_model.and_then(|model| model.metadata.revision.clone());
 

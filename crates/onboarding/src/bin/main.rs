@@ -3,9 +3,7 @@
 use ai::LLMId;
 use anyhow::Result;
 use onboarding::slides::OnboardingModelInfo;
-use onboarding::{
-    AgentOnboardingEvent, AgentOnboardingView, MockTelemetryContextProvider, SelectedSettings,
-};
+use onboarding::{AgentOnboardingEvent, AgentOnboardingView, SelectedSettings};
 use pathfinder_color::ColorU;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
@@ -52,9 +50,6 @@ fn main() -> Result<()> {
         // Register Appearance singleton so views can access Appearance::handle(ctx).
         ctx.add_singleton_model(|ctx| build_appearance(phenomenon(), ctx));
 
-        // Register telemetry context provider for logging telemetry events.
-        ctx.add_singleton_model(MockTelemetryContextProvider::new_context_provider);
-
         ctx.add_window(AddWindowOptions::default(), |ctx| {
             OnboardingMainView::new(ctx)
         });
@@ -84,26 +79,23 @@ impl OnboardingMainView {
                 id: LLMId::from("auto"),
                 title: "Auto".to_string(),
                 icon: Icon::Oz,
-                requires_upgrade: false,
                 is_default: true,
             },
             OnboardingModelInfo {
                 id: LLMId::from("claude-sonnet"),
                 title: "Claude Sonnet".to_string(),
                 icon: Icon::ClaudeLogo,
-                requires_upgrade: false,
                 is_default: false,
             },
             OnboardingModelInfo {
                 id: LLMId::from("gpt-4o"),
                 title: "GPT-4o".to_string(),
                 icon: Icon::OpenAILogo,
-                requires_upgrade: true,
                 is_default: false,
             },
         ];
         let onboarding_view = ctx.add_typed_action_view(move |ctx| {
-            // agent_modality_enabled and no_ai_experiment are false for demo purposes
+            // agent_modality_enabled is false for demo purposes.
             AgentOnboardingView::new(
                 themes.clone(),
                 true,
@@ -111,9 +103,6 @@ impl OnboardingMainView {
                 default_model_id.clone(),
                 false,
                 false,
-                false,
-                None,
-                onboarding::OnboardingAuthState::LoggedOut,
                 ctx,
             )
         });
@@ -161,13 +150,7 @@ impl OnboardingMainView {
                 self.state = OnboardingMainState::Finished(finished_view);
                 ctx.notify();
             }
-            AgentOnboardingEvent::SyncWithOsToggled { .. }
-            | AgentOnboardingEvent::UpgradeRequested
-            | AgentOnboardingEvent::UpgradeCopyUrlRequested
-            | AgentOnboardingEvent::UpgradePasteTokenFromClipboardRequested
-            | AgentOnboardingEvent::LoginFromWelcomeRequested
-            | AgentOnboardingEvent::PrivacySettingsFromTerminalThemeSlideRequested
-            | AgentOnboardingEvent::AppBecameActive => {
+            AgentOnboardingEvent::SyncWithOsToggled { .. } => {
                 // No-op in the standalone demo binary
             }
         }

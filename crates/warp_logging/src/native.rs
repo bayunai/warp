@@ -9,7 +9,6 @@ use anyhow::Result;
 use chrono::Local;
 use log::LevelFilter;
 use std::sync::OnceLock;
-use warp_core::features::FeatureFlag;
 use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
 use crate::{LogConfig, LogDestination};
@@ -142,12 +141,6 @@ pub async fn rotate_log_files() {
 
     if let Err(err) = rotate_files(&ChannelState::logfile_name(), max_rotation).await {
         log::error!("Failed to rotate log files: {err:?}");
-    }
-
-    if FeatureFlag::SendTelemetryToFile.is_enabled()
-        && let Err(err) = rotate_files(&ChannelState::telemetry_file_name(), max_rotation).await
-    {
-        log::error!("Failed to rotate telemetry files: {err:?}");
     }
 }
 
@@ -316,32 +309,6 @@ fn temp_log_file_path(log_directory: impl AsRef<Path>) -> PathBuf {
         .join(format!("{channel_logfile_name}.{TEMP_LOG_FILE_SUFFIX}"))
 }
 
-#[cfg(feature = "crash_reporting")]
-fn sentry_log_filter(md: &log::Metadata) -> sentry_log::LogFilter {
-    if warp_core::errors::should_ignore_log_for_sentry(md) {
-        return sentry_log::LogFilter::Ignore;
-    }
-
-    match md.target() {
-        // Ignore any log lines that come from the `log_panics` crate.
-        "panic" => sentry_log::LogFilter::Ignore,
-
-        // Filter out spammy INFO-level log lines from wgpu.
-        t if t.starts_with("wgpu_core") || t.starts_with("wgpu_hal") => {
-            sentry_log::LogFilter::Ignore
-        }
-
-        // Filter out the "redraw_frame" logging from breadcrumbs.
-        "warpui::core::redraw_frame" => sentry_log::LogFilter::Ignore,
-
-        // Filter out logs from the crash-reporting implementation, in case it logs
-        // anything in the process of forwarding logs to Sentry.
-        t if t.starts_with("warp::crash_reporting::") => sentry_log::LogFilter::Ignore,
-
-        _ => sentry_log::default_filter(md),
-    }
-}
-
 fn init_internal(
     is_from_crash_recovery_process: bool,
     is_cli: bool,
@@ -435,16 +402,6 @@ fn init_internal(
         base_logger.format(format_for_terminal_output);
     }
 
-    #[cfg(feature = "crash_reporting")]
-    {
-        let base_logger = base_logger.build();
-        log::set_max_level(base_logger.filter());
-        let logger = sentry_log::SentryLogger::with_dest(base_logger).filter(sentry_log_filter);
-        log::set_boxed_logger(Box::new(logger))
-            .expect("Should not have already initialized a logger");
-    }
-
-    #[cfg(not(feature = "crash_reporting"))]
     base_logger.init();
 
     // If we're logging to a file, initialize the `log_panics` crate, which

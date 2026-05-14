@@ -12,7 +12,7 @@ use crate::ai::blocklist::telemetry_banner::should_collect_ai_ugc_telemetry;
 use crate::auth::AuthState;
 use crate::auth::AuthStateProvider;
 use crate::auth::SyncedUserSettings;
-use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::report_error;
 // OpenWarp Wave 3-1:`AuthClient` trait + `MockAuthClient` 随 server_api/auth.rs
 // 整件物理删,`SyncedUserSettings` 迁到 `crate::auth`。
@@ -28,7 +28,7 @@ use settings::{
 
 use serde::{Deserialize, Serialize};
 
-// OpenWarp(本地化,Phase 5):`CloudPreferencesSyncer` 已物理删除。
+// OpenWarp(本地化,Phase 5):`PreferencesSyncer` 已物理删除。
 use crate::workspaces::workspace::EnterpriseSecretRegex;
 
 pub trait RegexDisplayInfo {
@@ -94,8 +94,8 @@ impl PartialEq for CustomSecretRegex {
 impl settings_value::SettingsValue for CustomSecretRegex {}
 
 // openWarp 闭源遥测剥离:三个隐私开关默认值 true → false。原 Warp 默认开是商业产品的
-// "选择退出"模式;openWarp 已物理切断 Rudder/Sentry/cloud-conversation-storage 三条
-// 外发链路,默认开关只会在新用户面前显示 ON 但实际不外发,造成认知割裂。改为默认 OFF。
+// "选择退出"模式;OpenWarp 已物理切断遥测、崩溃上报、云端对话存储三条外发链路,
+// 默认开关只会在新用户面前显示 ON 但实际不外发,造成认知割裂。改为默认 OFF。
 define_settings_group!(WarpDrivePrivacySettings, settings: [
     is_telemetry_enabled: IsTelemetryEnabled {
         type: bool,
@@ -260,7 +260,7 @@ impl PrivacySettings {
                 .expect("is_crash_reporting_enabled is a boolean."),
         );
 
-        // Listen for changes to the cloud model and update ourselves when they happen.
+        // Listen for changes to the object store and update ourselves when they happen.
         ctx.subscribe_to_model(&WarpDrivePrivacySettings::handle(ctx), |me, event, ctx| {
             let privacy_settings = WarpDrivePrivacySettings::as_ref(ctx);
             match event {
@@ -601,12 +601,8 @@ impl PrivacySettings {
         }
     }
 
-    /// openWarp 闭源遥测剥离 P3:原会调 `auth_client.update_user_settings(snapshot)`
-    /// 把 telemetry_enabled / crash_reporting_enabled 等隐私设置同步到 Warp 官方
-    /// GraphQL `UpdateUserSettings` mutation(指向 app.warp.dev)。这是云端 settings
-    /// 同步链路:本地关掉遥测后,如果云端拉到旧值会再被覆盖回 true。剥离后纯本地落盘
-    /// (调用方仍会写 settings.toml + warp_drive 本地缓存),无外发。
-    /// `update_user_settings` mutation + `auth_client` 字段暂留死代码,P4 物理清理。
+    /// openWarp 闭源遥测剥离 P3:隐私设置不再同步到上游云端 settings。
+    /// 剥离后纯本地落盘(调用方仍会写 settings.toml + warp_drive 本地缓存),无外发。
     fn update_server_with_local_settings(&self, _ctx: &mut ModelContext<Self>) {}
 
     /// We wait until warp drive prefs have loaded and then either
@@ -618,7 +614,7 @@ impl PrivacySettings {
         // Wait for cloud objects to load, and, if telemetry & crash reporting are synced to warp drive
         // initialize from the warp drive values.
         ctx.spawn(
-            CloudModel::as_ref(ctx).initial_load_complete(),
+            ObjectStoreModel::as_ref(ctx).initial_load_complete(),
             Self::handle_warp_drive_objects_loaded,
         );
     }
@@ -628,8 +624,8 @@ impl PrivacySettings {
         // Check if the warp drive preferences are set. If they are, and telemetry and crash reporting
         // are set as warp drive prefs, then use those.  Otherwise, update the warp drive prefs to match
         // the values from the legacy user_settings endpoint so that we can use warp drive prefs going forward.
-        let cloud_model = CloudModel::as_ref(ctx);
-        let cloud_prefs = cloud_model.get_all_cloud_preferences_by_storage_key();
+        let object_store_model = ObjectStoreModel::as_ref(ctx);
+        let cloud_prefs = object_store_model.get_all_preferences_by_storage_key();
         let cloud_telemetry_value =
             cloud_prefs
                 .get(IsTelemetryEnabled::storage_key())
@@ -674,7 +670,7 @@ impl PrivacySettings {
                         .is_crash_reporting_enabled
                         .set_value(self.is_crash_reporting_enabled, ctx));
                 });
-                // OpenWarp(本地化,Phase 5):原 `CloudPreferencesSyncer::maybe_sync_local_prefs_to_cloud`
+                // OpenWarp(本地化,Phase 5):原 `PreferencesSyncer::maybe_sync_local_prefs_to_cloud`
                 // 同步本地隐私设置到云端,随同步器物理删除。本地设置仅写入 sqlite。
             }
         }

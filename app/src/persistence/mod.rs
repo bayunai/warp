@@ -1,4 +1,4 @@
-﻿#![cfg_attr(not(feature = "local_fs"), allow(dead_code))]
+#![cfg_attr(not(feature = "local_fs"), allow(dead_code))]
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
@@ -28,7 +28,6 @@ use ai::project_context::model::ProjectRulePath;
 use chrono::{DateTime, Local, Utc};
 use uuid::Uuid;
 use warp_core::command::ExitCode;
-use warp_graphql::scalars::time::ServerTimestamp;
 use warp_multi_agent_api as api;
 use warpui::{AppContext, Entity, SingletonEntity};
 
@@ -37,20 +36,18 @@ use crate::ai::mcp::TemplatableMCPServerInstallation;
 use crate::app_state::AppState;
 use crate::auth::PersistedCurrentUserInformation;
 use crate::cloud_object::model::actions::ObjectAction;
-use crate::cloud_object::model::generic_string_model::CloudStringObject;
+use crate::cloud_object::model::generic_string_model::StoredStringObject;
 
-use crate::cloud_object::{
-    CloudObject, CloudObjectMetadata, ObjectIdType, RevisionAndLastEditor, ServerCreationInfo,
-};
-use crate::drive::folders::CloudFolder;
-use crate::notebooks::CloudNotebook;
+use crate::cloud_object::{ObjectIdType, StoredObject, StoredObjectMetadata};
+use crate::drive::folders::FolderObject;
+use crate::notebooks::NotebookObject;
 use crate::server::experiments::ServerExperiment;
 use crate::server::ids::SyncId;
 use crate::suggestions::ignored_suggestions_model::SuggestionType;
 use crate::terminal::history::PersistedCommand;
 use crate::terminal::model::block::{SerializedAgentViewVisibility, SerializedBlock};
 use crate::terminal::model::session::SessionId;
-use crate::workflows::CloudWorkflow;
+use crate::workflows::WorkflowObject;
 use crate::workspaces::user_profiles::UserProfileWithUID;
 use crate::workspaces::workspace::{Workspace as WorkspaceMetadata, WorkspaceUid};
 
@@ -159,7 +156,7 @@ impl PersistenceWriter {
                 log::error!("Could not terminate SQLite writer thread: {err}");
             }
             if handle.join().is_err() {
-                // If crash reporting is enabled, Sentry will have already handled the panic.
+                // crash reporting 启用时 panic hook 已写入本地日志,这里补充线程级上下文。
                 log::error!("SQLite writer thread panicked");
             }
             log::info!("Shut down SQLite writer in {:?}", start.elapsed());
@@ -190,7 +187,7 @@ pub struct PersistedData {
     pub app_state: AppState,
 
     /// Shareable objects.
-    pub cloud_objects: Vec<Box<dyn CloudObject>>,
+    pub cloud_objects: Vec<Box<dyn StoredObject>>,
     pub workspaces: Vec<WorkspaceMetadata>,
     pub current_workspace_uid: Option<WorkspaceUid>,
     pub command_history: Vec<PersistedCommand>,
@@ -243,31 +240,22 @@ pub enum ModelEvent {
     SaveBlock(BlockCompleted),
     DeleteBlocks(Vec<u8>),
     Snapshot(AppState),
-    UpsertWorkflows(Vec<CloudWorkflow>),
-    UpsertNotebooks(Vec<CloudNotebook>),
-    UpsertFolders(Vec<CloudFolder>),
-    MarkObjectAsSynced {
-        hashed_sqlite_id: String,
-        revision_and_editor: RevisionAndLastEditor,
-        metadata_ts: Option<ServerTimestamp>,
-    },
+    UpsertWorkflows(Vec<WorkflowObject>),
+    UpsertNotebooks(Vec<NotebookObject>),
+    UpsertFolders(Vec<FolderObject>),
     IncrementRetryCount(String),
     UpsertGenericStringObject {
-        object: Box<dyn CloudStringObject>,
+        object: Box<dyn StoredStringObject>,
     },
-    UpsertGenericStringObjects(Vec<Box<dyn CloudStringObject>>),
+    UpsertGenericStringObjects(Vec<Box<dyn StoredStringObject>>),
     UpsertNotebook {
-        notebook: CloudNotebook,
+        notebook: NotebookObject,
     },
     UpsertWorkflow {
-        workflow: CloudWorkflow,
+        workflow: WorkflowObject,
     },
     UpsertFolder {
-        folder: CloudFolder,
-    },
-    UpdateObjectAfterServerCreation {
-        client_id: String,
-        server_creation_info: ServerCreationInfo,
+        folder: FolderObject,
     },
     DeleteObjects {
         ids: Vec<(SyncId, ObjectIdType)>,
@@ -283,7 +271,7 @@ pub enum ModelEvent {
     },
     UpdateObjectMetadata {
         id: String,
-        metadata: CloudObjectMetadata,
+        metadata: StoredObjectMetadata,
     },
     InsertCommand {
         metadata: StartedCommandMetadata,

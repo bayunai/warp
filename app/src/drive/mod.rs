@@ -1,4 +1,3 @@
-pub mod cloud_action_confirmation_dialog;
 mod cloud_object_naming_dialog;
 pub mod cloud_object_styling;
 pub mod drive_helpers;
@@ -23,15 +22,15 @@ use warpui::AppContext;
 
 use crate::{
     cloud_object::{
-        model::view::{CloudViewModel, UpdateTimestamp},
-        CloudObject, GenericStringObjectFormat, ObjectIdType, ObjectType,
+        model::view::{ObjectStoreViewModel, UpdateTimestamp},
+        GenericStringObjectFormat, ObjectIdType, ObjectType, StoredObject,
     },
     server::ids::{HashedSqliteId, ObjectUid, ServerId, SyncId},
     ui_components::icons::Icon,
-    workflows::CloudWorkflow,
+    workflows::WorkflowObject,
 };
 
-type SortByComparator<'a> = dyn FnMut(&&dyn CloudObject, &&dyn CloudObject) -> Ordering + 'a;
+type SortByComparator<'a> = dyn FnMut(&&dyn StoredObject, &&dyn StoredObject) -> Ordering + 'a;
 
 #[derive(Copy, Clone, Debug)]
 pub enum DriveObjectType {
@@ -105,7 +104,7 @@ pub struct OpenWarpDriveObjectArgs {
 /// Enum to use to pass down type and id between actions to avoid multiplying actions whenever we
 /// need to pass the object id etc.
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
-pub enum CloudObjectTypeAndId {
+pub enum ObjectTypeAndId {
     Notebook(SyncId),
     Workflow(SyncId),
     Folder(SyncId),
@@ -115,7 +114,7 @@ pub enum CloudObjectTypeAndId {
     },
 }
 
-impl CloudObjectTypeAndId {
+impl ObjectTypeAndId {
     pub fn from_id_and_type(id: SyncId, object_type: ObjectType) -> Self {
         match object_type {
             ObjectType::Notebook => Self::Notebook(id),
@@ -148,10 +147,10 @@ impl CloudObjectTypeAndId {
 
     pub fn sqlite_uid_hash(self) -> HashedSqliteId {
         match self {
-            CloudObjectTypeAndId::Notebook(id) => id.sqlite_uid_hash(ObjectIdType::Notebook),
-            CloudObjectTypeAndId::Workflow(id) => id.sqlite_uid_hash(ObjectIdType::Workflow),
-            CloudObjectTypeAndId::Folder(id) => id.sqlite_uid_hash(ObjectIdType::Folder),
-            CloudObjectTypeAndId::GenericStringObject { object_type: _, id } => {
+            ObjectTypeAndId::Notebook(id) => id.sqlite_uid_hash(ObjectIdType::Notebook),
+            ObjectTypeAndId::Workflow(id) => id.sqlite_uid_hash(ObjectIdType::Workflow),
+            ObjectTypeAndId::Folder(id) => id.sqlite_uid_hash(ObjectIdType::Folder),
+            ObjectTypeAndId::GenericStringObject { object_type: _, id } => {
                 id.sqlite_uid_hash(ObjectIdType::GenericStringObject)
             }
         }
@@ -159,19 +158,19 @@ impl CloudObjectTypeAndId {
 
     pub fn object_id_type(&self) -> ObjectIdType {
         match self {
-            CloudObjectTypeAndId::Notebook(_) => ObjectIdType::Notebook,
-            CloudObjectTypeAndId::Workflow(_) => ObjectIdType::Workflow,
-            CloudObjectTypeAndId::GenericStringObject { .. } => ObjectIdType::GenericStringObject,
-            CloudObjectTypeAndId::Folder(_) => ObjectIdType::Folder,
+            ObjectTypeAndId::Notebook(_) => ObjectIdType::Notebook,
+            ObjectTypeAndId::Workflow(_) => ObjectIdType::Workflow,
+            ObjectTypeAndId::GenericStringObject { .. } => ObjectIdType::GenericStringObject,
+            ObjectTypeAndId::Folder(_) => ObjectIdType::Folder,
         }
     }
 
     pub fn object_type(&self) -> ObjectType {
         match self {
-            CloudObjectTypeAndId::Notebook(_) => ObjectType::Notebook,
-            CloudObjectTypeAndId::Workflow(_) => ObjectType::Workflow,
-            CloudObjectTypeAndId::Folder(_) => ObjectType::Folder,
-            CloudObjectTypeAndId::GenericStringObject { object_type, .. } => {
+            ObjectTypeAndId::Notebook(_) => ObjectType::Notebook,
+            ObjectTypeAndId::Workflow(_) => ObjectType::Workflow,
+            ObjectTypeAndId::Folder(_) => ObjectType::Folder,
+            ObjectTypeAndId::GenericStringObject { object_type, .. } => {
                 ObjectType::GenericStringObject(*object_type)
             }
         }
@@ -179,23 +178,23 @@ impl CloudObjectTypeAndId {
 
     pub fn as_folder_id(self) -> Option<SyncId> {
         match self {
-            CloudObjectTypeAndId::Notebook(_) => None,
-            CloudObjectTypeAndId::Workflow(_) => None,
-            CloudObjectTypeAndId::GenericStringObject { .. } => None,
-            CloudObjectTypeAndId::Folder(f) => Some(f),
+            ObjectTypeAndId::Notebook(_) => None,
+            ObjectTypeAndId::Workflow(_) => None,
+            ObjectTypeAndId::GenericStringObject { .. } => None,
+            ObjectTypeAndId::Folder(f) => Some(f),
         }
     }
 
     pub fn as_notebook_id(self) -> Option<SyncId> {
         match self {
-            CloudObjectTypeAndId::Notebook(id) => Some(id),
+            ObjectTypeAndId::Notebook(id) => Some(id),
             _ => None,
         }
     }
 
     pub fn as_generic_string_object_id(self) -> Option<SyncId> {
         match self {
-            CloudObjectTypeAndId::GenericStringObject { object_type: _, id } => Some(id),
+            ObjectTypeAndId::GenericStringObject { object_type: _, id } => Some(id),
             _ => None,
         }
     }
@@ -203,10 +202,10 @@ impl CloudObjectTypeAndId {
     pub fn has_server_id(self) -> bool {
         matches!(
             self,
-            CloudObjectTypeAndId::Notebook(SyncId::ServerId(_))
-                | CloudObjectTypeAndId::Workflow(SyncId::ServerId(_))
-                | CloudObjectTypeAndId::Folder(SyncId::ServerId(_))
-                | CloudObjectTypeAndId::GenericStringObject {
+            ObjectTypeAndId::Notebook(SyncId::ServerId(_))
+                | ObjectTypeAndId::Workflow(SyncId::ServerId(_))
+                | ObjectTypeAndId::Folder(SyncId::ServerId(_))
+                | ObjectTypeAndId::GenericStringObject {
                     id: SyncId::ServerId(_),
                     ..
                 }
@@ -215,10 +214,10 @@ impl CloudObjectTypeAndId {
 
     pub fn server_id(self) -> Option<ServerId> {
         match self {
-            CloudObjectTypeAndId::Notebook(SyncId::ServerId(notebook_id)) => Some(notebook_id),
-            CloudObjectTypeAndId::Workflow(SyncId::ServerId(workflow_id)) => Some(workflow_id),
-            CloudObjectTypeAndId::Folder(SyncId::ServerId(folder_id)) => Some(folder_id),
-            CloudObjectTypeAndId::GenericStringObject {
+            ObjectTypeAndId::Notebook(SyncId::ServerId(notebook_id)) => Some(notebook_id),
+            ObjectTypeAndId::Workflow(SyncId::ServerId(workflow_id)) => Some(workflow_id),
+            ObjectTypeAndId::Folder(SyncId::ServerId(folder_id)) => Some(folder_id),
+            ObjectTypeAndId::GenericStringObject {
                 id: SyncId::ServerId(json_object_id),
                 ..
             } => Some(json_object_id),
@@ -284,46 +283,50 @@ pub enum DriveSortOrder {
 
 impl DriveSortOrder {
     /// Returns the comparator that can be used for sorting items returned by
-    /// CloudModel::cloud_objects_in_space, for example (so more specifically, on the iterator of
-    /// type Iterator<Item = &'_ dyn CloudObject>)
+    /// ObjectStoreModel::cloud_objects_in_space, for example (so more specifically, on the iterator of
+    /// type Iterator<Item = &'_ dyn StoredObject>)
     pub fn sort_by<'a>(
         &self,
-        cloud_model: &'a CloudViewModel,
+        object_store_model: &'a ObjectStoreViewModel,
         update_timestamp: UpdateTimestamp,
         app: &'a AppContext,
     ) -> Box<SortByComparator<'a>> {
         match self {
             // Sorts newly-created objects to be at the top of the list
             Self::ByTimestamp => Box::new(
-                move |a: &&dyn CloudObject, b: &&dyn CloudObject| -> Ordering {
-                    cloud_model
+                move |a: &&dyn StoredObject, b: &&dyn StoredObject| -> Ordering {
+                    object_store_model
                         .object_sorting_timestamp(*a, update_timestamp, app)
-                        .cmp(&cloud_model.object_sorting_timestamp(*b, update_timestamp, app))
+                        .cmp(&object_store_model.object_sorting_timestamp(
+                            *b,
+                            update_timestamp,
+                            app,
+                        ))
                         .reverse()
                 },
             ),
             Self::AlphabeticalDescending => Box::new(
-                move |a: &&dyn CloudObject, b: &&dyn CloudObject| -> Ordering {
+                move |a: &&dyn StoredObject, b: &&dyn StoredObject| -> Ordering {
                     a.display_name()
                         .to_lowercase()
                         .cmp(&b.display_name().to_lowercase())
                 },
             ),
             Self::AlphabeticalAscending => Box::new(
-                move |a: &&dyn CloudObject, b: &&dyn CloudObject| -> Ordering {
+                move |a: &&dyn StoredObject, b: &&dyn StoredObject| -> Ordering {
                     b.display_name()
                         .to_lowercase()
                         .cmp(&a.display_name().to_lowercase())
                 },
             ),
             Self::ByObjectType => Box::new(
-                move |a: &&dyn CloudObject, b: &&dyn CloudObject| -> Ordering {
-                    let order = |obj: &&dyn CloudObject| match obj.object_type() {
+                move |a: &&dyn StoredObject, b: &&dyn StoredObject| -> Ordering {
+                    let order = |obj: &&dyn StoredObject| match obj.object_type() {
                         ObjectType::Folder => 0,
                         ObjectType::GenericStringObject(_) => 1,
                         ObjectType::Notebook => 2,
                         ObjectType::Workflow => {
-                            let Some(workflow) = obj.as_any().downcast_ref::<CloudWorkflow>()
+                            let Some(workflow) = obj.as_any().downcast_ref::<WorkflowObject>()
                             else {
                                 return 3;
                             };

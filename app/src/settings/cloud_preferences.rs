@@ -7,14 +7,14 @@ use crate::cloud_object::{
         generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
         json_model::{JsonModel, JsonSerializer},
     },
-    GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey, JsonObjectType,
-    ServerCloudObject, UniquePer,
+    GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey, JsonObjectType,
+    UniquePer,
 };
 
 use settings::{
     macros::define_settings_group, RespectUserSyncSetting, SupportedPlatforms, SyncToCloud,
 };
-define_settings_group!(CloudPreferencesSettings, settings: [
+define_settings_group!(PreferencesSettings, settings: [
    settings_sync_enabled: IsSettingsSyncEnabled {
        type: bool,
        default: false,
@@ -26,8 +26,8 @@ define_settings_group!(CloudPreferencesSettings, settings: [
    },
 ]);
 
-pub type CloudPreference = GenericCloudObject<GenericStringObjectId, CloudPreferenceModel>;
-pub type CloudPreferenceModel = GenericStringModel<Preference, JsonSerializer>;
+pub type PreferenceObject = GenericStoredObject<GenericStringObjectId, PreferenceObjectModel>;
+pub type PreferenceObjectModel = GenericStringModel<Preference, JsonSerializer>;
 
 /// Defines the platform that a preference was set on.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -131,7 +131,7 @@ impl Preference {
 
 /// Defines a based model for syncing cloud preferences.
 impl StringModel for Preference {
-    type CloudObjectType = CloudPreference;
+    type StoredObjectType = PreferenceObject;
 
     fn model_type_name(&self) -> &'static str {
         "Preference"
@@ -150,13 +150,6 @@ impl StringModel for Preference {
     fn warn_if_unsaved_at_quit() -> bool {
         // Don't block quitting on unsaved cloud prefs changes
         false
-    }
-
-    fn new_from_server_update(&self, server_cloud_object: &ServerCloudObject) -> Option<Self> {
-        if let ServerCloudObject::Preference(server_preference) = server_cloud_object {
-            return Some(server_preference.model.clone().string_model);
-        }
-        None
     }
 
     fn model_format() -> GenericStringObjectFormat {

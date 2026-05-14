@@ -23,8 +23,9 @@ use crate::{
     ai::blocklist::block::secret_redaction::find_secrets_in_text_with_levels,
     cloud_object::{
         breadcrumbs::ContainingObject,
-        model::persistence::{CloudModel, CloudModelEvent},
-        CloudObjectEventEntrypoint, Owner,
+        model::persistence::{ObjectStoreEvent, ObjectStoreModel},
+        update_manager::{FetchSingleObjectOption, UpdateManager},
+        Owner, StoredObjectEventEntrypoint,
     },
     drive::{items::WarpDriveItemId, sharing::ContentEditability},
     editor::EditorView,
@@ -33,7 +34,7 @@ use crate::{
             ActiveEnvVarCollection, ActiveEnvVarCollectionData, ActiveEnvVarCollectionDataEvent,
             SavingStatus, TrashStatus,
         },
-        CloudEnvVarCollection, CloudEnvVarCollectionModel, EnvVar, EnvVarCollection,
+        EnvVar, EnvVarCollection, EnvVarCollectionObject, EnvVarCollectionObjectModel,
         EnvVarCollectionType, EnvVarValue,
     },
     external_secrets::SecretManager,
@@ -44,10 +45,7 @@ use crate::{
     },
     search::external_secrets::view::ExternalSecretsMenu,
     send_telemetry_from_ctx,
-    server::{
-        cloud_objects::update_manager::{FetchSingleObjectOption, UpdateManager},
-        ids::{ServerId, SyncId},
-    },
+    server::ids::{ServerId, SyncId},
     terminal::{model::secrets::SecretLevel, safe_mode_settings::get_secret_obfuscation_mode},
     ui_components::{
         breadcrumb::{render_breadcrumbs, BreadcrumbState},
@@ -60,7 +58,7 @@ use crate::{
     util::bindings::CustomAction,
     view_components::{alert::AlertConfig, Alert, DismissibleToast, ToastType},
     workspace::ToastStack,
-    Appearance, CloudObjectTypeAndId, TelemetryEvent,
+    Appearance, ObjectTypeAndId, TelemetryEvent,
 };
 
 use super::{command_dialog::EnvVarCommandDialog, menus::Menus};
@@ -489,9 +487,9 @@ impl EnvVarCollectionView {
         let appearance = Appearance::as_ref(ctx);
         let ui_font_family = appearance.ui_font_family();
 
-        let cloud_model = CloudModel::handle(ctx);
-        ctx.subscribe_to_model(&cloud_model, |view, _handle, event, ctx| {
-            view.handle_cloud_model_event(event, ctx);
+        let object_store_model = ObjectStoreModel::handle(ctx);
+        ctx.subscribe_to_model(&object_store_model, |view, _handle, event, ctx| {
+            view.handle_object_store_event(event, ctx);
         });
 
         let pane_configuration =
@@ -603,10 +601,10 @@ impl EnvVarCollectionView {
         ctx: &mut ViewContext<Self>,
     ) {
         let initial_load_complete =
-            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+            crate::cloud_object::model::persistence::ObjectStoreModel::as_ref(ctx)
                 .initial_load_complete();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
-            let env_var_collection = CloudModel::as_ref(ctx)
+            let env_var_collection = ObjectStoreModel::as_ref(ctx)
                 .get_env_var_collection(&env_var_collection_id)
                 .cloned();
             if let Some(env_var_collection) = env_var_collection {
@@ -616,7 +614,7 @@ impl EnvVarCollectionView {
             } else {
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                     toast_stack.add_ephemeral_toast_by_type(
-                        ToastType::CloudObjectNotFound,
+                        ToastType::StoredObjectNotFound,
                         window_id,
                         ctx,
                     );
@@ -641,21 +639,25 @@ impl EnvVarCollectionView {
                 )
             });
         ctx.spawn(fetch_cloud_object_rx, move |me, _, ctx| {
-            if let Some(env_var_collection) = CloudModel::as_ref(ctx)
+            if let Some(env_var_collection) = ObjectStoreModel::as_ref(ctx)
                 .get_env_var_collection(&SyncId::ServerId(env_var_collection_id))
                 .cloned()
             {
                 me.load(env_var_collection, ctx);
             } else {
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
-                    toast_stack.add_ephemeral_toast_by_type(ToastType::CloudObjectNotFound, window_id, ctx);
+                    toast_stack.add_ephemeral_toast_by_type(ToastType::StoredObjectNotFound, window_id, ctx);
                 });
                 log::warn!("Tried to open unknown env var collection {env_var_collection_id:?} after fetching");
             }
         });
     }
 
-    pub fn load(&mut self, env_var_collection: CloudEnvVarCollection, ctx: &mut ViewContext<Self>) {
+    pub fn load(
+        &mut self,
+        env_var_collection: EnvVarCollectionObject,
+        ctx: &mut ViewContext<Self>,
+    ) {
         self.active_env_var_collection_data
             .update(ctx, |data, ctx| {
                 data.open_existing(env_var_collection.id, ctx);
@@ -742,9 +744,9 @@ impl EnvVarCollectionView {
             .active_env_var_collection
         {
             ActiveEnvVarCollection::CommittedEnvVarCollection(id) => {
-                let cloud_model = CloudModel::as_ref(ctx);
-                if let Some(cloud_env_var) = cloud_model.get_env_var_collection(id) {
-                    ctx.emit(EnvVarCollectionEvent::Invoke(EnvVarCollectionType::Cloud(
+                let object_store_model = ObjectStoreModel::as_ref(ctx);
+                if let Some(cloud_env_var) = object_store_model.get_env_var_collection(id) {
+                    ctx.emit(EnvVarCollectionEvent::Invoke(EnvVarCollectionType::Object(
                         Box::new(cloud_env_var.clone()),
                     )));
                 } else {
@@ -762,7 +764,7 @@ impl EnvVarCollectionView {
                 }
             }
             ActiveEnvVarCollection::NewEnvVarCollection(env_var_collection) => {
-                ctx.emit(EnvVarCollectionEvent::Invoke(EnvVarCollectionType::Cloud(
+                ctx.emit(EnvVarCollectionEvent::Invoke(EnvVarCollectionType::Object(
                     Box::new(env_var_collection.as_ref().clone()),
                 )))
             }
@@ -856,8 +858,8 @@ impl EnvVarCollectionView {
                             client_id,
                             env_var_collection.permissions.owner,
                             env_var_collection.metadata.folder_id,
-                            CloudEnvVarCollectionModel::new(new_env_var_collection),
-                            CloudObjectEventEntrypoint::Unknown,
+                            EnvVarCollectionObjectModel::new(new_env_var_collection),
+                            StoredObjectEventEntrypoint::Unknown,
                             true,
                             ctx,
                         );
@@ -974,9 +976,9 @@ impl EnvVarCollectionView {
         }
     }
 
-    fn handle_cloud_model_event(&mut self, event: &CloudModelEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_object_store_event(&mut self, event: &ObjectStoreEvent, ctx: &mut ViewContext<Self>) {
         match event {
-            CloudModelEvent::ObjectCreated { type_and_id, .. } => {
+            ObjectStoreEvent::ObjectCreated { type_and_id, .. } => {
                 if self
                     .as_active_env_var_collection_id(type_and_id, ctx)
                     .is_some()
@@ -984,11 +986,11 @@ impl EnvVarCollectionView {
                     ctx.notify();
                 }
             }
-            CloudModelEvent::ObjectTrashed { .. }
-            | CloudModelEvent::ObjectDeleted { .. }
-            | CloudModelEvent::ObjectUntrashed { .. }
-            | CloudModelEvent::ObjectMoved { .. } => ctx.notify(),
-            CloudModelEvent::ObjectPermissionsUpdated { type_and_id, .. }
+            ObjectStoreEvent::ObjectTrashed { .. }
+            | ObjectStoreEvent::ObjectDeleted { .. }
+            | ObjectStoreEvent::ObjectUntrashed { .. }
+            | ObjectStoreEvent::ObjectMoved { .. } => ctx.notify(),
+            ObjectStoreEvent::ObjectPermissionsUpdated { type_and_id, .. }
                 if self
                     .as_active_env_var_collection_id(type_and_id, ctx)
                     .is_some() =>
@@ -1079,7 +1081,7 @@ impl EnvVarCollectionView {
 
     fn as_active_env_var_collection_id(
         &self,
-        id: &CloudObjectTypeAndId,
+        id: &ObjectTypeAndId,
         ctx: &mut ViewContext<Self>,
     ) -> Option<SyncId> {
         id.as_generic_string_object_id().filter(|id| {

@@ -1,26 +1,20 @@
-﻿use warp_core::ui::appearance::Appearance;
+use warp_core::ui::appearance::Appearance;
 use warpui::{platform::WindowStyle, App};
 
 use crate::{
     ai::blocklist::BlocklistAIHistoryModel,
     auth::{AuthManager, AuthStateProvider},
+    cloud_object::update_manager::UpdateManager,
     cloud_object::{
-        model::{persistence::CloudModel, view::CloudViewModel},
+        model::{persistence::ObjectStoreModel, view::ObjectStoreViewModel},
         Space,
     },
     drive::index::DriveIndexSection,
     network::NetworkStatus,
-    server::{
-        cloud_objects::update_manager::UpdateManager, server_api::ServerApiProvider,
-        telemetry::context_provider::AppTelemetryContextProvider,
-    },
     settings_view::keybindings::KeybindingChangedNotifier,
-    terminal::{
-        resizable_data::ResizableData,
-        shared_session::permissions_manager::SessionPermissionsManager,
-    },
+    terminal::resizable_data::ResizableData,
     test_util::settings::initialize_settings_for_tests,
-    workspaces::{team_tester::TeamTesterStatus, user_workspaces::UserWorkspaces},
+    workspaces::user_workspaces::UserWorkspaces,
     Assets, ObjectActions,
 };
 
@@ -29,20 +23,16 @@ use super::DrivePanel;
 fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);
 
-    app.add_singleton_model(CloudModel::mock);
+    app.add_singleton_model(ObjectStoreModel::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| Appearance::mock());
     app.add_singleton_model(|_| ResizableData::default());
-    app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);
-    app.add_singleton_model(CloudViewModel::mock);
+    app.add_singleton_model(ObjectStoreViewModel::mock);
     app.add_singleton_model(|_| ObjectActions::new(Vec::new()));
-    app.add_singleton_model(|_| ServerApiProvider::new_for_test());
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
-    app.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
     app.add_singleton_model(AuthManager::new_for_test);
-    app.add_singleton_model(SessionPermissionsManager::new);
     app.add_singleton_model(|_| KeybindingChangedNotifier::mock());
     app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
     #[cfg(feature = "voice_input")]
@@ -62,9 +52,8 @@ fn test_warp_drive_sections_with_no_team() {
         let index = panel.read(&app, |panel, _| panel.index_view.clone());
         index.read(&app, |index, _| {
             let sections = index.sections();
-            assert_eq!(sections.len(), 2);
-            assert_eq!(sections[0], DriveIndexSection::CreateATeam);
-            assert_eq!(sections[1], DriveIndexSection::Space(Space::Personal))
+            assert_eq!(sections.len(), 1);
+            assert_eq!(sections[0], DriveIndexSection::Space(Space::Personal))
         });
     })
 }

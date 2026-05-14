@@ -1,46 +1,29 @@
-use chrono::{DateTime, Utc};
 use warpui::{App, SingletonEntity};
 
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::execution_profiles::{
-    AIExecutionProfile, ActionPermission, CloudAIExecutionProfileModel,
+    AIExecutionProfile, AIExecutionProfileObject, AIExecutionProfileObjectModel, ActionPermission,
 };
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::auth::AuthStateProvider;
-use crate::cloud_object::model::persistence::{CloudModel, CloudModelEvent};
-use crate::cloud_object::{Revision, ServerAIExecutionProfile, ServerMetadata, ServerPermissions};
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::cloud_object::{StoredObjectMetadata, StoredObjectPermissions};
 use crate::network::NetworkStatus;
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ServerId, SyncId};
 use crate::settings::PrivacySettings;
 use crate::test_util::settings::initialize_settings_for_tests;
-use crate::workspaces::team_tester::TeamTesterStatus;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::LaunchMode;
 
-fn mock_server_metadata(uid: ServerId) -> ServerMetadata {
-    ServerMetadata {
-        uid,
-        revision: Revision::now(),
-        metadata_last_updated_ts: DateTime::<Utc>::default().into(),
-        trashed_ts: None,
-        folder_id: None,
-        is_welcome_object: false,
-        creator_uid: None,
-        last_editor_uid: None,
-        current_editor_uid: None,
-    }
-}
-
 /// Install the minimal singleton graph needed to construct an
-/// `AIExecutionProfilesModel` and exercise its CloudModel interactions.
+/// `AIExecutionProfilesModel` and exercise its ObjectStoreModel interactions.
 fn install_singletons(app: &mut App, auth_state: AuthStateProvider) {
     initialize_settings_for_tests(app);
     app.add_singleton_model(|_| auth_state);
     app.add_singleton_model(|_| NetworkStatus::new());
-    app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);
-    app.add_singleton_model(CloudModel::mock);
+    app.add_singleton_model(ObjectStoreModel::mock);
     app.add_singleton_model(|_| TemplatableMCPServerManager::default());
     app.add_singleton_model(PrivacySettings::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
@@ -96,12 +79,11 @@ fn edits_persist_on_unsynced_default_profile_when_logged_out() {
 }
 
 /// Regression test for the "log in to an existing user after onboarding"
-/// bug. Cloud objects arriving via the initial bulk load are inserted into
-/// `CloudModel` *without* firing per-object `ObjectCreated` events —
-/// `update_objects_from_initial_load` passes `emit_events: false` and emits
-/// a single `CloudModelEvent::InitialLoadCompleted` afterward instead.
+/// bug. Objects restored from local storage can already exist in `ObjectStoreModel`
+/// before `AIExecutionProfilesModel` observes per-object `ObjectCreated` events.
+/// The model reconciles when it receives `ObjectStoreEvent::InitialLoadCompleted`.
 /// Without the reconciliation handler for `InitialLoadCompleted`, the
-/// existing user's default profile sits in `CloudModel` but
+/// existing user's default profile sits in `ObjectStoreModel` but
 /// `AIExecutionProfilesModel` stays in `Unsynced`, so a subsequent
 /// onboarding edit creates a duplicate cloud default profile instead of
 /// editing the existing one. This test drives that sequence and asserts
@@ -114,7 +96,7 @@ fn reconciles_unsynced_default_profile_with_cloud_after_initial_load() {
             AIExecutionProfilesModel::new(&LaunchMode::new_for_unit_test(), ctx)
         });
 
-        // Baseline: CloudModel is empty, so the model starts Unsynced and
+        // Baseline: ObjectStoreModel is empty, so the model starts Unsynced and
         // `sync_id` is `None`.
         profile_model.read(&app, |model, ctx| {
             assert!(
@@ -123,52 +105,50 @@ fn reconciles_unsynced_default_profile_with_cloud_after_initial_load() {
             );
         });
 
-        // Simulate the user's existing cloud default profile arriving via
+        // Simulate the user's existing default profile object arriving via
         // initial bulk load. We construct the existing profile with
         // `apply_code_diffs = AlwaysAllow` so we can verify the model is
-        // reading that cloud object after reconciliation.
+        // reading that stored object after reconciliation.
         let cloud_uid = ServerId::from(42);
         let cloud_sync_id = SyncId::ServerId(cloud_uid);
-        let cloud_profile = AIExecutionProfile {
+        let local_profile = AIExecutionProfile {
             name: "Default".to_string(),
             is_default_profile: true,
             apply_code_diffs: ActionPermission::AlwaysAllow,
             ..Default::default()
         };
-        let server_object = ServerAIExecutionProfile {
-            id: cloud_sync_id,
-            model: CloudAIExecutionProfileModel::new(cloud_profile),
-            metadata: mock_server_metadata(cloud_uid),
-            permissions: ServerPermissions::mock_personal(),
-        };
+        let profile_object = AIExecutionProfileObject::new(
+            cloud_sync_id,
+            AIExecutionProfileObjectModel::new(local_profile),
+            StoredObjectMetadata::mock(),
+            StoredObjectPermissions::mock_personal(),
+        );
 
-        // Insert the object into CloudModel via the initial-load path
-        // (`emit_events=false`) and then emit `InitialLoadCompleted` so the
-        // reconciliation handler fires.
-        CloudModel::handle(&app).update(&mut app, move |cloud_model, ctx| {
-            let server_objects: Vec<ServerAIExecutionProfile> = vec![server_object];
-            cloud_model.update_objects_from_initial_load(server_objects, false, false, ctx);
-            ctx.emit(CloudModelEvent::InitialLoadCompleted);
+        // Insert the object into ObjectStoreModel without per-object events and then
+        // emit `InitialLoadCompleted` so the reconciliation handler fires.
+        ObjectStoreModel::handle(&app).update(&mut app, move |object_store_model, ctx| {
+            object_store_model.add_object(cloud_sync_id, profile_object);
+            ctx.emit(ObjectStoreEvent::InitialLoadCompleted);
         });
 
-        // The model should now be Synced with the cloud profile's sync_id,
-        // and `default_profile` should read values from the existing cloud
+        // The model should now be Synced with the stored profile object's sync_id,
+        // and `default_profile` should read values from the existing local
         // object (proving we're not backed by a fresh client-side default).
         profile_model.read(&app, |model, ctx| {
             let info = model.default_profile(ctx);
             assert_eq!(
                 info.sync_id(),
                 Some(cloud_sync_id),
-                "model did not adopt the existing cloud default profile's sync_id"
+                "model did not adopt the existing default profile object's sync_id"
             );
             assert_eq!(
                 info.data().apply_code_diffs,
                 ActionPermission::AlwaysAllow,
-                "default profile should now surface the existing cloud value"
+                "default profile should now surface the existing stored value"
             );
         });
 
-        // Further edits should now target the existing cloud profile in
+        // Further edits should now target the existing profile object in
         // place, rather than falling through the `Unsynced` branch and
         // creating a duplicate.
         let default_profile_id = profile_model.read(&app, |model, _ctx| model.default_profile_id());
@@ -185,7 +165,7 @@ fn reconciles_unsynced_default_profile_with_cloud_after_initial_load() {
             assert_eq!(
                 info.data().apply_code_diffs,
                 ActionPermission::AlwaysAsk,
-                "edit should be reflected on the existing cloud profile"
+                "edit should be reflected on the existing profile object"
             );
         });
     })

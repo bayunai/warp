@@ -1,7 +1,6 @@
 pub(crate) mod convert_conversation;
 mod convert_from;
 mod convert_to;
-mod r#impl;
 
 pub use ai::agent::convert::ConvertToAPITypeError;
 use ai::api_keys::ApiKeyManager;
@@ -10,22 +9,19 @@ pub use convert_from::{
     MaybeAIAgentOutputMessage, MessageToAIAgentOutputMessageError,
 };
 
-pub use r#impl::generate_multi_agent_output;
-
 use futures_lite::Stream;
 use serde::Serialize;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
-use warp_core::channel::ChannelState;
 use warp_core::execution_mode::AppExecutionMode;
 use warp_core::features::FeatureFlag;
 
 use crate::ai::agent::conversation::AIConversationId;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::{
+    ai::api_error::AIApiError,
     ai::{blocklist::SessionContext, llms::LLMId},
-    server::server_api::AIApiError,
 };
 
 use super::{AIAgentInput, MCPContext, MCPServer, RequestMetadata, RunningCommand, Suggestions};
@@ -54,42 +50,17 @@ impl ServerConversationToken {
     }
 
     pub fn debug_link(&self) -> String {
-        format!(
-            "{}/debug/maa/{}",
-            ChannelState::server_root_url(),
-            self.as_str()
-        )
+        format!("warp://debug/maa/{}", self.as_str())
     }
 
     pub fn conversation_link(&self) -> String {
-        format!(
-            "{}/conversation/{}",
-            ChannelState::server_root_url(),
-            self.as_str()
-        )
+        format!("warp://conversation/{}", self.as_str())
     }
 }
 
 impl From<ServerConversationToken> for String {
     fn from(value: ServerConversationToken) -> Self {
         value.0
-    }
-}
-
-// Conversions between AI ServerConversationToken and protocol ServerConversationToken
-impl From<session_sharing_protocol::common::ServerConversationToken> for ServerConversationToken {
-    fn from(token: session_sharing_protocol::common::ServerConversationToken) -> Self {
-        Self(token.to_string())
-    }
-}
-
-impl TryFrom<ServerConversationToken>
-    for session_sharing_protocol::common::ServerConversationToken
-{
-    type Error = uuid::Error;
-
-    fn try_from(token: ServerConversationToken) -> Result<Self, Self::Error> {
-        token.as_str().parse()
     }
 }
 

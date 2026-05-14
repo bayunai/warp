@@ -1,15 +1,14 @@
 use byte_unit::Byte;
 use instant::Duration;
 use serde::{Deserialize, Serialize};
-use session_sharing_protocol::common::{Role, Scrollback, ScrollbackBlock, SessionId};
-use session_sharing_protocol::sharer::SessionSourceType;
 use warpui::{id, keymap::ContextPredicate, AppContext};
 
-use crate::{
-    channel::{Channel, ChannelState},
-    editor::{InteractionState, ReplicaId},
-    features::FeatureFlag,
-};
+use crate::editor::{InteractionState, ReplicaId};
+
+pub mod protocol;
+pub use protocol::ParticipantId;
+
+use protocol::{Role, Scrollback, ScrollbackBlock, SessionSourceType};
 
 use super::{
     model::{block::SerializedBlock, terminal_model::BlockIndex},
@@ -17,19 +16,12 @@ use super::{
 };
 
 pub mod ai_agent;
-pub mod manager;
-pub mod network;
 pub mod participant_avatar_view;
-pub mod permissions_manager;
 pub mod presence_manager;
 pub mod render_util;
-pub mod replay_agent_conversations;
-pub mod role_change_modal;
-mod selections;
+pub(crate) mod selections;
 pub mod settings;
 // OpenWarp:删除 share_modal(云端 shared session 弹窗)
-pub(super) mod shared_handlers;
-pub mod sharer;
 pub mod viewer;
 
 #[cfg(test)]
@@ -287,50 +279,6 @@ pub enum SharedSessionActionSource {
     FooterChip,
 }
 
-/// Returns the native intent URL to join a shared session.
-/// This should be used when opening the session from within Warp.
-pub fn join_native_intent(session_id: &SessionId) -> String {
-    format!(
-        "{}://shared_session/{}",
-        ChannelState::url_scheme(),
-        session_id
-    )
-}
-
-/// Returns the link to join a shared session.
-pub fn join_link(session_id: &SessionId) -> String {
-    // For non-bundled builds against the staging server, use the native app intent
-    // because the staging web URL won't resolve to a local build.
-    let use_web_url = !ChannelState::uses_staging_server() || cfg!(feature = "release_bundle");
-
-    let mut link = if use_web_url {
-        format!("{}/session/{}", ChannelState::server_root_url(), session_id,)
-    } else {
-        join_native_intent(session_id)
-    };
-
-    // If this is a preview build, route the sharing link to the preview server.
-    if matches!(ChannelState::channel(), Channel::Preview) {
-        link.push_str("?preview=true");
-    }
-
-    link
-}
-
-/// Returns the full session sharing URL given a path.
-pub fn connect_endpoint(path: String) -> Option<String> {
-    let base = ChannelState::session_sharing_server_url()?;
-    if FeatureFlag::SessionSharingAcls.is_enabled() {
-        let version = ChannelState::app_version().unwrap_or("v0.00.000");
-        if path.contains("?") {
-            return Some(format!("{base}{path}&version={version}"));
-        } else {
-            return Some(format!("{base}{path}?version={version}"));
-        }
-    }
-    Some(format!("{base}{path}"))
-}
-
 /// The event number for events sent to the server. The newtype
 /// ensures that events are incremented correctly.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -358,38 +306,36 @@ impl From<EventNumber> for usize {
     }
 }
 
-impl From<GridType> for session_sharing_protocol::common::GridType {
+impl From<GridType> for protocol::GridType {
     fn from(val: GridType) -> Self {
         match val {
-            GridType::Prompt => session_sharing_protocol::common::GridType::Prompt,
-            GridType::Rprompt => session_sharing_protocol::common::GridType::Rprompt,
-            GridType::Output => session_sharing_protocol::common::GridType::Output,
-            GridType::PromptAndCommand => {
-                session_sharing_protocol::common::GridType::PromptAndCommand
-            }
+            GridType::Prompt => protocol::GridType::Prompt,
+            GridType::Rprompt => protocol::GridType::Rprompt,
+            GridType::Output => protocol::GridType::Output,
+            GridType::PromptAndCommand => protocol::GridType::PromptAndCommand,
         }
     }
 }
 
-impl From<session_sharing_protocol::common::GridType> for GridType {
-    fn from(value: session_sharing_protocol::common::GridType) -> Self {
+impl From<protocol::GridType> for GridType {
+    fn from(value: protocol::GridType) -> Self {
         match value {
-            session_sharing_protocol::common::GridType::Prompt => Self::Prompt,
-            session_sharing_protocol::common::GridType::Rprompt => Self::Rprompt,
-            session_sharing_protocol::common::GridType::Output => Self::Output,
-            session_sharing_protocol::common::GridType::PromptAndCommand => Self::PromptAndCommand,
+            protocol::GridType::Prompt => Self::Prompt,
+            protocol::GridType::Rprompt => Self::Rprompt,
+            protocol::GridType::Output => Self::Output,
+            protocol::GridType::PromptAndCommand => Self::PromptAndCommand,
         }
     }
 }
 
-impl From<ReplicaId> for session_sharing_protocol::common::InputReplicaId {
+impl From<ReplicaId> for protocol::InputReplicaId {
     fn from(value: ReplicaId) -> Self {
         value.to_string().into()
     }
 }
 
-impl From<session_sharing_protocol::common::InputReplicaId> for ReplicaId {
-    fn from(value: session_sharing_protocol::common::InputReplicaId) -> Self {
+impl From<protocol::InputReplicaId> for ReplicaId {
+    fn from(value: protocol::InputReplicaId) -> Self {
         ReplicaId::new(value)
     }
 }

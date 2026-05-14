@@ -198,13 +198,6 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
             kind: AgentTipKind::Mcp,
         },
         AgentTip {
-            description: crate::t!("agent-tip-create-environment"),
-            link: Some("https://docs.warp.dev/reference/cli/integration-setup".to_string()),
-            binding_name: None,
-            action: None,
-            kind: AgentTipKind::General,
-        },
-        AgentTip {
             description: crate::t!("agent-tip-add-prompt"),
             link: None,
             binding_name: None,
@@ -311,7 +304,7 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
         },
         AgentTip {
             description: crate::t!("agent-tip-desktop-notifications"),
-            link: Some("https://docs.warp.dev/agent-platform/cloud-agents/managing-cloud-agents#in-app-agent-notifications".to_string()),
+            link: None,
             binding_name: None,
             action: None,
             kind: AgentTipKind::General,
@@ -441,13 +434,9 @@ pub struct AITipModel<T: AITip> {
 
 impl<T: AITip + 'static> AITipModel<T> {
     /// Creates a new AITipModel with the given tips.
-    /// Selects a random initial tip from the provided tips.
-    ///
-    /// # Panics
-    /// Panics if the tips vector is empty.
+    /// Selects a random initial tip from the provided tips, if any.
     pub fn new(tips: Vec<T>) -> Self {
         use rand::seq::SliceRandom;
-        debug_assert!(!tips.is_empty(), "AITipModel must have at least one tip");
 
         let mut rng = rand::thread_rng();
         let current_tip = tips.choose(&mut rng).cloned();
@@ -521,8 +510,8 @@ impl AITipModel<AgentTip> {
 
 impl SingletonEntity for AITipModel<AgentTip> {}
 
-// Specific implementation for CloudModeTip
-impl AITipModel<crate::terminal::view::ambient_agent::CloudModeTip> {
+// Specific implementation for AmbientAgentTip
+impl AITipModel<crate::terminal::view::ambient_agent::AmbientAgentTip> {
     /// Refreshes the current tip with a new random selection.
     /// Only updates if not in cooldown period (60 seconds).
     pub fn maybe_refresh_tip(&mut self, ctx: &mut ModelContext<Self>) {

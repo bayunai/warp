@@ -11,10 +11,10 @@ use crate::{
     appearance::Appearance,
     cloud_object::{
         model::actions::{ObjectActionType, ObjectActions},
-        CloudObjectMetadata,
+        StoredObjectMetadata,
     },
-    drive::{index::DriveIndexAction, CloudObjectTypeAndId, DriveObjectType},
-    env_vars::{CloudEnvVarCollection, EnvVarValue},
+    drive::{index::DriveIndexAction, DriveObjectType, ObjectTypeAndId},
+    env_vars::{EnvVarCollectionObject, EnvVarValue},
     themes::theme::Fill,
 };
 
@@ -22,12 +22,12 @@ use super::{WarpDriveItem, WarpDriveItemId};
 
 #[derive(Clone)]
 pub struct WarpDriveEnvVarCollection {
-    id: CloudObjectTypeAndId,
-    env_var_collection: CloudEnvVarCollection,
+    id: ObjectTypeAndId,
+    env_var_collection: EnvVarCollectionObject,
 }
 
 impl WarpDriveEnvVarCollection {
-    pub fn new(id: CloudObjectTypeAndId, env_var_collection: CloudEnvVarCollection) -> Self {
+    pub fn new(id: ObjectTypeAndId, env_var_collection: EnvVarCollectionObject) -> Self {
         Self {
             id,
             env_var_collection,
@@ -40,7 +40,7 @@ impl WarpDriveItem for WarpDriveEnvVarCollection {
         self.env_var_collection.model().string_model.title.clone()
     }
 
-    fn metadata(&self) -> Option<&CloudObjectMetadata> {
+    fn metadata(&self) -> Option<&StoredObjectMetadata> {
         Some(&self.env_var_collection.metadata)
     }
 

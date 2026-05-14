@@ -1,4 +1,4 @@
-﻿use std::borrow::Cow;
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -40,7 +40,6 @@ use crate::ui_components::buttons::icon_button;
 use crate::view_components::{Dropdown, DropdownItem};
 use crate::{
     appearance::Appearance,
-    auth::AuthManager,
     channel::ChannelState,
     report_if_error, send_telemetry_from_ctx,
     server::telemetry::TelemetryEvent,
@@ -71,17 +70,6 @@ use warpui::fonts::Weight;
 const FONT_SIZE: f32 = 12.;
 
 const TELEMETRY_DOCS_URL: &str = "https://docs.warp.dev/support-and-community/privacy-and-security/privacy#what-telemetry-data-does-warp-collect-and-why";
-
-pub fn data_management_url(custom_token: Option<&str>) -> String {
-    match custom_token {
-        Some(token) => format!(
-            "{}/data_management?customToken={}",
-            ChannelState::server_root_url(),
-            token
-        ),
-        None => format!("{}/data_management", ChannelState::server_root_url(),),
-    }
-}
 
 pub struct PrivacyPageView {
     page: PageType<Self>,
@@ -211,7 +199,6 @@ impl PrivacyPageView {
             Box::new(AppAnalyticsWidget::default()),
             Box::new(CrashReportsWidget::default()),
         ];
-        widgets.push(Box::new(DataManagementWidget::default()));
         widgets.push(Box::new(PrivacyPolicyWidget::default()));
         PageType::new_uncategorized(
             widgets,
@@ -459,7 +446,6 @@ pub enum PrivacyPageAction {
     ToggleTelemetry,
     ToggleCrashReporting,
     RemoveCustomRegex(usize),
-    OpenDataManagementWebpage,
     AddAllRecommendedRegexes,
     ShowAddRegexModal,
     AddRecommendedRegex(usize),
@@ -539,12 +525,6 @@ impl TypedActionView for PrivacyPageView {
             PrivacyPageAction::ToggleCrashReporting => self.toggle_crash_reporting(ctx),
             PrivacyPageAction::RemoveCustomRegex(idx) => {
                 self.queue_regex_removal(*idx, ctx);
-            }
-            PrivacyPageAction::OpenDataManagementWebpage => {
-                AuthManager::handle(ctx).update(ctx, |auth_manager, ctx| {
-                    auth_manager
-                        .open_url_maybe_with_anonymous_token(ctx, Box::new(data_management_url));
-                });
             }
             PrivacyPageAction::AddAllRecommendedRegexes => {
                 // First process any pending removals
@@ -1626,82 +1606,6 @@ impl SettingsWidget for CrashReportsWidget {
 }
 
 #[derive(Default)]
-struct DataManagementWidget {
-    link_mouse_state: MouseStateHandle,
-}
-
-impl SettingsWidget for DataManagementWidget {
-    type View = PrivacyPageView;
-
-    fn search_terms(&self) -> &str {
-        "data management delete account"
-    }
-
-    fn render(
-        &self,
-        _view: &Self::View,
-        appearance: &Appearance,
-        _app: &AppContext,
-    ) -> Box<dyn Element> {
-        let ui_builder = appearance.ui_builder();
-        Flex::column()
-            .with_child(render_body_item::<PrivacyPageAction>(
-                crate::t!("settings-privacy-data-management-title").into(),
-                None,
-                // Not rendering a setting, so no need to show local only icon state.
-                LocalOnlyIconState::Hidden,
-                ToggleState::Enabled,
-                appearance,
-                Empty::new().finish(),
-                None,
-            ))
-            .with_child(
-                ui_builder
-                    .paragraph(crate::t!("settings-privacy-data-management-description"))
-                    .with_style(UiComponentStyles {
-                        font_color: Some(
-                            appearance
-                                .theme()
-                                .sub_text_color(appearance.theme().surface_2())
-                                .into_solid(),
-                        ),
-                        margin: Some(
-                            Coords::default()
-                                .top(styles::DESCRIPTION_NEGATIVE_MARGIN_OFFSET)
-                                .bottom(styles::DESCRIPTION_LINE_MARGIN_BOTTOM),
-                        ),
-                        ..Default::default()
-                    })
-                    .build()
-                    .finish(),
-            )
-            .with_child(
-                Align::new(
-                    appearance
-                        .ui_builder()
-                        .link(
-                            crate::t!("settings-privacy-data-management-link").into(),
-                            None,
-                            Some(Box::new(|ctx| {
-                                ctx.dispatch_typed_action(
-                                    PrivacyPageAction::OpenDataManagementWebpage,
-                                );
-                            })),
-                            self.link_mouse_state.clone(),
-                        )
-                        .soft_wrap(false)
-                        .build()
-                        .with_margin_bottom(styles::DESCRIPTION_MARGIN_BOTTOM)
-                        .finish(),
-                )
-                .left()
-                .finish(),
-            )
-            .finish()
-    }
-}
-
-#[derive(Default)]
 struct PrivacyPolicyWidget {
     link_mouse_state: MouseStateHandle,
 }
@@ -1757,24 +1661,29 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     context: &ContextPredicate,
     builder: fn(SettingsAction) -> T,
 ) {
-    let mut toggle_binding_pairs = vec![
-        ToggleSettingActionPair::new(
+    let mut toggle_binding_pairs = vec![];
+
+    if ChannelState::is_telemetry_available() {
+        toggle_binding_pairs.push(ToggleSettingActionPair::new(
             &crate::t!("toggle-suffix-app-analytics"),
             builder(SettingsAction::PrivacyPageToggle(
                 PrivacyPageAction::ToggleTelemetry,
             )),
             context,
             flags::TELEMETRY_FLAG,
-        ),
-        ToggleSettingActionPair::new(
+        ));
+    }
+
+    if ChannelState::is_crash_reporting_available() {
+        toggle_binding_pairs.push(ToggleSettingActionPair::new(
             &crate::t!("toggle-suffix-crash-reporting"),
             builder(SettingsAction::PrivacyPageToggle(
                 PrivacyPageAction::ToggleCrashReporting,
             )),
             context,
             flags::CRASH_REPORTING_FLAG,
-        ),
-    ];
+        ));
+    }
 
     toggle_binding_pairs.push(ToggleSettingActionPair::new(
         &crate::t!("toggle-suffix-secret-redaction"),

@@ -5,8 +5,8 @@ use super::super::rich_text_styles;
 use super::NotebooksEditorModel;
 use crate::appearance::Appearance;
 use crate::auth::AuthStateProvider;
-use crate::cloud_object::model::persistence::CloudModel;
-use crate::cloud_object::{Owner, Revision, ServerMetadata, ServerPermissions, ServerWorkflow};
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::{Revision, StoredObjectMetadata, StoredObjectPermissions};
 use crate::editor::InteractionState;
 use crate::notebooks::editor::keys::NotebookKeybindings;
 use crate::notebooks::editor::model::DEBOUNCED_RESIZE_PERIOD;
@@ -20,11 +20,10 @@ use crate::settings_view::keybindings::KeybindingChangedNotifier;
 use crate::terminal::keys::TerminalKeybindings;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workflows::workflow::Workflow;
-use crate::workflows::{CloudWorkflow, CloudWorkflowModel, WorkflowId};
+use crate::workflows::{WorkflowId, WorkflowObject, WorkflowObjectModel};
 use crate::workspace::ActiveSession;
 use crate::UserWorkspaces;
 use crate::{GlobalResourceHandles, GlobalResourceHandlesProvider};
-use chrono::Utc;
 use futures::prelude::*;
 use itertools::Itertools;
 use markdown_parser::markdown_parser::RUNNABLE_BLOCK_MARKDOWN_LANG;
@@ -78,7 +77,7 @@ impl TypedActionView for TestView {
 fn model_from_markdown(
     markdown: &str,
     app: &mut App,
-    should_initialize_cloud_model: bool,
+    should_initialize_object_store_model: bool,
 ) -> ModelHandle<NotebooksEditorModel> {
     let global_resources = GlobalResourceHandles::mock(app);
     app.add_singleton_model(|_| GlobalResourceHandlesProvider::new(global_resources));
@@ -91,9 +90,9 @@ fn model_from_markdown(
     app.add_singleton_model(NotebookKeybindings::new);
     app.add_singleton_model(TerminalKeybindings::new);
 
-    // In some tests, we need to initialize CloudModel first to mock some server data. In those cases, avoid mocking it a second time.
-    if should_initialize_cloud_model {
-        app.add_singleton_model(CloudModel::mock);
+    // In some tests, we need to initialize ObjectStoreModel first to mock some server data. In those cases, avoid mocking it a second time.
+    if should_initialize_object_store_model {
+        app.add_singleton_model(ObjectStoreModel::mock);
     }
 
     let (window, _) = app.add_window(WindowStyle::NotStealFocus, |ctx| {
@@ -1647,34 +1646,17 @@ fn mock_server_workflow(id: i64, app: &mut App) {
     let server_id: ServerId = id.into();
     let workflow_id: WorkflowId = server_id.into();
     let sync_id = SyncId::ServerId(workflow_id.into());
-    let ts = Utc::now();
+    let mut metadata = StoredObjectMetadata::mock();
+    metadata.revision = Some(Revision::now());
+    let workflow = WorkflowObject::new(
+        sync_id,
+        WorkflowObjectModel::new(Workflow::new(format!("w{id}"), format!("c{id}"))),
+        metadata,
+        StoredObjectPermissions::mock_personal(),
+    );
 
-    let server_metadata = ServerMetadata {
-        uid: server_id,
-        revision: Revision::now(),
-        metadata_last_updated_ts: ts.into(),
-        trashed_ts: None,
-        folder_id: None,
-        is_welcome_object: false,
-        creator_uid: None,
-        last_editor_uid: None,
-        current_editor_uid: None,
-    };
-
-    let workflow = ServerWorkflow {
-        id: SyncId::ServerId(workflow_id.into()),
-        metadata: server_metadata,
-        permissions: ServerPermissions {
-            space: Owner::mock_current_user(),
-            guests: Vec::new(),
-            permissions_last_updated_ts: ts.into(),
-            anyone_link_sharing: None,
-        },
-        model: CloudWorkflowModel::new(Workflow::new(format!("w{id}"), format!("c{id}"))),
-    };
-
-    CloudModel::handle(app).update(app, |cloud_model, _| {
-        cloud_model.add_object(sync_id, CloudWorkflow::new_from_server(workflow));
+    ObjectStoreModel::handle(app).update(app, |object_store_model, _| {
+        object_store_model.add_object(sync_id, workflow);
     });
 }
 
@@ -1682,7 +1664,7 @@ fn mock_server_workflow(id: i64, app: &mut App) {
 fn test_interleaving_command_and_embedding() {
     App::test((), |mut app| async move {
         initialize_deps(&mut app);
-        app.add_singleton_model(CloudModel::mock);
+        app.add_singleton_model(ObjectStoreModel::mock);
 
         // IDs are padded to be length 22.
         mock_server_workflow(123, &mut app);

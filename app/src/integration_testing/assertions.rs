@@ -1,9 +1,10 @@
 use crate::{
     cloud_object::{
-        model::persistence::CloudModel, CloudObjectEventEntrypoint, CloudObjectLocation, Space,
+        model::persistence::ObjectStoreModel, update_manager::UpdateManager, Space,
+        StoredObjectEventEntrypoint, StoredObjectLocation,
     },
     network::{NetworkStatus, NetworkStatusKind},
-    server::{cloud_objects::update_manager::UpdateManager, ids::ClientId},
+    server::ids::ClientId,
     util::bindings::keybinding_name_to_display_string,
     workflows::workflow::Workflow,
     workspaces::{team::Team, user_workspaces::UserWorkspaces, workspace::Workspace},
@@ -101,18 +102,18 @@ pub fn create_a_personal_workflow() -> TestStep {
                         .expect("User UID must be set in tests"),
                     None,
                     ClientId::default(),
-                    CloudObjectEventEntrypoint::ManagementUI,
+                    StoredObjectEventEntrypoint::ManagementUI,
                     true,
                     ctx,
                 )
             })
         })
         .add_assertion(move |app, _| {
-            CloudModel::handle(app).read(app, |cloud_model, ctx| {
+            ObjectStoreModel::handle(app).read(app, |object_store_model, ctx| {
                 async_assert!(
-                    cloud_model
+                    object_store_model
                         .active_cloud_objects_in_location_without_descendents(
-                            CloudObjectLocation::Space(Space::Personal),
+                            StoredObjectLocation::Space(Space::Personal),
                             ctx,
                         )
                         .count()

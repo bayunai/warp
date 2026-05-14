@@ -1,39 +1,23 @@
 use ai::LLMId;
-use chrono::{DateTime, Utc};
 use onboarding::slides::{AgentAutonomy, AgentDevelopmentSettings, ProjectOnboardingSettings};
 use onboarding::SelectedSettings;
 use warpui::{App, SingletonEntity};
 
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
 use crate::ai::execution_profiles::{
-    AIExecutionProfile, ActionPermission, CloudAIExecutionProfileModel,
+    AIExecutionProfile, AIExecutionProfileObject, AIExecutionProfileObjectModel, ActionPermission,
 };
 use crate::ai::mcp::TemplatableMCPServerManager;
 use crate::auth::AuthStateProvider;
-use crate::cloud_object::model::persistence::{CloudModel, CloudModelEvent};
-use crate::cloud_object::{Revision, ServerAIExecutionProfile, ServerMetadata, ServerPermissions};
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use crate::cloud_object::update_manager::UpdateManager;
+use crate::cloud_object::{StoredObjectMetadata, StoredObjectPermissions};
 use crate::network::NetworkStatus;
-use crate::server::cloud_objects::update_manager::UpdateManager;
 use crate::server::ids::{ServerId, SyncId};
 use crate::settings::{apply_onboarding_settings, PrivacySettings};
 use crate::test_util::settings::initialize_settings_for_tests;
-use crate::workspaces::team_tester::TeamTesterStatus;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::LaunchMode;
-
-fn mock_server_metadata(uid: ServerId) -> ServerMetadata {
-    ServerMetadata {
-        uid,
-        revision: Revision::now(),
-        metadata_last_updated_ts: DateTime::<Utc>::default().into(),
-        trashed_ts: None,
-        folder_id: None,
-        is_welcome_object: false,
-        creator_uid: None,
-        last_editor_uid: None,
-        current_editor_uid: None,
-    }
-}
 
 /// Regression test for: "Logging in to an existing user at the end of
 /// onboarding should preserve the user's cloud-stored default execution
@@ -48,18 +32,17 @@ fn mock_server_metadata(uid: ServerId) -> ServerMetadata {
 ///   3. The reconciliation handler promotes the local state to `Synced`
 ///      with the cloud profile's `sync_id`.
 ///   4. `apply_onboarding_settings` runs (as it would from
-///      `handle_cloud_preferences_syncer_event`) with onboarding-selected
-///      values that differ from what's on the cloud profile.
-///   5. The cloud profile's stored values must be preserved.
+///      `handle_preferences_syncer_event`) with onboarding-selected
+///      values that differ from what's on the stored profile object.
+///   5. The stored profile object's values must be preserved.
 #[test]
-fn apply_onboarding_settings_preserves_existing_cloud_profile_on_existing_user_login() {
+fn apply_onboarding_settings_preserves_existing_profile_object_on_existing_user_login() {
     App::test((), |mut app| async move {
         initialize_settings_for_tests(&mut app);
         app.add_singleton_model(|_| AuthStateProvider::new_for_test());
         app.add_singleton_model(|_| NetworkStatus::new());
-        app.add_singleton_model(TeamTesterStatus::mock);
         app.add_singleton_model(UpdateManager::mock);
-        app.add_singleton_model(CloudModel::mock);
+        app.add_singleton_model(ObjectStoreModel::mock);
         app.add_singleton_model(|_| TemplatableMCPServerManager::default());
         app.add_singleton_model(PrivacySettings::mock);
         app.add_singleton_model(UserWorkspaces::default_mock);
@@ -67,14 +50,14 @@ fn apply_onboarding_settings_preserves_existing_cloud_profile_on_existing_user_l
             AIExecutionProfilesModel::new(&LaunchMode::new_for_unit_test(), ctx)
         });
 
-        // The existing user's stored cloud default profile. Values are
+        // The existing user's stored default profile. Values are
         // deliberately chosen to differ from both `AIExecutionProfile`'s
         // defaults and from the onboarding values we'll pass below, so any
         // accidental overwrite is detectable.
         let cloud_uid = ServerId::from(7);
         let cloud_sync_id = SyncId::ServerId(cloud_uid);
         let cloud_stored_model = LLMId::from("claude-existing-cloud-model");
-        let cloud_profile = AIExecutionProfile {
+        let local_profile = AIExecutionProfile {
             name: "Default".to_string(),
             is_default_profile: true,
             base_model: Some(cloud_stored_model.clone()),
@@ -84,24 +67,23 @@ fn apply_onboarding_settings_preserves_existing_cloud_profile_on_existing_user_l
             mcp_permissions: ActionPermission::AlwaysAllow,
             ..Default::default()
         };
-        let server_object = ServerAIExecutionProfile {
-            id: cloud_sync_id,
-            model: CloudAIExecutionProfileModel::new(cloud_profile),
-            metadata: mock_server_metadata(cloud_uid),
-            permissions: ServerPermissions::mock_personal(),
-        };
+        let profile_object = AIExecutionProfileObject::new(
+            cloud_sync_id,
+            AIExecutionProfileObjectModel::new(local_profile),
+            StoredObjectMetadata::mock(),
+            StoredObjectPermissions::mock_personal(),
+        );
 
-        // Insert the existing user's cloud profile via the initial-load
-        // path (no per-object events) and emit `InitialLoadCompleted` so
-        // `AIExecutionProfilesModel` reconciles to `Synced`.
-        CloudModel::handle(&app).update(&mut app, move |cloud_model, ctx| {
-            let server_objects: Vec<ServerAIExecutionProfile> = vec![server_object];
-            cloud_model.update_objects_from_initial_load(server_objects, false, false, ctx);
-            ctx.emit(CloudModelEvent::InitialLoadCompleted);
+        // Insert the existing user's stored profile without per-object events
+        // and emit `InitialLoadCompleted` so `AIExecutionProfilesModel`
+        // reconciles to `Synced`.
+        ObjectStoreModel::handle(&app).update(&mut app, move |object_store_model, ctx| {
+            object_store_model.add_object(cloud_sync_id, profile_object);
+            ctx.emit(ObjectStoreEvent::InitialLoadCompleted);
         });
 
         // Sanity: reconciliation occurred and the model now reads the
-        // cloud profile.
+        // stored profile object.
         profile_model.read(&app, |model, ctx| {
             let info = model.default_profile(ctx);
             assert_eq!(info.sync_id(), Some(cloud_sync_id));
@@ -136,7 +118,7 @@ fn apply_onboarding_settings_preserves_existing_cloud_profile_on_existing_user_l
             assert_eq!(
                 info.sync_id(),
                 Some(cloud_sync_id),
-                "still pointing at the existing cloud profile"
+                "still pointing at the existing profile object"
             );
             assert_eq!(
                 info.data().base_model,

@@ -3,9 +3,9 @@ use std::sync::Arc;
 use futures_lite::future::yield_now;
 use warpui::{AppContext, SingletonEntity};
 
-use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::notebooks::manager::NotebookManager;
-use crate::notebooks::CloudNotebookModel;
+use crate::notebooks::NotebookObjectModel;
 use crate::search::async_snapshot_data_source::AsyncSnapshotDataSource;
 use crate::search::command_search::searcher::CommandSearchItemAction;
 use crate::search::data_source::{Query, QueryResult};
@@ -16,7 +16,7 @@ use super::NotebookSearchItem;
 
 pub(crate) struct NotebookMatchCandidate {
     id: SyncId,
-    model: Arc<CloudNotebookModel>,
+    model: Arc<NotebookObjectModel>,
     raw_text: Option<Arc<str>>,
 }
 
@@ -27,14 +27,14 @@ pub(crate) struct NotebooksSnapshot {
 
 /// Creates an async data source for cloud notebooks.
 ///
-/// The snapshot captures `Arc<CloudNotebookModel>` and `Arc<str>` (raw text) per notebook,
+/// The snapshot captures `Arc<NotebookObjectModel>` and `Arc<str>` (raw text) per notebook,
 /// avoiding deep clones of notebook data on each keystroke.
 pub fn notebooks_data_source() -> AsyncSnapshotDataSource<NotebooksSnapshot, CommandSearchItemAction>
 {
     AsyncSnapshotDataSource::new(
         |query: &Query, app: &AppContext| {
             let notebook_manager = NotebookManager::as_ref(app);
-            let candidates: Vec<NotebookMatchCandidate> = CloudModel::as_ref(app)
+            let candidates: Vec<NotebookMatchCandidate> = ObjectStoreModel::as_ref(app)
                 .get_all_active_notebooks()
                 .map(|notebook| NotebookMatchCandidate {
                     id: notebook.id,

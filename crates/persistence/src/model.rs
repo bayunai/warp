@@ -774,13 +774,13 @@ pub struct UserProfile {
 
 #[derive(Insertable)]
 #[diesel(table_name = cloud_objects_refreshes)]
-pub struct NewCloudObjectsRefresh {
+pub struct NewObjectStoreRefresh {
     pub time_of_next_refresh: NaiveDateTime,
 }
 
 #[derive(Identifiable, Queryable)]
 #[diesel(table_name = cloud_objects_refreshes)]
-pub struct CloudObjectsRefresh {
+pub struct ObjectStoreRefresh {
     pub id: i32,
     pub time_of_next_refresh: NaiveDateTime,
 }
@@ -993,9 +993,8 @@ pub struct AgentConversationData {
     /// The local conversation ID of the parent conversation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_conversation_id: Option<String>,
-    /// The server-assigned run identifier (`ai_tasks.id`) for v2 orchestration.
-    /// For local agents this arrives via StreamInit; for cloud agents it will
-    /// come from SpawnAgentResponse once the local→cloud spawn path is wired.
+    /// The run identifier for v2 orchestration. For local agents this arrives
+    /// via StreamInit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

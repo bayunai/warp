@@ -1,30 +1,19 @@
 //! Common utilities for agent SDK commands.
 
 use std::future::Future;
-use std::sync::Arc;
-use std::time::Duration;
 
 use futures::TryFutureExt;
 
-use warp_cli::agent::Harness;
 use warpui::r#async::FutureExt;
-use warpui::{AppContext, GetSingletonModelHandle, SingletonEntity as _, UpdateModel};
+use warpui::{AppContext, SingletonEntity as _};
 
-use crate::ai::agent::conversation::ServerAIConversationMetadata;
-use crate::ai::agent_sdk::driver::{AgentDriverError, WARP_DRIVE_SYNC_TIMEOUT};
-use crate::ai::ambient_agents::AmbientAgentTaskId;
+use crate::ai::agent_sdk::driver::WARP_DRIVE_SYNC_TIMEOUT;
 
 use crate::ai::llms::{LLMId, LLMPreferences};
 use crate::auth::AuthStateProvider;
-use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::cloud_object::Owner;
-use crate::server::server_api::ai::AIClient;
-use crate::server::server_api::ServerApiProvider;
-use crate::workspaces::update_manager::TeamUpdateManager;
 use crate::workspaces::user_workspaces::UserWorkspaces;
-
-/// How long to wait for workspace metadata to refresh.
-pub const WORKSPACE_METADATA_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn validate_agent_mode_base_model_id(
     model_id: &str,
@@ -52,28 +41,7 @@ pub fn validate_agent_mode_base_model_id(
     }
 }
 
-pub(super) fn parse_ambient_task_id(
-    run_id: &str,
-    error_prefix: &str,
-) -> anyhow::Result<AmbientAgentTaskId> {
-    run_id
-        .parse()
-        .map_err(|err| anyhow::anyhow!("{error_prefix} '{run_id}': {err}"))
-}
-
-pub(super) fn set_ambient_task_context_from_run_id(
-    ctx: &AppContext,
-    run_id: &str,
-) -> anyhow::Result<AmbientAgentTaskId> {
-    let task_id = parse_ambient_task_id(run_id, "Invalid run ID")?;
-    ServerApiProvider::handle(ctx)
-        .as_ref(ctx)
-        .get_local_client()
-        .set_ambient_agent_task_id(Some(task_id));
-    Ok(task_id)
-}
-
-/// Resolve the owner of a new cloud object. This resolution is based on the CLI `--team` and `--personal` flags.
+/// Resolve the owner of a new object. This resolution is based on the CLI `--team` and `--personal` flags.
 ///
 /// If `team_flag` is true, attempts to get the current team UID (errors if not on a team).
 /// If `user_flag` is true, gets the current user's UID.
@@ -109,57 +77,21 @@ pub fn resolve_owner(team_flag: bool, user_flag: bool, ctx: &AppContext) -> anyh
 
 /// Refresh workspace metadata before executing an operation.
 ///
-/// This ensures that team state is up-to-date before creating cloud objects or performing
-/// other operations that depend on team membership.
+/// This keeps workspace state fresh before operations that depend on team membership.
 pub fn refresh_workspace_metadata<C>(
-    ctx: &mut C,
-) -> impl Future<Output = anyhow::Result<()>> + Send + 'static
-where
-    C: GetSingletonModelHandle + UpdateModel,
-{
-    let refresh_future = TeamUpdateManager::handle(ctx).update(ctx, |manager, ctx| {
-        manager
-            .refresh_workspace_metadata(ctx)
-            .with_timeout(WORKSPACE_METADATA_REFRESH_TIMEOUT)
-    });
-
-    async move {
-        let _ = refresh_future
-            .await
-            .map_err(|_| anyhow::anyhow!("Timed out refreshing team metadata"))?;
-        Ok(())
-    }
+    _ctx: &mut C,
+) -> impl Future<Output = anyhow::Result<()>> + Send + 'static {
+    async { Ok(()) }
 }
 
 /// Refresh Warp Drive before executing an operation.
 pub fn refresh_warp_drive(
     ctx: &AppContext,
 ) -> impl Future<Output = anyhow::Result<()>> + Send + 'static {
-    CloudModel::as_ref(ctx)
+    ObjectStoreModel::as_ref(ctx)
         .initial_load_complete()
         .with_timeout(WARP_DRIVE_SYNC_TIMEOUT)
         .map_err(|_| anyhow::anyhow!("Timed out waiting for Warp Drive to sync"))
-}
-
-/// Fetch the conversation's server metadata and validate that its harness matches the caller's
-/// `--harness` choice. Returns the metadata on success so the caller can reuse it (e.g. for the
-/// server conversation token).
-///
-/// Called up-front before any task/config-build logic consumes `args.harness`, so a mismatch
-/// error surfaces before side effects like task creation. We deliberately do NOT auto-upgrade
-/// the harness: `Harness::Oz` default with a Claude conversation id is treated as a mismatch
-/// and errors out.
-pub(super) async fn fetch_and_validate_conversation_harness(
-    _ai_client: Arc<dyn AIClient>,
-    conversation_id: &str,
-    _args_harness: Harness,
-) -> Result<ServerAIConversationMetadata, AgentDriverError> {
-    // Conversation metadata fetching from the cloud was removed alongside the
-    // `CloudConversations` feature. The `--conversation` CLI argument therefore
-    // can no longer resolve any cloud-stored conversation in OpenWarp.
-    Err(AgentDriverError::ConversationLoadFailed(format!(
-        "conversation {conversation_id} not found: cloud conversations are disabled in OpenWarp"
-    )))
 }
 
 /// Format an object owner for display in the CLI.
@@ -183,25 +115,4 @@ pub enum ResolveConfigurationError {
     ObjectNotFound { id: String, kind: &'static str },
     #[error(transparent)]
     Other(anyhow::Error),
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_ambient_task_id;
-
-    #[test]
-    fn parse_ambient_task_id_accepts_valid_ids() {
-        let task_id =
-            parse_ambient_task_id("550e8400-e29b-41d4-a716-446655440000", "Invalid run ID")
-                .unwrap();
-
-        assert_eq!(task_id.to_string(), "550e8400-e29b-41d4-a716-446655440000");
-    }
-
-    #[test]
-    fn parse_ambient_task_id_preserves_error_prefix() {
-        let err = parse_ambient_task_id("not-a-run-id", "Invalid run ID").unwrap_err();
-
-        assert!(err.to_string().contains("Invalid run ID 'not-a-run-id'"));
-    }
 }

@@ -19,10 +19,10 @@ use warpui::{
 
 use crate::{
     cloud_object::{
-        model::{persistence::CloudModel, view::CloudViewModel},
-        CloudObject, CloudObjectMetadataExt, Owner,
+        model::{persistence::ObjectStoreModel, view::ObjectStoreViewModel},
+        Owner, StoredObject, StoredObjectMetadataExt,
     },
-    drive::CloudObjectTypeAndId,
+    drive::ObjectTypeAndId,
     workspaces::{user_profiles::UserProfiles, user_workspaces::UserWorkspaces},
 };
 
@@ -49,7 +49,7 @@ use crate::{
         },
     },
 };
-use crate::{cloud_object::CloudObjectLocation, drive::items::WarpDriveItem};
+use crate::{cloud_object::StoredObjectLocation, drive::items::WarpDriveItem};
 
 use super::WarpDriveItemId;
 
@@ -247,7 +247,7 @@ impl<'a> WarpDriveRow<'a> {
 
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_cloud_object(
-        object: &dyn CloudObject,
+        object: &dyn StoredObject,
         item_states: ItemStates,
         space: Space,
         folder_depth: usize,
@@ -433,11 +433,13 @@ impl<'a> WarpDriveRow<'a> {
             return None;
         };
 
-        if CloudViewModel::as_ref(app).object_space(&object_id.uid(), app) != Some(Space::Shared) {
+        if ObjectStoreViewModel::as_ref(app).object_space(&object_id.uid(), app)
+            != Some(Space::Shared)
+        {
             return None;
         }
 
-        let owner = CloudModel::as_ref(app)
+        let owner = ObjectStoreModel::as_ref(app)
             .get_by_uid(&object_id.uid())?
             .permissions()
             .owner;
@@ -609,9 +611,7 @@ impl<'a> WarpDriveRow<'a> {
     fn render_icon(&self, style: UiComponentStyles) -> Box<dyn Element> {
         let icon_to_render = match self.item.warp_drive_id() {
             // This sets the icon color of folders correctly in color contrast cases, e.g. being dragged or focused
-            WarpDriveItemId::Object(CloudObjectTypeAndId::Folder(_))
-                if style == self.styles.dragged =>
-            {
+            WarpDriveItemId::Object(ObjectTypeAndId::Folder(_)) if style == self.styles.dragged => {
                 self.item
                     .icon(self.appearance, Some(style.font_color.unwrap().into()))
             }
@@ -634,7 +634,7 @@ impl<'a> WarpDriveRow<'a> {
 
     fn render_secondary_icon(&self, style: UiComponentStyles) -> Box<dyn Element> {
         let icon_to_render = match self.item.warp_drive_id() {
-            WarpDriveItemId::Object(CloudObjectTypeAndId::Folder(_)) => self
+            WarpDriveItemId::Object(ObjectTypeAndId::Folder(_)) => self
                 .item
                 .secondary_icon(Some(style.font_color.unwrap().into())),
             _ => self.item.secondary_icon(None),
@@ -835,12 +835,12 @@ impl UiComponent for WarpDriveRow<'_> {
                             .with_drag_bounds_callback(drag_bounds_callback())
                             .with_accepted_by_drop_target_fn(move |drop_data, app| {
                                 let Some(location) =
-                                    drop_data.as_any().downcast_ref::<CloudObjectLocation>()
+                                    drop_data.as_any().downcast_ref::<StoredObjectLocation>()
                                 else {
                                     return AcceptedByDropTarget::No;
                                 };
-                                let cloud_model = CloudModel::handle(app);
-                                if cloud_model.as_ref(app).can_move_object_to_location(
+                                let object_store_model = ObjectStoreModel::handle(app);
+                                if object_store_model.as_ref(app).can_move_object_to_location(
                                     &item.uid(),
                                     *location,
                                     app,
@@ -852,10 +852,10 @@ impl UiComponent for WarpDriveRow<'_> {
                             })
                             .on_drop(move |ctx, _, _, data| {
                                 if let Some(location) = data.and_then(|data| {
-                                    data.as_any().downcast_ref::<CloudObjectLocation>()
+                                    data.as_any().downcast_ref::<StoredObjectLocation>()
                                 }) {
                                     ctx.dispatch_typed_action(DriveIndexAction::DropIndexItem {
-                                        cloud_object_type_and_id: item,
+                                        object_type_and_id: item,
                                         drop_target_location: *location,
                                     });
                                 }
@@ -863,7 +863,7 @@ impl UiComponent for WarpDriveRow<'_> {
                             .on_drag(move |ctx, _, dragged_item, data| {
                                 // First, check if we are over a drop target for styling
                                 if let Some(location) = data.and_then(|data| {
-                                    data.as_any().downcast_ref::<CloudObjectLocation>()
+                                    data.as_any().downcast_ref::<StoredObjectLocation>()
                                 }) {
                                     ctx.dispatch_typed_action(
                                         DriveIndexAction::UpdateCurrentDropTarget {

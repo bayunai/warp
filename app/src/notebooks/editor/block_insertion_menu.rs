@@ -18,8 +18,8 @@ use warpui::{
 
 use crate::{
     appearance::Appearance,
-    cloud_object::{model::persistence::CloudModel, ObjectIdType, Space},
-    drive::CloudObjectTypeAndId,
+    cloud_object::{model::persistence::ObjectStoreModel, ObjectIdType, Space},
+    drive::ObjectTypeAndId,
     menu::{self, Menu, MenuItemFields},
     notebooks::telemetry::EmbeddedObjectInfo,
     search::notebook_embedding::{
@@ -229,7 +229,7 @@ impl RichTextEditorView {
             }),
             ctx,
         );
-        let team_uid = CloudModel::as_ref(ctx)
+        let team_uid = ObjectStoreModel::as_ref(ctx)
             .get_workflow(id)
             .and_then(|workflow| workflow.permissions.owner.into());
         ctx.emit(EditorViewEvent::InsertedEmbeddedObject(
@@ -242,13 +242,13 @@ impl RichTextEditorView {
 
     /// Insert an embedded notebook inline view at the current insertion menu source.
     fn insert_embedded_notebook(&mut self, id: &SyncId, ctx: &mut ViewContext<Self>) {
-        let (title, link) = CloudModel::handle(ctx).read(ctx, |model, _| {
+        let (title, link) = ObjectStoreModel::handle(ctx).read(ctx, |model, _| {
             let title = model
                 .get_notebook(id)
                 .map(|notebook| notebook.model().title.clone())
                 .unwrap_or_else(|| "Untitled".to_string());
             let link = model
-                .get_by_uid(&CloudObjectTypeAndId::Notebook(*id).uid())
+                .get_by_uid(&ObjectTypeAndId::Notebook(*id).uid())
                 .and_then(|object| object.object_link());
             (title, link)
         });

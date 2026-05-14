@@ -10,25 +10,25 @@
 //! * 外溢使用 `RequestLimitInfo` / `RequestUsageInfo` / `BonusGrant` /
 //!   `BonusGrantScope` / `RequestLimitRefreshDuration` /
 //!   `BuyCreditsBannerDisplayState` / `AIRequestUsageModelEvent` /
-//!   `AMBIENT_AGENT_TRIAL_CREDIT_THRESHOLD` 的文件(`server/server_api/ai.rs`、
-//!   `workspaces/gql_convert.rs`、`ai_assistant/requests.rs`、`ai_assistant/mod.rs`、
+//!   `AMBIENT_AGENT_TRIAL_CREDIT_THRESHOLD` 的文件(`workspaces/gql_convert.rs`、
+//!   `ai_assistant/requests.rs`、`ai_assistant/mod.rs`、
 //!   `settings/ai.rs`、`settings/ai_tests.rs`、`workspace/bonus_grant_notification_model.rs`、
-//!   `workspace/view/free_tier_limit_hit_modal.rs`、`settings_view/ai_page.rs`、
+//!   `settings_view/ai_page.rs`、
 //!   `terminal/view/ambient_agent/first_time_setup.rs`、`agent_view/agent_message_bar.rs`)
 //!   不在本任务写入域内 → 必须在 stub 内继续保留这些类型定义与等价构造能力,
 //!   只剥离 RPC / 缓存 / 计量等业务逻辑。
 
-use crate::workspaces::workspace::WorkspaceUid;
+use crate::{server_time::ServerTimestamp, workspaces::workspace::WorkspaceUid};
 use chrono::{DateTime, Utc};
 use instant::Instant;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use warp_graphql::scalars::time::ServerTimestamp;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
-pub use warp_graphql::billing::BonusGrantType;
-
-use crate::server::server_api::ai::AIClient;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BonusGrantType {
+    AmbientOnly,
+    Any,
+}
 
 /// Threshold of ambient-only credits at which we surface upgrade/CTA UI。
 ///
@@ -125,19 +125,15 @@ impl RequestLimitInfo {
 }
 
 /// 历史:服务端 `getRequestLimitInfo` 返回的聚合结构。
-/// OpenWarp:仅作为类型壳保留(`server/server_api/ai.rs`、`ai_assistant/requests.rs`
-/// 仍会构造此类型)。`AIRequestUsageModel` 不再消费它。
+/// OpenWarp:仅作为类型壳保留(`ai_assistant/requests.rs` 仍会构造此类型)。
+/// `AIRequestUsageModel` 不再消费它。
 pub struct RequestUsageInfo {
     pub request_limit_info: RequestLimitInfo,
     pub bonus_grants: Vec<BonusGrant>,
 }
 
-/// OpenWarp:Model 不再持有任何状态;`ai_client` 仅保留以兼容
-/// `lib.rs::initialize_app` 中 `AIRequestUsageModel::new(ai_client, ctx)` 的注入签名。
-pub struct AIRequestUsageModel {
-    #[allow(unused)] // 仅保留为占位:30+ 调用点的注入签名兼容性
-    ai_client: Arc<dyn AIClient>,
-}
+/// OpenWarp:Model 不再持有任何状态。
+pub struct AIRequestUsageModel;
 
 impl Entity for AIRequestUsageModel {
     type Event = AIRequestUsageModelEvent;
@@ -155,13 +151,13 @@ pub enum AIRequestUsageModelEvent {
 }
 
 impl AIRequestUsageModel {
-    pub fn new(ai_client: Arc<dyn AIClient>, _ctx: &mut ModelContext<Self>) -> Self {
-        Self { ai_client }
+    pub fn new(_ctx: &mut ModelContext<Self>) -> Self {
+        Self
     }
 
     #[cfg(test)]
-    pub fn new_for_test(ai_client: Arc<dyn AIClient>, _ctx: &mut ModelContext<Self>) -> Self {
-        Self { ai_client }
+    pub fn new_for_test(_ctx: &mut ModelContext<Self>) -> Self {
+        Self
     }
 
     pub fn last_update_time(&self) -> Option<Instant> {

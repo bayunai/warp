@@ -12,135 +12,14 @@ pub struct ChannelConfig {
     /// The name of the file to which logs should be written.
     pub logfile_name: Cow<'static, str>,
 
-    /// Configuration for talking to Warp's servers.
-    pub server_config: WarpServerConfig,
-    /// Configuration for Oz/ambient agents.
-    pub oz_config: OzConfig,
-    /// Configuration for telemetry sending, or [`None`] if telemetry should be
-    /// disabled for this build.
-    pub telemetry_config: Option<TelemetryConfig>,
     /// Configuration for autoupdate functionality.
     pub autoupdate_config: Option<AutoupdateConfig>,
-    /// Configuration for crash reporting.
-    pub crash_reporting_config: Option<CrashReportingConfig>,
     /// Configuration for statically-bundled MCP OAuth credentials.
     pub mcp_static_config: Option<McpStaticConfig>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct WarpServerConfig {
-    /// The root URL for the standard server pool.
-    pub server_root_url: Cow<'static, str>,
-    /// The URL for the RTC server, which serves real-time updates for Warp Drive objects.
-    pub rtc_server_url: Cow<'static, str>,
-    /// The URL for the session sharing server, or [`None`] if session sharing is not
-    /// supported.
-    pub session_sharing_server_url: Option<Cow<'static, str>>,
-    /// The API key to use when making requests to Firebase Authentication endpoints.
-    pub firebase_auth_api_key: Cow<'static, str>,
-}
-
-impl WarpServerConfig {
-    pub fn production() -> Self {
-        Self {
-            server_root_url: "https://app.warp.dev".into(),
-            rtc_server_url: "wss://rtc.app.warp.dev/graphql/v2".into(),
-            session_sharing_server_url: Some("wss://sessions.app.warp.dev".into()),
-            firebase_auth_api_key: "AIzaSyBdy3O3S9hrdayLJxJ7mriBR4qgUaUygAs".into(),
-        }
-    }
-
-    pub fn disabled() -> Self {
-        Self {
-            server_root_url: DISABLED_HTTP_SENTINEL.into(),
-            rtc_server_url: DISABLED_WS_SENTINEL.into(),
-            session_sharing_server_url: None,
-            firebase_auth_api_key: "".into(),
-        }
-    }
-
-    /// Returns true when this config is the openWarp disabled stub (no real
-    /// cloud endpoints). Phase 0 of the cloud-removal plan uses this as the
-    /// canonical guard so subsequent phases can short-circuit cloud init
-    /// without spreading hard-coded IP checks across the codebase.
-    pub fn is_disabled(&self) -> bool {
-        self.server_root_url == DISABLED_HTTP_SENTINEL
-    }
-}
-
-/// RFC 5737 TEST-NET-1 sentinel used to mark openWarp's no-op cloud config.
-/// Hard-coded in [`WarpServerConfig::disabled`] / [`OzConfig::disabled`];
-/// matched by [`WarpServerConfig::is_disabled`] / [`OzConfig::is_disabled`].
+#[cfg(not(feature = "test-util"))]
 pub(crate) const DISABLED_HTTP_SENTINEL: &str = "http://192.0.2.0:9";
-pub(crate) const DISABLED_WS_SENTINEL: &str = "ws://192.0.2.0:9/graphql/v2";
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct OzConfig {
-    /// Root URL for the Oz (ambient agent management) dashboard.
-    pub oz_root_url: Cow<'static, str>,
-
-    /// URL to use as the audience when issuing workload identity tokens. If [`None`], falls back
-    /// to [`WarpServerConfig::server_root_url`]. This exists so the audience is not overridden
-    /// when a custom server root URL is provided (e.g. an ngrok URL for local development).
-    pub workload_audience_url: Option<Cow<'static, str>>,
-}
-
-impl OzConfig {
-    pub fn production() -> Self {
-        Self {
-            oz_root_url: "https://oz.warp.dev".into(),
-            workload_audience_url: None,
-        }
-    }
-
-    pub fn disabled() -> Self {
-        Self {
-            oz_root_url: DISABLED_HTTP_SENTINEL.into(),
-            workload_audience_url: Some(DISABLED_HTTP_SENTINEL.into()),
-        }
-    }
-
-    pub fn is_disabled(&self) -> bool {
-        self.oz_root_url == DISABLED_HTTP_SENTINEL
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct TelemetryConfig {
-    /// The name of the file in which not-yet-sent telemetry events will be stored.
-    pub telemetry_file_name: Cow<'static, str>,
-    /// Configuration for Rudderstack, for reporting telemetry events.
-    pub rudderstack_config: Option<RudderStackConfig>,
-}
-
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct RudderStackConfig {
-    pub write_key: Cow<'static, str>,
-    pub root_url: Cow<'static, str>,
-    pub ugc_write_key: Cow<'static, str>,
-}
-
-impl RudderStackConfig {
-    pub fn non_ugc_destination(&self) -> RudderStackDestination {
-        RudderStackDestination {
-            root_url: self.root_url.clone(),
-            write_key: self.write_key.clone(),
-        }
-    }
-
-    pub fn ugc_destination(&self) -> RudderStackDestination {
-        RudderStackDestination {
-            root_url: self.root_url.clone(),
-            write_key: self.ugc_write_key.clone(),
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct RudderStackDestination {
-    pub root_url: Cow<'static, str>,
-    pub write_key: Cow<'static, str>,
-}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct AutoupdateConfig {
@@ -148,12 +27,6 @@ pub struct AutoupdateConfig {
     pub releases_base_url: Cow<'static, str>,
     /// Whether or not to display menu items relating to autoupdate.
     pub show_autoupdate_menu_items: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct CrashReportingConfig {
-    /// The URL/DSN for sending error logs and crash reports to Sentry.
-    pub sentry_url: Cow<'static, str>,
 }
 
 /// Configuration for statically-bundled MCP OAuth credentials.
@@ -177,57 +50,12 @@ pub struct McpOAuthProviderConfig {
     pub client_secret: Cow<'static, str>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "test-util")))]
 mod tests {
     use super::*;
 
     #[test]
-    fn warp_server_config_disabled_is_disabled() {
-        assert!(WarpServerConfig::disabled().is_disabled());
-    }
-
-    #[test]
-    fn warp_server_config_production_is_not_disabled() {
-        assert!(!WarpServerConfig::production().is_disabled());
-    }
-
-    #[test]
-    fn warp_server_config_real_url_is_not_disabled() {
-        let cfg = WarpServerConfig {
-            server_root_url: "https://app.warp.dev".into(),
-            rtc_server_url: "wss://rtc.app.warp.dev/graphql/v2".into(),
-            session_sharing_server_url: None,
-            firebase_auth_api_key: "".into(),
-        };
-        assert!(!cfg.is_disabled());
-    }
-
-    #[test]
-    fn oz_config_disabled_is_disabled() {
-        assert!(OzConfig::disabled().is_disabled());
-    }
-
-    #[test]
-    fn oz_config_production_is_not_disabled() {
-        assert!(!OzConfig::production().is_disabled());
-    }
-
-    #[test]
-    fn disabled_sentinels_match_legacy_literals() {
-        // Lock the sentinel strings: any future change here is a breaking
-        // change for the cloud-removal short-circuit and must be intentional.
+    fn disabled_http_sentinel_matches_legacy_literal() {
         assert_eq!(DISABLED_HTTP_SENTINEL, "http://192.0.2.0:9");
-        assert_eq!(DISABLED_WS_SENTINEL, "ws://192.0.2.0:9/graphql/v2");
-
-        let server = WarpServerConfig::disabled();
-        assert_eq!(server.server_root_url, "http://192.0.2.0:9");
-        assert_eq!(server.rtc_server_url, "ws://192.0.2.0:9/graphql/v2");
-
-        let oz = OzConfig::disabled();
-        assert_eq!(oz.oz_root_url, "http://192.0.2.0:9");
-        assert_eq!(
-            oz.workload_audience_url.as_deref(),
-            Some("http://192.0.2.0:9")
-        );
     }
 }

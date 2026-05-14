@@ -1,7 +1,6 @@
-﻿use std::sync::Arc;
+use std::sync::Arc;
 
 use super::super::controller::{BlocklistAIController, BlocklistAIControllerEvent};
-use crate::ai::agent::api::generate_multi_agent_output;
 use crate::ai::agent::AIIdentifiers;
 use crate::ai::agent::FileContext;
 use crate::ai::agent::PassiveCodeDiffEntry;
@@ -15,7 +14,6 @@ use crate::ai::blocklist::{
 };
 use crate::ai::paths::host_native_absolute_path;
 use crate::auth::AuthStateProvider;
-use crate::server::server_api::ServerApiProvider;
 use crate::settings::AISettings;
 use crate::terminal::event::{BlockType, UserBlockCompleted};
 use crate::terminal::model::session::active_session::ActiveSession;
@@ -155,7 +153,7 @@ impl PassiveSuggestionsModel {
         // Capture before the call — `Some` means there's a real conversation
         // the user can continue in; `None` means ephemeral.
         let continuable_conversation_id = followup_conversation_id;
-        let Ok((conversation_id, request_params)) =
+        let Ok((conversation_id, _request_params)) =
             self.ai_controller.update(ctx, |controller, ctx| {
                 controller.build_passive_suggestions_request_params(
                     followup_conversation_id,
@@ -168,14 +166,15 @@ impl PassiveSuggestionsModel {
             return;
         };
 
-        let server_api = ServerApiProvider::as_ref(ctx).get();
+        log::debug!(
+            "[passive-suggestions] skipped MAA request because the multi-agent endpoint is disabled in OpenWarp"
+        );
         let (cancellation_tx, cancellation_rx) = futures::channel::oneshot::channel();
 
         let stream_handle = ctx.spawn(
             async move {
-                let stream_result =
-                    generate_multi_agent_output(server_api, request_params, cancellation_rx).await;
-                extract_suggestion_from_stream(stream_result).await
+                let _ = cancellation_rx;
+                None
             },
             move |me, result, ctx| {
                 let Some(latest_request) = &me.latest_request else {
@@ -402,7 +401,7 @@ impl PassiveSuggestionsModel {
             return;
         }
 
-        // Suppress passive suggestions in cloud mode sessions.
+        // Suppress passive suggestions in ambient-agent sessions.
         if self.ambient_agent_view_model.as_ref(ctx).is_ambient_agent() {
             return;
         }
@@ -451,23 +450,11 @@ impl PassiveSuggestionsModel {
         ctx: &mut ModelContext<Self>,
     ) {
         self.abort_pending_requests(ctx);
-        // Suppress passive suggestions in cloud mode sessions.
+        // Suppress passive suggestions in ambient-agent sessions.
         if self.ambient_agent_view_model.as_ref(ctx).is_ambient_agent() {
             return;
         }
 
-        // Startup commands run while bootstrapping an Oz cloud environment, so we skip
-        // passive prompt suggestion generation for them to avoid unnecessary requests.
-        let is_oz_environment_startup_command = FeatureFlag::CloudModeSetupV2.is_enabled()
-            && self
-                .terminal_model
-                .lock()
-                .block_list()
-                .block_at(block_completed.index)
-                .is_some_and(|block| block.is_oz_environment_startup_command());
-        if is_oz_environment_startup_command {
-            return;
-        }
         let is_prompt_suggestions_enabled = is_prompt_suggestions_enabled(ctx);
         let is_passive_code_diffs_enabled = is_passive_code_diffs_enabled(ctx);
         if !is_prompt_suggestions_enabled && !is_passive_code_diffs_enabled {

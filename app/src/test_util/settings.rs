@@ -19,10 +19,11 @@ pub fn initialize_settings_for_tests_with_mode(
         settings::{
             app_icon::AppIconSettings, init_and_register_user_preferences,
             manager::SettingsManager, AISettings, AccessibilitySettings, AliasExpansionSettings,
-            AppEditorSettings, BlockVisibilitySettings, CloudPreferencesSettings, CodeSettings,
-            DebugSettings, EmacsBindingsSettings, FontSettings, GPUSettings, InputModeSettings,
-            InputSettings, NativePreferenceSettings, PaneSettings, SameLinePromptBlockSettings,
-            ScrollSettings, SelectionSettings, SshSettings, ThemeSettings, VimBannerSettings,
+            AppEditorSettings, BlockVisibilitySettings, CodeSettings, DebugSettings,
+            EmacsBindingsSettings, FontSettings, GPUSettings, InputModeSettings, InputSettings,
+            NativePreferenceSettings, PaneSettings, PreferencesSettings,
+            SameLinePromptBlockSettings, ScrollSettings, SelectionSettings, SshSettings,
+            ThemeSettings, VimBannerSettings,
         },
         terminal::{
             general_settings::GeneralSettings, keys_settings::KeysSettings,
@@ -46,11 +47,11 @@ pub fn initialize_settings_for_tests_with_mode(
     AccessibilitySettings::register(app);
     app.update(AISettings::register_and_subscribe_to_events);
     AliasExpansionSettings::register(app);
-    // OpenWarp Wave 7-3:`CloudAgentSettings` 随 Cloud Mode UI 子系统物理删。
+    // OpenWarp Wave 7-3:`AmbientAgentSettings` 随 ambient-agent UI 子系统物理删。
     AppEditorSettings::register(app);
     BlockVisibilitySettings::register(app);
     BlockListSettings::register(app);
-    CloudPreferencesSettings::register(app);
+    PreferencesSettings::register(app);
     CommandSearchSettings::register(app);
     DebugSettings::register(app);
     AppIconSettings::register(app);

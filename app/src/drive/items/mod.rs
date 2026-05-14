@@ -2,7 +2,7 @@ use warpui::{elements::MouseStateHandle, AppContext, Element};
 
 use crate::{
     appearance::Appearance,
-    cloud_object::{CloudObjectMetadata, Space},
+    cloud_object::{Space, StoredObjectMetadata},
     themes::theme::Fill,
     ui_components::icons::Icon,
 };
@@ -10,7 +10,7 @@ use crate::{
 use super::{
     cloud_object_styling::warp_drive_icon_color,
     index::{warp_drive_section_header_position_id, DriveIndexAction, DriveIndexSection},
-    CloudObjectTypeAndId, DriveObjectType,
+    DriveObjectType, ObjectTypeAndId,
 };
 
 pub mod ai_fact;
@@ -28,7 +28,7 @@ pub trait WarpDriveItem {
     /// The display name of the item. If the item is unnamed, this may return `None` - implementations
     /// should prefer this over `Some("")`, as it lets the index view use alternate styling.
     fn display_name(&self) -> Option<String>;
-    fn metadata(&self) -> Option<&CloudObjectMetadata>;
+    fn metadata(&self) -> Option<&StoredObjectMetadata>;
     fn object_type(&self) -> Option<DriveObjectType>;
     fn secondary_icon(&self, color: Option<Fill>) -> Option<Box<dyn Element>>; // The optional icon to the right of the name
     fn click_action(&self) -> Option<DriveIndexAction>;
@@ -72,12 +72,12 @@ impl WarpDriveItemId {
     }
 }
 /// This uniquely identifies an item in Warp Drive index
-/// Includes spaces (which CloudObjectTypeAndId does not entail)
+/// Includes spaces (which ObjectTypeAndId does not entail)
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum WarpDriveItemId {
     AIFactCollection,
     MCPServerCollection,
-    Object(CloudObjectTypeAndId),
+    Object(ObjectTypeAndId),
     Space(Space),
     Trash,
 }

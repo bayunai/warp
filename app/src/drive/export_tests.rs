@@ -13,13 +13,13 @@ use warpui::{AddSingletonModel, App, SingletonEntity, WindowId};
 
 use crate::{
     cloud_object::{
-        model::persistence::CloudModel, CloudObjectMetadata, CloudObjectPermissions, ObjectIdType,
-        ObjectType, Space,
+        model::persistence::ObjectStoreModel, ObjectIdType, ObjectType, Space,
+        StoredObjectMetadata, StoredObjectPermissions,
     },
-    drive::CloudObjectTypeAndId,
-    notebooks::{CloudNotebook, CloudNotebookModel, NotebookId},
+    drive::ObjectTypeAndId,
+    notebooks::{NotebookId, NotebookObject, NotebookObjectModel},
     server::ids::SyncId,
-    workflows::{workflow::Workflow, CloudWorkflow, CloudWorkflowModel, WorkflowId},
+    workflows::{workflow::Workflow, WorkflowId, WorkflowObject, WorkflowObjectModel},
     workspace::ToastStack,
     workspaces::user_workspaces::UserWorkspaces,
 };
@@ -63,7 +63,7 @@ impl ExportTest {
     /// Starts exporting an object into the temporary directory.
     fn start_export(
         &self,
-        export_ids: CloudObjectTypeAndId,
+        export_ids: ObjectTypeAndId,
         app: &mut App,
     ) -> (ExportId, oneshot::Receiver<ExportEvent>) {
         let id = ExportId(export_ids, Space::Personal);
@@ -102,7 +102,7 @@ impl ExportTest {
 }
 
 fn initialize_app(app: &mut App) {
-    app.add_singleton_model(CloudModel::mock);
+    app.add_singleton_model(ObjectStoreModel::mock);
     app.add_singleton_model(ExportManager::new);
     app.add_singleton_model(UserWorkspaces::default_mock);
     app.add_singleton_model(|_| ToastStack);
@@ -110,14 +110,14 @@ fn initialize_app(app: &mut App) {
 
 /// Add a mocked workflow.
 fn add_workflow(id: SyncId, workflow: Workflow, app: &mut App) {
-    CloudModel::handle(app).update(app, |cloud_model, _ctx| {
-        cloud_model.add_object(
+    ObjectStoreModel::handle(app).update(app, |object_store_model, _ctx| {
+        object_store_model.add_object(
             id,
-            CloudWorkflow::new(
+            WorkflowObject::new(
                 id,
-                CloudWorkflowModel::new(workflow),
-                CloudObjectMetadata::mock(),
-                CloudObjectPermissions::mock_personal(),
+                WorkflowObjectModel::new(workflow),
+                StoredObjectMetadata::mock(),
+                StoredObjectPermissions::mock_personal(),
             ),
         );
     });
@@ -125,19 +125,19 @@ fn add_workflow(id: SyncId, workflow: Workflow, app: &mut App) {
 
 /// Add a mocked notebook.
 fn add_notebook(id: SyncId, title: impl Into<String>, data: impl Into<String>, app: &mut App) {
-    CloudModel::handle(app).update(app, |cloud_model, _ctx| {
-        cloud_model.add_object(
+    ObjectStoreModel::handle(app).update(app, |object_store_model, _ctx| {
+        object_store_model.add_object(
             id,
-            CloudNotebook::new(
+            NotebookObject::new(
                 id,
-                CloudNotebookModel {
+                NotebookObjectModel {
                     title: title.into(),
                     data: data.into(),
                     ai_document_id: None,
                     conversation_id: None,
                 },
-                CloudObjectMetadata::mock(),
-                CloudObjectPermissions::mock_personal(),
+                StoredObjectMetadata::mock(),
+                StoredObjectPermissions::mock_personal(),
             ),
         );
     });
@@ -154,7 +154,7 @@ fn test_export_workflow_success() {
 
         let exporter = ExportTest::new(&mut app);
         let (id, export) = exporter.start_export(
-            CloudObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
+            ObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
             &mut app,
         );
         let expected_path = exporter.path("Test workflow.yaml", None, &app);
@@ -206,7 +206,7 @@ fn test_export_workflow_duplicate() {
         .expect("failed to write existing workflow");
 
         let (id, export) = exporter.start_export(
-            CloudObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
+            ObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
             &mut app,
         );
         let expected_path = exporter.path("Test workflow (1).yaml", None, &app);
@@ -259,7 +259,7 @@ fn test_export_workflow_failure() {
         fs::remove_dir_all(exporter.target_dir.path()).expect("Could not remove test directory");
 
         let (id, export) = exporter.start_export(
-            CloudObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
+            ObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
             &mut app,
         );
 
@@ -301,7 +301,7 @@ print("hello")
 
         let exporter = ExportTest::new(&mut app);
         let (id, export) = exporter.start_export(
-            CloudObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
+            ObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
             &mut app,
         );
         let expected_path = exporter.path("Test notebook.md", None, &app);
@@ -356,7 +356,7 @@ fn test_export_untitled_notebook() {
 
         let exporter = ExportTest::new(&mut app);
         let (id, export) = exporter.start_export(
-            CloudObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
+            ObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
             &mut app,
         );
         let expected_path = exporter.path("Untitled.md", None, &app);
@@ -387,7 +387,7 @@ fn test_export_with_special_characters() {
 
         let exporter = ExportTest::new(&mut app);
         let (id, export) = exporter.start_export(
-            CloudObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
+            ObjectTypeAndId::from_id_and_type(workflow_id, ObjectType::Workflow),
             &mut app,
         );
         let expected_path = exporter.path("Prefix_ Some_workflow.yaml", None, &app);
@@ -445,9 +445,9 @@ fn test_export_multiple_objects() {
 
         // Prepare export IDs for all three objects
         let export_ids = vec![
-            CloudObjectTypeAndId::from_id_and_type(workflow_id1, ObjectType::Workflow),
-            CloudObjectTypeAndId::from_id_and_type(workflow_id2, ObjectType::Workflow),
-            CloudObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
+            ObjectTypeAndId::from_id_and_type(workflow_id1, ObjectType::Workflow),
+            ObjectTypeAndId::from_id_and_type(workflow_id2, ObjectType::Workflow),
+            ObjectTypeAndId::from_id_and_type(notebook_id, ObjectType::Notebook),
         ];
 
         // Create channels for all exports

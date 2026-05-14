@@ -1,9 +1,12 @@
 use crate::ai::agent::SuggestedRule;
-use crate::ai::facts::CloudAIFactModel;
+use crate::ai::facts::AIFactObjectModel;
 use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
-use crate::cloud_object::model::persistence::{CloudModel, CloudModelEvent};
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
+use crate::cloud_object::update_manager::{
+    ObjectOperation, OperationSuccessType, UpdateManagerEvent,
+};
 use crate::cloud_object::Owner;
-use crate::drive::CloudObjectTypeAndId;
+use crate::drive::ObjectTypeAndId;
 use crate::editor::{
     EditorOptions, EditorView, EnterAction, EnterSettings, Event as EditorEvent, InteractionState,
     PropagateAndNoOpNavigationKeys, SingleLineEditorOptions, TextOptions,
@@ -11,16 +14,13 @@ use crate::editor::{
 use crate::modal::{Modal, ModalEvent};
 use crate::network::NetworkStatus;
 use crate::send_telemetry_from_ctx;
-use crate::server::cloud_objects::update_manager::{
-    ObjectOperation, OperationSuccessType, UpdateManagerEvent,
-};
 use crate::server::ids::SyncId;
 use crate::server::telemetry::TelemetryEvent;
 use crate::view_components::action_button::{ActionButton, PrimaryTheme};
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::{
     ai::facts::{AIFact, AIMemory},
-    server::cloud_objects::update_manager::UpdateManager,
+    cloud_object::update_manager::UpdateManager,
     ui_components::blended_colors,
 };
 use pathfinder_geometry::vector::vec2f;
@@ -244,9 +244,9 @@ impl SuggestedRuleView {
             me.handle_update_manager_event(event, ctx);
         });
 
-        let cloud_model = CloudModel::handle(ctx);
-        ctx.subscribe_to_model(&cloud_model, |me, _, event, ctx| {
-            me.handle_cloud_model_event(event, ctx);
+        let object_model = ObjectStoreModel::handle(ctx);
+        ctx.subscribe_to_model(&object_model, |me, _, event, ctx| {
+            me.handle_object_store_event(event, ctx);
         });
 
         let owner = UserWorkspaces::as_ref(ctx).personal_drive(ctx);
@@ -426,7 +426,7 @@ impl SuggestedRuleView {
                             rule: rule_and_id.rule.clone(),
                             sync_id: SyncId::ServerId(server_id),
                         });
-                        // Reload the rule from the cloud model.
+                        // Reload the rule from the local object store.
                         self.load_rule(ctx);
                     }
                 }
@@ -434,10 +434,10 @@ impl SuggestedRuleView {
         }
     }
 
-    fn handle_cloud_model_event(&mut self, event: &CloudModelEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_object_store_event(&mut self, event: &ObjectStoreEvent, ctx: &mut ViewContext<Self>) {
         match event {
-            CloudModelEvent::ObjectUpdated {
-                type_and_id: CloudObjectTypeAndId::GenericStringObject { id, .. },
+            ObjectStoreEvent::ObjectUpdated {
+                type_and_id: ObjectTypeAndId::GenericStringObject { id, .. },
                 ..
             } => {
                 if let Some(rule_and_id) = &self.rule_and_id {
@@ -446,12 +446,12 @@ impl SuggestedRuleView {
                     }
                 }
             }
-            CloudModelEvent::ObjectTrashed {
-                type_and_id: CloudObjectTypeAndId::GenericStringObject { id, .. },
+            ObjectStoreEvent::ObjectTrashed {
+                type_and_id: ObjectTypeAndId::GenericStringObject { id, .. },
                 ..
             }
-            | CloudModelEvent::ObjectDeleted {
-                type_and_id: CloudObjectTypeAndId::GenericStringObject { id, .. },
+            | ObjectStoreEvent::ObjectDeleted {
+                type_and_id: ObjectTypeAndId::GenericStringObject { id, .. },
                 ..
             } => {
                 // If the rule has been deleted, then we should reset the rule such that
@@ -490,16 +490,16 @@ impl SuggestedRuleView {
         ctx.notify();
     }
 
-    /// Fetches the rule from the cloud model, and updates the UI to reflect that.
+    /// Fetches the rule from the local object store, and updates the UI to reflect that.
     fn load_rule(&mut self, ctx: &mut ViewContext<Self>) {
         let Some(SuggestedRuleAndId { sync_id, .. }) = &self.rule_and_id else {
             return;
         };
 
-        let cloud_model = CloudModel::handle(ctx);
-        if let Some(rule) = cloud_model
+        let object_model = ObjectStoreModel::handle(ctx);
+        if let Some(rule) = object_model
             .as_ref(ctx)
-            .get_object_of_type::<GenericStringObjectId, CloudAIFactModel>(sync_id)
+            .get_object_of_type::<GenericStringObjectId, AIFactObjectModel>(sync_id)
         {
             let AIFact::Memory(AIMemory { name, content, .. }) = rule.model().string_model.clone();
             self.name_editor.update(ctx, |name_editor, ctx| {

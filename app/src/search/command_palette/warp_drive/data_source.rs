@@ -1,13 +1,13 @@
 use super::env_var_collection_search_item::EnvVarCollectionSearchItem;
 use super::notebook_search_item::NotebookSearchItem;
 use super::workflow_search_item::WorkflowSearchItem;
-use crate::cloud_object::model::persistence::{CloudModel, CloudModelEvent};
+use crate::cloud_object::model::persistence::{ObjectStoreEvent, ObjectStoreModel};
 use crate::cloud_object::{
-    CloudObject, CloudObjectLocation, GenericStringObjectFormat, JsonObjectType, ObjectType,
+    GenericStringObjectFormat, JsonObjectType, ObjectType, StoredObject, StoredObjectLocation,
 };
-use crate::drive::folders::CloudFolder;
-use crate::env_vars::CloudEnvVarCollection;
-use crate::notebooks::CloudNotebook;
+use crate::drive::folders::FolderObject;
+use crate::env_vars::EnvVarCollectionObject;
+use crate::notebooks::NotebookObject;
 use crate::search::command_palette::mixer::CommandPaletteItemAction;
 use crate::search::data_source::{DataSourceSearchError, Query, QueryResult};
 use crate::search::env_var_collections::fuzzy_match::FuzzyMatchEnvVarCollectionResult;
@@ -17,7 +17,7 @@ use crate::search::workflows::fuzzy_match::FuzzyMatchWorkflowResult;
 use crate::search::QueryFilter;
 use crate::server::ids::{ObjectUid, SyncId};
 use crate::settings::AISettings;
-use crate::workflows::CloudWorkflow;
+use crate::workflows::WorkflowObject;
 use std::collections::HashMap;
 use warpui::{AppContext, Entity, ModelContext, SingletonEntity};
 
@@ -42,7 +42,10 @@ impl DataSource {
     }
 
     pub fn new_fuzzy(ctx: &mut ModelContext<Self>) -> Self {
-        ctx.subscribe_to_model(&CloudModel::handle(ctx), Self::handle_cloud_object_updated);
+        ctx.subscribe_to_model(
+            &ObjectStoreModel::handle(ctx),
+            Self::handle_cloud_object_updated,
+        );
         let mut searcher = Box::new(FuzzyWarpDriveSearcher::default());
         searcher.refresh_search_index(ctx).unwrap_or_else(|err| {
             log::error!("Error refreshing search index: {err:?}");
@@ -52,7 +55,10 @@ impl DataSource {
 
     #[cfg(not(target_family = "wasm"))]
     fn new_full_text(ctx: &mut ModelContext<Self>) -> Self {
-        ctx.subscribe_to_model(&CloudModel::handle(ctx), Self::handle_cloud_object_updated);
+        ctx.subscribe_to_model(
+            &ObjectStoreModel::handle(ctx),
+            Self::handle_cloud_object_updated,
+        );
         let mut searcher = Box::new(full_text_searcher::FullTextWarpDriveSearcher::new(
             ctx.background_executor(),
         ));
@@ -64,13 +70,13 @@ impl DataSource {
 
     fn handle_cloud_object_updated(
         &mut self,
-        event: &CloudModelEvent,
+        event: &ObjectStoreEvent,
         ctx: &mut ModelContext<Self>,
     ) {
         // When the initial bulk load completes, rebuild the entire search index once.
         // Per-object events are suppressed at the source during initial load, so this
         // is the only event we receive from that batch.
-        if let CloudModelEvent::InitialLoadCompleted = event {
+        if let ObjectStoreEvent::InitialLoadCompleted = event {
             self.searcher
                 .refresh_search_index(ctx)
                 .unwrap_or_else(|err| {
@@ -80,11 +86,11 @@ impl DataSource {
         }
 
         match event {
-            CloudModelEvent::ObjectCreated { type_and_id }
-            | CloudModelEvent::ObjectUntrashed { type_and_id, .. }
-            | CloudModelEvent::ObjectMoved { type_and_id, .. }
-            | CloudModelEvent::ObjectUpdated { type_and_id, .. } => {
-                if let Some(obj) = CloudModel::as_ref(ctx).get_by_uid(&type_and_id.uid()) {
+            ObjectStoreEvent::ObjectCreated { type_and_id }
+            | ObjectStoreEvent::ObjectUntrashed { type_and_id, .. }
+            | ObjectStoreEvent::ObjectMoved { type_and_id, .. }
+            | ObjectStoreEvent::ObjectUpdated { type_and_id, .. } => {
+                if let Some(obj) = ObjectStoreModel::as_ref(ctx).get_by_uid(&type_and_id.uid()) {
                     // Insertion will overwrite the object if it already exists.
                     self.searcher
                         .insert_searchable_object(obj, type_and_id.object_type(), ctx)
@@ -92,39 +98,15 @@ impl DataSource {
                             log::error!("Error inserting object into search index: {err:?}");
                         });
                 } else {
-                    log::error!("Object with ID {type_and_id:?} not found in CloudModel");
+                    log::error!("Object with ID {type_and_id:?} not found in ObjectStoreModel");
                 }
             }
-            CloudModelEvent::ObjectTrashed { type_and_id, .. } => self
+            ObjectStoreEvent::ObjectTrashed { type_and_id, .. } => self
                 .searcher
                 .delete_searchable_object(type_and_id.uid(), type_and_id.object_type(), ctx)
                 .unwrap_or_else(|err| {
                     log::error!("Error deleting object from search index: {err:?}");
                 }),
-            CloudModelEvent::ObjectSynced {
-                type_and_id,
-                client_id,
-                server_id,
-            } => {
-                let Some(cloud_object) = CloudModel::as_ref(ctx).get_by_uid(&server_id.uid())
-                else {
-                    return;
-                };
-
-                // Ensure the index is updated with the new server ID (any operations using old client ID will fail
-                // when reading from the CloudModel once the object is synced).
-                self.searcher
-                    .delete_searchable_object(client_id.to_string(), type_and_id.object_type(), ctx)
-                    .unwrap_or_else(|err| {
-                        log::warn!("Error deleting object from search index: {err:?}");
-                    });
-
-                self.searcher
-                    .insert_searchable_object(cloud_object, type_and_id.object_type(), ctx)
-                    .unwrap_or_else(|err| {
-                        log::warn!("Error inserting object into search index: {err:?}");
-                    });
-            }
             _ => {}
         }
     }
@@ -243,24 +225,24 @@ impl DataSource {
         sync_id: &SyncId,
         app: &AppContext,
     ) -> Option<QueryResult<CommandPaletteItemAction>> {
-        let object = CloudModel::as_ref(app).get_by_uid(&sync_id.uid())?;
-        let workflow: Option<&CloudWorkflow> = object.into();
+        let object = ObjectStoreModel::as_ref(app).get_by_uid(&sync_id.uid())?;
+        let workflow: Option<&WorkflowObject> = object.into();
         if let Some(workflow) = workflow {
             return Some(QueryResult::from(WorkflowSearchItem {
                 match_result: FuzzyMatchWorkflowResult::no_match(),
-                cloud_workflow: workflow.clone(),
+                workflow: workflow.clone(),
             }));
         }
 
-        let notebook: Option<&CloudNotebook> = object.into();
+        let notebook: Option<&NotebookObject> = object.into();
         if let Some(notebook) = notebook {
             return Some(QueryResult::from(NotebookSearchItem {
                 match_result: FuzzyMatchNotebookResult::no_match(),
-                cloud_notebook: notebook.clone(),
+                notebook: notebook.clone(),
             }));
         }
 
-        let env_var_collection: Option<&CloudEnvVarCollection> = object.into();
+        let env_var_collection: Option<&EnvVarCollectionObject> = object.into();
         if let Some(env_var_collection) = env_var_collection {
             return Some(QueryResult::from(EnvVarCollectionSearchItem {
                 match_result: FuzzyMatchEnvVarCollectionResult::no_match(),
@@ -279,7 +261,7 @@ impl Entity for DataSource {
 trait WarpDriveSearcher {
     fn insert_searchable_object(
         &mut self,
-        object: &dyn CloudObject,
+        object: &dyn StoredObject,
         object_type: ObjectType,
         app: &AppContext,
     ) -> anyhow::Result<()>;
@@ -323,56 +305,56 @@ trait WarpDriveSearcher {
 
 #[derive(Default)]
 struct FuzzyWarpDriveSearcher {
-    notebooks: HashMap<ObjectUid, CloudNotebook>,
-    workflows: HashMap<ObjectUid, CloudWorkflow>,
-    env_vars: HashMap<ObjectUid, CloudEnvVarCollection>,
+    notebooks: HashMap<ObjectUid, NotebookObject>,
+    workflows: HashMap<ObjectUid, WorkflowObject>,
+    env_vars: HashMap<ObjectUid, EnvVarCollectionObject>,
 }
 
 impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
     fn insert_searchable_object(
         &mut self,
-        object: &dyn CloudObject,
+        object: &dyn StoredObject,
         object_type: ObjectType,
         app: &AppContext,
     ) -> anyhow::Result<()> {
         match object_type {
             ObjectType::Notebook => {
-                let notebook: Option<&CloudNotebook> = object.into();
+                let notebook: Option<&NotebookObject> = object.into();
                 if let Some(notebook) = notebook {
                     self.notebooks.insert(notebook.uid(), notebook.clone());
                 } else {
-                    anyhow::bail!("Expected CloudNotebook, got {:?}", object);
+                    anyhow::bail!("Expected NotebookObject, got {:?}", object);
                 }
             }
             ObjectType::Workflow => {
-                let workflow: Option<&CloudWorkflow> = object.into();
+                let workflow: Option<&WorkflowObject> = object.into();
                 if let Some(workflow) = workflow {
                     self.workflows.insert(workflow.uid(), workflow.clone());
                 } else {
-                    anyhow::bail!("Expected CloudWorkflow, got {:?}", object);
+                    anyhow::bail!("Expected WorkflowObject, got {:?}", object);
                 }
             }
             ObjectType::GenericStringObject(GenericStringObjectFormat::Json(
                 JsonObjectType::EnvVarCollection,
             )) => {
-                let env_var: Option<&CloudEnvVarCollection> = object.into();
+                let env_var: Option<&EnvVarCollectionObject> = object.into();
                 if let Some(env_var) = env_var {
                     self.env_vars.insert(env_var.uid(), env_var.clone());
                 } else {
-                    anyhow::bail!("Expected CloudEnvVarCollection, got {:?}", object);
+                    anyhow::bail!("Expected EnvVarCollectionObject, got {:?}", object);
                 }
             }
             ObjectType::Folder => {
-                let folder: Option<&CloudFolder> = object.into();
+                let folder: Option<&FolderObject> = object.into();
                 if let Some(folder) = folder {
-                    let location = CloudObjectLocation::Folder(folder.id);
-                    for obj in CloudModel::as_ref(app)
+                    let location = StoredObjectLocation::Folder(folder.id);
+                    for obj in ObjectStoreModel::as_ref(app)
                         .active_cloud_objects_in_location_without_descendents(location, app)
                     {
                         self.insert_searchable_object(obj, obj.object_type(), app)?
                     }
                 } else {
-                    anyhow::bail!("Expected CloudFolder, got {:?}", object);
+                    anyhow::bail!("Expected FolderObject, got {:?}", object);
                 }
             }
             // We don't care about other object types for now.
@@ -400,20 +382,20 @@ impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
                 self.env_vars.remove(&uid);
             }
             ObjectType::Folder => {
-                let model = CloudModel::as_ref(app);
+                let model = ObjectStoreModel::as_ref(app);
                 let Some(obj) = model.get_by_uid(&uid) else {
-                    anyhow::bail!("Object with ID {:?} not found in CloudModel", uid);
+                    anyhow::bail!("Object with ID {:?} not found in ObjectStoreModel", uid);
                 };
-                let folder: Option<&CloudFolder> = obj.into();
+                let folder: Option<&FolderObject> = obj.into();
                 if let Some(folder) = folder {
-                    let location = CloudObjectLocation::Folder(folder.id);
+                    let location = StoredObjectLocation::Folder(folder.id);
                     for obj in
                         model.trashed_cloud_objects_in_location_without_descendents(location, app)
                     {
                         self.delete_searchable_object(obj.uid(), obj.object_type(), app)?
                     }
                 } else {
-                    anyhow::bail!("Expected CloudFolder, got {:?}", obj);
+                    anyhow::bail!("Expected FolderObject, got {:?}", obj);
                 }
             }
             // We don't care about other object types for now.
@@ -426,18 +408,18 @@ impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
         self.workflows.clear();
         self.notebooks.clear();
         self.env_vars.clear();
-        let model = CloudModel::as_ref(app);
+        let model = ObjectStoreModel::as_ref(app);
         // Single pass with memoized is_trashed: O(N) instead of O(3×N×D).
         let active_uids = model.active_object_uids();
         for object in model.cloud_objects() {
             if !active_uids.contains(&object.uid()) {
                 continue;
             }
-            if let Some(workflow) = <Option<&CloudWorkflow>>::from(object.as_ref()) {
+            if let Some(workflow) = <Option<&WorkflowObject>>::from(object.as_ref()) {
                 self.workflows.insert(workflow.uid(), workflow.clone());
-            } else if let Some(notebook) = <Option<&CloudNotebook>>::from(object.as_ref()) {
+            } else if let Some(notebook) = <Option<&NotebookObject>>::from(object.as_ref()) {
                 self.notebooks.insert(notebook.uid(), notebook.clone());
-            } else if let Some(env_var) = <Option<&CloudEnvVarCollection>>::from(object.as_ref()) {
+            } else if let Some(env_var) = <Option<&EnvVarCollectionObject>>::from(object.as_ref()) {
                 self.env_vars.insert(env_var.uid(), env_var.clone());
             }
         }
@@ -449,15 +431,15 @@ impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
         query: &str,
         app: &AppContext,
     ) -> anyhow::Result<Vec<NotebookSearchItem>> {
-        let cloud_notebooks = CloudModel::as_ref(app).get_all_active_notebooks();
+        let cloud_notebooks = ObjectStoreModel::as_ref(app).get_all_active_notebooks();
         Ok(cloud_notebooks
-            .filter_map(|cloud_notebook| {
-                FuzzyMatchNotebookResult::try_match(query, cloud_notebook, app).map(
-                    |match_result| NotebookSearchItem {
+            .filter_map(|notebook| {
+                FuzzyMatchNotebookResult::try_match(query, notebook, app).map(|match_result| {
+                    NotebookSearchItem {
                         match_result,
-                        cloud_notebook: cloud_notebook.clone(),
-                    },
-                )
+                        notebook: notebook.clone(),
+                    }
+                })
             })
             .collect())
     }
@@ -467,17 +449,17 @@ impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
         query: &str,
         app: &AppContext,
     ) -> anyhow::Result<Vec<NotebookSearchItem>> {
-        let cloud_notebooks = CloudModel::as_ref(app)
+        let cloud_notebooks = ObjectStoreModel::as_ref(app)
             .get_all_active_notebooks()
             .filter(|notebook| notebook.model().ai_document_id.is_some());
         Ok(cloud_notebooks
-            .filter_map(|cloud_notebook| {
-                FuzzyMatchNotebookResult::try_match(query, cloud_notebook, app).map(
-                    |match_result| NotebookSearchItem {
+            .filter_map(|notebook| {
+                FuzzyMatchNotebookResult::try_match(query, notebook, app).map(|match_result| {
+                    NotebookSearchItem {
                         match_result,
-                        cloud_notebook: cloud_notebook.clone(),
-                    },
-                )
+                        notebook: notebook.clone(),
+                    }
+                })
             })
             .collect())
     }
@@ -489,25 +471,24 @@ impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
         should_include_am_prompts: bool,
         should_include_command_workflow: bool,
     ) -> anyhow::Result<Vec<WorkflowSearchItem>> {
-        let cloud_workflows = CloudModel::as_ref(app).get_all_active_workflows();
+        let cloud_workflows = ObjectStoreModel::as_ref(app).get_all_active_workflows();
 
         Ok(cloud_workflows
-            .filter_map(move |cloud_workflow| {
-                if !should_include_am_prompts
-                    && cloud_workflow.model().data.is_agent_mode_workflow()
+            .filter_map(move |workflow| {
+                if !should_include_am_prompts && workflow.model().data.is_agent_mode_workflow()
                     || !should_include_command_workflow
-                        && cloud_workflow.model().data.is_command_workflow()
+                        && workflow.model().data.is_command_workflow()
                 {
                     return None;
                 };
                 FuzzyMatchWorkflowResult::try_match(
                     query,
-                    &cloud_workflow.model().data,
-                    cloud_workflow.breadcrumbs(app).as_str(),
+                    &workflow.model().data,
+                    workflow.breadcrumbs(app).as_str(),
                 )
                 .map(|match_result| WorkflowSearchItem {
                     match_result,
-                    cloud_workflow: cloud_workflow.clone(),
+                    workflow: workflow.clone(),
                 })
             })
             .collect())
@@ -519,7 +500,7 @@ impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
         app: &AppContext,
     ) -> anyhow::Result<Vec<EnvVarCollectionSearchItem>> {
         let cloud_env_var_collections =
-            CloudModel::as_ref(app).get_all_active_env_var_collections();
+            ObjectStoreModel::as_ref(app).get_all_active_env_var_collections();
 
         Ok(cloud_env_var_collections
             .filter_map(|cloud_env_var_collection| {
@@ -541,15 +522,15 @@ impl WarpDriveSearcher for FuzzyWarpDriveSearcher {
 mod full_text_searcher {
     use std::sync::Arc;
 
-    use crate::cloud_object::model::persistence::CloudModel;
+    use crate::cloud_object::model::persistence::ObjectStoreModel;
     use crate::cloud_object::{
-        CloudObject, CloudObjectLocation, GenericStringObjectFormat, JsonObjectType, ObjectType,
+        GenericStringObjectFormat, JsonObjectType, ObjectType, StoredObject, StoredObjectLocation,
     };
     use crate::define_search_schema;
-    use crate::drive::folders::CloudFolder;
-    use crate::env_vars::CloudEnvVarCollection;
+    use crate::drive::folders::FolderObject;
+    use crate::env_vars::EnvVarCollectionObject;
     use crate::notebooks::manager::NotebookManager;
-    use crate::notebooks::CloudNotebook;
+    use crate::notebooks::NotebookObject;
     use crate::search::command_palette::warp_drive::data_source::WarpDriveSearcher;
     use crate::search::command_palette::warp_drive::env_var_collection_search_item::{
         EnvVarCollectionSearchItem, ENV_VAR_NAME_SEPARATOR,
@@ -561,7 +542,7 @@ mod full_text_searcher {
     use crate::search::searcher::{AsyncSearcher, DEFAULT_MEMORY_BUDGET, SCORE_CONVERSION_FACTOR};
     use crate::search::workflows::fuzzy_match::FuzzyMatchWorkflowResult;
     use crate::server::ids::ObjectUid;
-    use crate::workflows::CloudWorkflow;
+    use crate::workflows::WorkflowObject;
     use fuzzy_match::FuzzyMatchResult;
     use itertools::Itertools;
     use warpui::r#async::executor::Background;
@@ -640,17 +621,17 @@ mod full_text_searcher {
                     .get_all_doc_ids()?
                     .into_iter()
                     .filter_map(|search_match| {
-                        let notebook: Option<&CloudNotebook> = CloudModel::as_ref(app)
+                        let notebook: Option<&NotebookObject> = ObjectStoreModel::as_ref(app)
                             .get_by_uid(&search_match.uid)?
                             .into();
-                        let cloud_notebook = notebook?;
-                        if filter_by_plan && cloud_notebook.model().ai_document_id.is_none() {
+                        let notebook = notebook?;
+                        if filter_by_plan && notebook.model().ai_document_id.is_none() {
                             return None;
                         }
 
                         Some(NotebookSearchItem {
                             match_result: FuzzyMatchNotebookResult::no_match(),
-                            cloud_notebook: cloud_notebook.clone(),
+                            notebook: notebook.clone(),
                         })
                     })
                     .collect());
@@ -661,7 +642,7 @@ mod full_text_searcher {
                 .search_id(query)?
                 .into_iter()
                 .filter_map(|search_match| {
-                    let notebook: Option<&CloudNotebook> = CloudModel::as_ref(app)
+                    let notebook: Option<&NotebookObject> = ObjectStoreModel::as_ref(app)
                         .get_by_uid(&search_match.values.uid)?
                         .into();
                     let notebook = notebook?;
@@ -690,7 +671,7 @@ mod full_text_searcher {
                             content_match_result,
                             folder_match_result,
                         },
-                        cloud_notebook: notebook.clone(),
+                        notebook: notebook.clone(),
                     })
                 })
                 .collect())
@@ -700,13 +681,13 @@ mod full_text_searcher {
     impl WarpDriveSearcher for FullTextWarpDriveSearcher {
         fn insert_searchable_object(
             &mut self,
-            object: &dyn CloudObject,
+            object: &dyn StoredObject,
             object_type: ObjectType,
             app: &AppContext,
         ) -> anyhow::Result<()> {
             match object_type {
                 ObjectType::Notebook => {
-                    let notebook: Option<&CloudNotebook> = object.into();
+                    let notebook: Option<&NotebookObject> = object.into();
                     if let Some(notebook) = notebook {
                         let name = notebook.model().title.to_lowercase();
                         let content = NotebookManager::as_ref(app)
@@ -724,13 +705,13 @@ mod full_text_searcher {
                         };
                         self.notebook_searcher.insert_document_async(document)
                     } else {
-                        anyhow::bail!("Expected CloudNotebook, got {:?}", object);
+                        anyhow::bail!("Expected NotebookObject, got {:?}", object);
                     }
                 }
                 ObjectType::Workflow => {
-                    let workflow: Option<&CloudWorkflow> = object.into();
-                    if let Some(cloud_workflow) = workflow {
-                        let workflow = &cloud_workflow.model().data;
+                    let workflow_object: Option<&WorkflowObject> = object.into();
+                    if let Some(workflow_object) = workflow_object {
+                        let workflow = &workflow_object.model().data;
 
                         let title = workflow.name().to_lowercase();
                         let content = workflow.content().to_lowercase();
@@ -738,24 +719,24 @@ mod full_text_searcher {
                             .description()
                             .unwrap_or(&"".to_owned())
                             .to_lowercase();
-                        let folder = cloud_workflow.breadcrumbs(app).to_lowercase();
+                        let folder = workflow_object.breadcrumbs(app).to_lowercase();
 
                         let document = WorkflowSearchDocument {
                             name: title,
                             content,
                             description,
                             folder,
-                            uid: cloud_workflow.uid(),
+                            uid: workflow_object.uid(),
                         };
                         self.workflow_searcher.insert_document_async(document)
                     } else {
-                        anyhow::bail!("Expected CloudWorkflow, got {:?}", object);
+                        anyhow::bail!("Expected WorkflowObject, got {:?}", object);
                     }
                 }
                 ObjectType::GenericStringObject(GenericStringObjectFormat::Json(
                     JsonObjectType::EnvVarCollection,
                 )) => {
-                    let env_var: Option<&CloudEnvVarCollection> = object.into();
+                    let env_var: Option<&EnvVarCollectionObject> = object.into();
                     if let Some(cloud_env_var) = env_var {
                         let env_var_collection = &cloud_env_var.model().string_model;
 
@@ -786,21 +767,21 @@ mod full_text_searcher {
                         };
                         self.env_var_searcher.insert_document_async(document)
                     } else {
-                        anyhow::bail!("Expected CloudEnvVarCollection, got {:?}", object);
+                        anyhow::bail!("Expected EnvVarCollectionObject, got {:?}", object);
                     }
                 }
                 ObjectType::Folder => {
-                    let folder: Option<&CloudFolder> = object.into();
+                    let folder: Option<&FolderObject> = object.into();
                     if let Some(folder) = folder {
-                        let location = CloudObjectLocation::Folder(folder.id);
-                        for obj in CloudModel::as_ref(app)
+                        let location = StoredObjectLocation::Folder(folder.id);
+                        for obj in ObjectStoreModel::as_ref(app)
                             .active_cloud_objects_in_location_without_descendents(location, app)
                         {
                             self.insert_searchable_object(obj, obj.object_type(), app)?
                         }
                         Ok(())
                     } else {
-                        anyhow::bail!("Expected CloudFolder, got {:?}", object);
+                        anyhow::bail!("Expected FolderObject, got {:?}", object);
                     }
                 }
                 // We don't care about other object types for now.
@@ -833,20 +814,20 @@ mod full_text_searcher {
                         .delete_document_async(identifying_entry)
                 }
                 ObjectType::Folder => {
-                    let Some(obj) = CloudModel::as_ref(app).get_by_uid(&uid) else {
-                        anyhow::bail!("Object with ID {:?} not found in CloudModel", uid);
+                    let Some(obj) = ObjectStoreModel::as_ref(app).get_by_uid(&uid) else {
+                        anyhow::bail!("Object with ID {:?} not found in ObjectStoreModel", uid);
                     };
-                    let folder: Option<&CloudFolder> = obj.into();
+                    let folder: Option<&FolderObject> = obj.into();
                     if let Some(folder) = folder {
-                        let location = CloudObjectLocation::Folder(folder.id);
-                        for obj in CloudModel::as_ref(app)
+                        let location = StoredObjectLocation::Folder(folder.id);
+                        for obj in ObjectStoreModel::as_ref(app)
                             .trashed_cloud_objects_in_location_without_descendents(location, app)
                         {
                             self.delete_searchable_object(obj.uid(), obj.object_type(), app)?
                         }
                         Ok(())
                     } else {
-                        anyhow::bail!("Expected CloudFolder, got {:?}", folder);
+                        anyhow::bail!("Expected FolderObject, got {:?}", folder);
                     }
                 }
                 // We don't care about other object types for now.
@@ -855,7 +836,7 @@ mod full_text_searcher {
         }
 
         fn refresh_search_index(&mut self, app: &AppContext) -> anyhow::Result<()> {
-            let model = CloudModel::as_ref(app);
+            let model = ObjectStoreModel::as_ref(app);
             // Pre-compute active UIDs in a single O(N) pass with memoized is_trashed,
             // instead of 3 separate O(N×D) passes.
             let active_uids = model.active_object_uids();
@@ -865,7 +846,7 @@ mod full_text_searcher {
                 .cloud_objects()
                 .filter(|obj| active_uids.contains(&obj.uid()))
                 .filter_map(|obj| {
-                    let notebook: Option<&CloudNotebook> = obj.as_ref().into();
+                    let notebook: Option<&NotebookObject> = obj.as_ref().into();
                     notebook.map(|notebook| {
                         let name = notebook.model().title.to_lowercase();
                         let content = NotebookManager::as_ref(app)
@@ -889,22 +870,22 @@ mod full_text_searcher {
                 .cloud_objects()
                 .filter(|obj| active_uids.contains(&obj.uid()))
                 .filter_map(|obj| {
-                    let cloud_workflow: Option<&CloudWorkflow> = obj.as_ref().into();
-                    cloud_workflow.map(|cloud_workflow| {
-                        let workflow = &cloud_workflow.model().data;
+                    let workflow_object: Option<&WorkflowObject> = obj.as_ref().into();
+                    workflow_object.map(|workflow_object| {
+                        let workflow = &workflow_object.model().data;
                         let title = workflow.name().to_lowercase();
                         let content = workflow.content().to_lowercase();
                         let description = workflow
                             .description()
                             .unwrap_or(&"".to_owned())
                             .to_lowercase();
-                        let folder = cloud_workflow.breadcrumbs(app).to_lowercase();
+                        let folder = workflow_object.breadcrumbs(app).to_lowercase();
                         WorkflowSearchDocument {
                             name: title,
                             content,
                             description,
                             folder,
-                            uid: cloud_workflow.uid(),
+                            uid: workflow_object.uid(),
                         }
                     })
                 });
@@ -915,7 +896,7 @@ mod full_text_searcher {
                 .cloud_objects()
                 .filter(|obj| active_uids.contains(&obj.uid()))
                 .filter_map(|obj| {
-                    let cloud_env_var: Option<&CloudEnvVarCollection> = obj.as_ref().into();
+                    let cloud_env_var: Option<&EnvVarCollectionObject> = obj.as_ref().into();
                     cloud_env_var.map(|cloud_env_var| {
                         let env_var_collection = &cloud_env_var.model().string_model;
                         let title = env_var_collection
@@ -978,11 +959,12 @@ mod full_text_searcher {
                     .get_all_doc_ids()?
                     .into_iter()
                     .filter_map(|search_match| {
-                        let cloud_workflow: Option<&CloudWorkflow> = CloudModel::as_ref(app)
-                            .get_by_uid(&search_match.uid)?
-                            .into();
-                        let cloud_workflow = cloud_workflow?;
-                        let workflow = &cloud_workflow.model().data;
+                        let workflow_object: Option<&WorkflowObject> =
+                            ObjectStoreModel::as_ref(app)
+                                .get_by_uid(&search_match.uid)?
+                                .into();
+                        let workflow_object = workflow_object?;
+                        let workflow = &workflow_object.model().data;
 
                         if !should_include_am_prompts && workflow.is_agent_mode_workflow()
                             || !should_include_command_workflow && workflow.is_command_workflow()
@@ -992,7 +974,7 @@ mod full_text_searcher {
 
                         Some(WorkflowSearchItem {
                             match_result: FuzzyMatchWorkflowResult::no_match(),
-                            cloud_workflow: cloud_workflow.clone(),
+                            workflow: workflow_object.clone(),
                         })
                     })
                     .collect());
@@ -1003,11 +985,11 @@ mod full_text_searcher {
                 .search_id(query)?
                 .into_iter()
                 .filter_map(|search_match| {
-                    let cloud_workflow: Option<&CloudWorkflow> = CloudModel::as_ref(app)
+                    let workflow_object: Option<&WorkflowObject> = ObjectStoreModel::as_ref(app)
                         .get_by_uid(&search_match.values.uid)?
                         .into();
-                    let cloud_workflow = cloud_workflow?;
-                    let workflow = &cloud_workflow.model().data;
+                    let workflow_object = workflow_object?;
+                    let workflow = &workflow_object.model().data;
 
                     if !should_include_am_prompts && workflow.is_agent_mode_workflow()
                         || !should_include_command_workflow && workflow.is_command_workflow()
@@ -1040,7 +1022,7 @@ mod full_text_searcher {
                             description_match_result,
                             folder_match_result,
                         },
-                        cloud_workflow: cloud_workflow.clone(),
+                        workflow: workflow_object.clone(),
                     })
                 })
                 .collect())
@@ -1057,8 +1039,8 @@ mod full_text_searcher {
                     .get_all_doc_ids()?
                     .into_iter()
                     .filter_map(|search_match| {
-                        let env_var_collection: Option<&CloudEnvVarCollection> =
-                            CloudModel::as_ref(app)
+                        let env_var_collection: Option<&EnvVarCollectionObject> =
+                            ObjectStoreModel::as_ref(app)
                                 .get_by_uid(&search_match.uid)?
                                 .into();
                         let env_var_collection = env_var_collection?;
@@ -1076,8 +1058,8 @@ mod full_text_searcher {
                 .search_id(query)?
                 .into_iter()
                 .filter_map(|search_match| {
-                    let env_var_collection: Option<&CloudEnvVarCollection> =
-                        CloudModel::as_ref(app)
+                    let env_var_collection: Option<&EnvVarCollectionObject> =
+                        ObjectStoreModel::as_ref(app)
                             .get_by_uid(&search_match.values.uid)?
                             .into();
                     let env_var_collection = env_var_collection?;

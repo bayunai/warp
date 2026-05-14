@@ -7,10 +7,10 @@ use crate::{
             generic_string_model::{GenericStringModel, GenericStringObjectId, StringModel},
             json_model::{JsonModel, JsonSerializer},
         },
-        GenericCloudObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
-        JsonObjectType, ServerCloudObject,
+        GenericStoredObject, GenericStringObjectFormat, GenericStringObjectUniqueKey,
+        JsonObjectType,
     },
-    drive::CloudObjectTypeAndId,
+    drive::ObjectTypeAndId,
 };
 use serde::{Deserialize, Serialize};
 use warp_core::ui::appearance::Appearance;
@@ -46,11 +46,11 @@ impl AIFact {
     }
 }
 
-pub type CloudAIFact = GenericCloudObject<GenericStringObjectId, CloudAIFactModel>;
-pub type CloudAIFactModel = GenericStringModel<AIFact, JsonSerializer>;
+pub type AIFactObject = GenericStoredObject<GenericStringObjectId, AIFactObjectModel>;
+pub type AIFactObjectModel = GenericStringModel<AIFact, JsonSerializer>;
 
 impl StringModel for AIFact {
-    type CloudObjectType = CloudAIFact;
+    type StoredObjectType = AIFactObject;
 
     fn model_type_name(&self) -> &'static str {
         "Rule"
@@ -78,13 +78,6 @@ impl StringModel for AIFact {
         }
     }
 
-    fn new_from_server_update(&self, server_cloud_object: &ServerCloudObject) -> Option<Self> {
-        if let ServerCloudObject::AIFact(server_ai_fact) = server_cloud_object {
-            return Some(server_ai_fact.model.clone().string_model);
-        }
-        None
-    }
-
     fn uniqueness_key(&self) -> Option<GenericStringObjectUniqueKey> {
         None
     }
@@ -97,10 +90,10 @@ impl StringModel for AIFact {
         &self,
         id: SyncId,
         _appearance: &Appearance,
-        ai_fact: &CloudAIFact,
+        ai_fact: &AIFactObject,
     ) -> Option<Box<dyn WarpDriveItem>> {
         Some(Box::new(WarpDriveAIFact::new(
-            CloudObjectTypeAndId::GenericStringObject {
+            ObjectTypeAndId::GenericStringObject {
                 object_type: GenericStringObjectFormat::Json(JsonObjectType::AIFact),
                 id,
             },

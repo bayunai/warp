@@ -10,23 +10,23 @@ use crate::{
     appearance::Appearance,
     cloud_object::{
         model::actions::{ObjectActionType, ObjectActions},
-        CloudObjectMetadata,
+        StoredObjectMetadata,
     },
-    drive::{index::DriveIndexAction, CloudObjectTypeAndId, DriveObjectType},
+    drive::{index::DriveIndexAction, DriveObjectType, ObjectTypeAndId},
     themes::theme::Fill,
-    workflows::{CloudWorkflow, WorkflowViewMode},
+    workflows::{WorkflowObject, WorkflowViewMode},
 };
 
 use super::{WarpDriveItem, WarpDriveItemId};
 
 #[derive(Clone)]
 pub struct WarpDriveWorkflow {
-    id: CloudObjectTypeAndId,
-    workflow: CloudWorkflow,
+    id: ObjectTypeAndId,
+    workflow: WorkflowObject,
 }
 
 impl WarpDriveWorkflow {
-    pub fn new(id: CloudObjectTypeAndId, workflow: CloudWorkflow) -> Self {
+    pub fn new(id: ObjectTypeAndId, workflow: WorkflowObject) -> Self {
         Self { id, workflow }
     }
 }
@@ -40,7 +40,7 @@ impl WarpDriveItem for WarpDriveWorkflow {
         }
     }
 
-    fn metadata(&self) -> Option<&CloudObjectMetadata> {
+    fn metadata(&self) -> Option<&StoredObjectMetadata> {
         Some(&self.workflow.metadata)
     }
 
@@ -61,7 +61,7 @@ impl WarpDriveItem for WarpDriveWorkflow {
             // If we are in a context where we can't run workflows, open it in view mode
             // by default
             Some(DriveIndexAction::OpenWorkflowInPane {
-                cloud_object_type_and_id: self.id,
+                object_type_and_id: self.id,
                 open_mode: WorkflowViewMode::View,
             })
         } else {

@@ -1,5 +1,5 @@
 //! Harness selector: an "options menu" (`ActionButton` + generic `Menu<A>`) shown
-//! in a row above the cloud mode input that lets the user switch between the Oz
+//! in a row above the ambient-agent input that lets the user switch between the Oz
 //! and Claude Code harnesses.
 
 use std::sync::Arc;
@@ -71,7 +71,7 @@ pub enum HarnessSelectorEvent {
     MenuVisibilityChanged { open: bool },
 }
 
-/// A dropdown selector for choosing which execution harness to run cloud agent
+/// A dropdown selector for choosing which execution harness to run the ambient agent.
 /// prompts with.
 pub struct HarnessSelector {
     button: ViewHandle<ActionButton>,

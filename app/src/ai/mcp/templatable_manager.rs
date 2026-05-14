@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 #[cfg(not(target_family = "wasm"))]
-use crate::ai::mcp::templatable::CloudTemplatableMCPServer;
+use crate::ai::mcp::templatable::TemplatableMCPServerObject;
 use crate::ai::mcp::FileBasedMCPManager;
 use crate::ai::mcp::{templatable_installation::TemplatableMCPServerInstallation, MCPServerState};
 use futures_util::stream::AbortHandle;
@@ -40,7 +40,7 @@ type ReconnectResultSender =
 #[derive(Default)]
 pub struct TemplatableMCPServerManager {
     #[cfg(not(target_family = "wasm"))]
-    cloud_templatable_mcp_servers: HashMap<Uuid, CloudTemplatableMCPServer>,
+    templatable_mcp_server_objects: HashMap<Uuid, TemplatableMCPServerObject>,
     locally_installed_servers: HashMap<Uuid, TemplatableMCPServerInstallation>,
     server_states: HashMap<Uuid, MCPServerState>,
     active_servers: HashMap<Uuid, TemplatableMCPServerInfo>,
@@ -84,7 +84,7 @@ pub struct TemplatableMCPServerManager {
     cli_spawned_server_uuids: HashSet<Uuid>,
 }
 
-/// Information about a spawned server task.
+/// Information about a spawned agent task.
 #[cfg_attr(target_family = "wasm", allow(dead_code))]
 struct SpawnedServerInfo {
     abort_handle: AbortHandle,

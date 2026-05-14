@@ -3,10 +3,10 @@ use warpui::{elements::MouseStateHandle, AppContext, Element};
 
 use crate::{
     appearance::Appearance,
-    cloud_object::CloudObjectMetadata,
+    cloud_object::StoredObjectMetadata,
     drive::{
-        cloud_object_styling::warp_drive_icon_color, folders::CloudFolder, index::DriveIndexAction,
-        CloudObjectTypeAndId, DriveObjectType,
+        cloud_object_styling::warp_drive_icon_color, folders::FolderObject,
+        index::DriveIndexAction, DriveObjectType, ObjectTypeAndId,
     },
     themes::theme::Fill,
     ui_components::icons::Icon,
@@ -16,12 +16,12 @@ use super::{WarpDriveItem, WarpDriveItemId};
 
 #[derive(Clone)]
 pub struct WarpDriveFolder {
-    id: CloudObjectTypeAndId,
-    folder: CloudFolder,
+    id: ObjectTypeAndId,
+    folder: FolderObject,
 }
 
 impl WarpDriveFolder {
-    pub fn new(id: CloudObjectTypeAndId, folder: CloudFolder) -> Self {
+    pub fn new(id: ObjectTypeAndId, folder: FolderObject) -> Self {
         Self { id, folder }
     }
 }
@@ -35,7 +35,7 @@ impl WarpDriveItem for WarpDriveFolder {
         }
     }
 
-    fn metadata(&self) -> Option<&CloudObjectMetadata> {
+    fn metadata(&self) -> Option<&StoredObjectMetadata> {
         Some(&self.folder.metadata)
     }
 

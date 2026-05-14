@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     cloud_object::{
-        model::{persistence::CloudModel, view::CloudViewModel},
+        model::{persistence::ObjectStoreModel, view::ObjectStoreViewModel},
         Space,
     },
     server::ids::{ClientId, HashableId as _, SyncId},
@@ -215,7 +215,7 @@ pub struct History {
 
 #[derive(Clone, Debug)]
 pub enum LinkedWorkflowData {
-    /// The history entry is linked to a `CloudWorkflow` by its ID.
+    /// The history entry is linked to a `WorkflowObject` by its ID.
     Id(SyncId),
 
     /// The history entry is linked to a local `Workflow` by its command.
@@ -230,13 +230,13 @@ impl LinkedWorkflowData {
     pub fn linked_workflow(&self, ctx: &AppContext) -> Option<(WorkflowType, WorkflowSource)> {
         match self {
             LinkedWorkflowData::Id(id) => {
-                let cloud_model = CloudModel::as_ref(ctx);
-                let workflow = cloud_model.get_workflow(id);
-                let workflow_source = match CloudViewModel::as_ref(ctx).object_space(&id.uid(), ctx)
-                {
-                    Some(Space::Team { team_uid }) => WorkflowSource::Team { team_uid },
-                    _ => WorkflowSource::PersonalCloud,
-                };
+                let object_store_model = ObjectStoreModel::as_ref(ctx);
+                let workflow = object_store_model.get_workflow(id);
+                let workflow_source =
+                    match ObjectStoreViewModel::as_ref(ctx).object_space(&id.uid(), ctx) {
+                        Some(Space::Team { team_uid }) => WorkflowSource::Team { team_uid },
+                        _ => WorkflowSource::PersonalCloud,
+                    };
                 workflow.map(|workflow| {
                     (
                         WorkflowType::Cloud(Box::new(workflow.clone())),
@@ -269,7 +269,7 @@ pub struct HistoryEntry {
     pub git_head: Option<String>,
     pub shell_host: Option<ShellHost>,
 
-    /// The ID of the `CloudWorkflow` used to construct this command.
+    /// The ID of the `WorkflowObject` used to construct this command.
     workflow_id: Option<SyncId>,
 
     /// The templated command contained in the `Workflow` used to construct the executed
@@ -390,7 +390,7 @@ impl HistoryEntry {
     /// workflow using `self.workflow_command`, if any.
     pub fn linked_workflow(&self, app: &AppContext) -> Option<Workflow> {
         match (&self.workflow_id, &self.workflow_command) {
-            (Some(workflow_id), _) => CloudModel::as_ref(app)
+            (Some(workflow_id), _) => ObjectStoreModel::as_ref(app)
                 .get_workflow(workflow_id)
                 .map(|workflow| workflow.model().data.clone()),
             (_, Some(workflow_command)) => LocalWorkflows::as_ref(app)

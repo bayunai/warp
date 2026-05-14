@@ -6,7 +6,6 @@ use crate::ai::blocklist::{RequestInput, ResponseStreamId, SerializedBlockListIt
 use crate::code_review::CodeReviewTelemetryEvent;
 use crate::notebooks::NotebookId;
 use crate::persistence::model::{ConversationUsageMetadata, ModelTokenUsage, ToolUsageMetadata};
-use crate::server::ids::ServerId;
 use crate::terminal::general_settings::GeneralSettings;
 use crate::terminal::model::block::{
     AgentInteractionMetadata, AgentViewVisibility, BlockId, SerializedAIMetadata, SerializedBlock,
@@ -168,13 +167,6 @@ pub struct AIConversation {
     /// The server conversation ID of the source conversation if this conversation was forked.
     forked_from_server_conversation_token: Option<ServerConversationToken>,
 
-    /// Metadata from the server for this conversation (permissions, timestamps, etc.).
-    /// This is None for new conversations and gets populated after the first response completes.
-    /// TODO (roland): server_conversation_token, conversation_usage_metadata, and artifacts are duplicated in here.
-    /// Those are updated via stream events on init and finished respectively, while this is fetched via graphQL
-    /// Consider consolidating by having the stream events return this whole metadata
-    server_metadata: Option<ServerAIConversationMetadata>,
-
     /// The active transaction for this conversation, if any.
     transaction: Option<Transaction>,
 
@@ -266,7 +258,6 @@ impl AIConversation {
             server_conversation_token: None,
             task_id: None,
             forked_from_server_conversation_token: None,
-            server_metadata: None,
             transaction: None,
             autoexecute_override: Default::default(),
             added_exchanges_by_response: Default::default(),
@@ -458,7 +449,6 @@ impl AIConversation {
             server_conversation_token,
             task_id: run_id.as_deref().and_then(|id| id.parse().ok()),
             forked_from_server_conversation_token,
-            server_metadata: None,
             transaction: None,
             autoexecute_override,
             added_exchanges_by_response: Default::default(),
@@ -775,20 +765,6 @@ impl AIConversation {
     /// This ensures we only send the forked_from token once during session sharing.
     pub(crate) fn clear_forked_from_server_conversation_token(&mut self) {
         self.forked_from_server_conversation_token = None;
-    }
-
-    pub fn server_id(&self) -> Option<ServerId> {
-        self.server_metadata
-            .as_ref()
-            .map(|metadata| metadata.metadata.uid)
-    }
-
-    pub fn server_metadata(&self) -> Option<&ServerAIConversationMetadata> {
-        self.server_metadata.as_ref()
-    }
-
-    pub fn set_server_metadata(&mut self, metadata: ServerAIConversationMetadata) {
-        self.server_metadata = Some(metadata);
     }
 
     pub fn parent_agent_id(&self) -> Option<&str> {
@@ -2042,7 +2018,7 @@ impl AIConversation {
 
                     if let Some(optimistic_subtask) = optimistic_cli_subagent_subtask {
                         log::debug!(
-                            "Upgrading optimistically created subtask with ID {:?} to server task with ID {:?}",
+                            "Upgrading optimistically created subtask with ID {:?} to confirmed task with ID {:?}",
                             optimistic_subtask.id(),
                             task.id
                         );
@@ -2056,7 +2032,7 @@ impl AIConversation {
                         )?;
                         ctx.emit(BlocklistAIHistoryEvent::UpgradedTask {
                             optimistic_id: optimistic_id.clone(),
-                            server_id: server_subtask.id().clone(),
+                            confirmed_task_id: server_subtask.id().clone(),
                             terminal_view_id,
                         });
 
@@ -2179,7 +2155,7 @@ impl AIConversation {
                         )?;
                         ctx.emit(BlocklistAIHistoryEvent::UpgradedTask {
                             optimistic_id: old_id,
-                            server_id: root_task.id().clone(),
+                            confirmed_task_id: root_task.id().clone(),
                             terminal_view_id,
                         });
 
@@ -3555,7 +3531,7 @@ pub enum UpdateConversationError {
     ExchangeNotFound,
     #[error("Could not update task: {0:?}")]
     UpdateTask(#[from] UpdateTaskError),
-    #[error("Could not update upgrade optimistic task for server task: {0:?}")]
+    #[error("Could not update optimistic task with confirmed task: {0:?}")]
     UpgradeOptimisticTask(#[from] UpgradeOptimisticTaskError),
     #[error("Could not extract messages: {0:?}")]
     ExtractMessages(#[from] ExtractMessagesError),
@@ -3631,8 +3607,7 @@ pub struct AIAgentConversationFormat {
     pub block_snapshot: Option<AIAgentSerializedBlockFormat>,
 }
 
-/// Metadata for an AI conversation, containing all information from the GraphQL API
-/// except the full task list data.
+/// Metadata for an AI conversation, containing restore data outside the full task list data.
 #[derive(Debug, Clone)]
 pub struct ServerAIConversationMetadata {
     /// The title of the conversation.
@@ -3646,12 +3621,6 @@ pub struct ServerAIConversationMetadata {
 
     /// Usage metadata including token counts, credits spent, etc.
     pub usage: ConversationUsageMetadata,
-
-    /// Server metadata (revision, timestamps, creator info, etc.).
-    pub metadata: crate::cloud_object::ServerMetadata,
-
-    /// Permissions for this conversation (space, guests, link sharing).
-    pub permissions: crate::cloud_object::ServerPermissions,
 
     /// The ID of the associated ambient agent task, if any.
     pub ambient_agent_task_id: Option<crate::ai::ambient_agents::AmbientAgentTaskId>,

@@ -6,10 +6,10 @@ use warpui::{
 };
 
 use crate::{
-    ai::facts::{AIFact, AIMemory, CloudAIFact},
+    ai::facts::{AIFact, AIFactObject, AIMemory},
     appearance::Appearance,
-    cloud_object::CloudObjectMetadata,
-    drive::{index::DriveIndexAction, CloudObjectTypeAndId, DriveObjectType},
+    cloud_object::StoredObjectMetadata,
+    drive::{index::DriveIndexAction, DriveObjectType, ObjectTypeAndId},
     themes::theme::Fill,
 };
 
@@ -17,12 +17,12 @@ use super::{WarpDriveItem, WarpDriveItemId};
 
 #[derive(Clone)]
 pub struct WarpDriveAIFact {
-    id: CloudObjectTypeAndId,
-    ai_fact: CloudAIFact,
+    id: ObjectTypeAndId,
+    ai_fact: AIFactObject,
 }
 
 impl WarpDriveAIFact {
-    pub fn new(id: CloudObjectTypeAndId, ai_fact: CloudAIFact) -> Self {
+    pub fn new(id: ObjectTypeAndId, ai_fact: AIFactObject) -> Self {
         Self { id, ai_fact }
     }
 }
@@ -43,7 +43,7 @@ impl WarpDriveItem for WarpDriveAIFact {
             }
         }
     }
-    fn metadata(&self) -> Option<&CloudObjectMetadata> {
+    fn metadata(&self) -> Option<&StoredObjectMetadata> {
         Some(&self.ai_fact.metadata)
     }
 

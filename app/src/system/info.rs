@@ -161,13 +161,11 @@ impl SystemInfo {
         }
     }
 
-    /// Checks for excessive memory usage.  This may send a telemetry event
-    /// and trigger a Sentry heap profile dump if excessive usage is detected.
+    /// Checks for excessive memory usage. This may emit an internal event and trigger
+    /// a heap profile dump if excessive usage is detected.
     ///
     /// The threshold check uses `memory_footprint` (which includes swapped
     /// and compressed pages) so we actually detect high memory situations.
-    /// The Rudderstack telemetry event still reports `rss` so existing
-    /// dashboards are unaffected.
     fn check_for_excessive_memory_usage(
         &mut self,
         rss: Byte,
@@ -189,19 +187,17 @@ impl SystemInfo {
         // Collect a detailed memory breakdown for diagnostics.
         let memory_breakdown = memory_footprint::memory_breakdown();
 
-        // If we're tracking heap usage and detect excessive memory usage,
-        // dump and upload the current heap profiling data.
+        // 如果启用了 heap usage tracking,内存异常时把当前 heap profile 写入本地日志。
         #[cfg(feature = "heap_usage_tracking")]
         {
-            let breakdown_for_sentry = memory_breakdown.clone();
+            let breakdown_for_diagnostics = memory_breakdown.clone();
             ctx.spawn(
-                crate::profiling::dump_jemalloc_heap_profile(breakdown_for_sentry),
+                crate::profiling::dump_jemalloc_heap_profile(breakdown_for_diagnostics),
                 |_, _, _| {},
             );
         }
 
-        // Send a telemetry event indicating that memory usage is extreme.
-        // Report RSS here to keep Rudderstack dashboards consistent.
+        // Preserve the existing RSS payload shape for callers that still construct the event.
         let total_application_usage_bytes = rss.as_u64();
         send_telemetry_sync_from_ctx!(
             TelemetryEvent::MemoryUsageHigh {

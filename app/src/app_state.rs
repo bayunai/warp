@@ -123,7 +123,7 @@ pub enum LeafContents {
     AIDocument(AIDocumentPaneSnapshot),
     Code(CodePaneSnapShot),
     EnvVarCollection(EnvVarCollectionPaneSnapshot),
-    // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents variant 随 Cloud Mode UI
+    // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents variant 随 Ambient Agent UI
     // 子系统物理删。
     Workflow(WorkflowPaneSnapshot),
     Settings(SettingsPaneSnapshot),
@@ -184,7 +184,7 @@ impl LeafContents {
 pub struct AmbientAgentPaneSnapshot {
     pub uuid: Vec<u8>,
     // `task_id` is purposefully optional,
-    // as you can have a valid state (i.e. an empty cloud mode pane) where it is None.
+    // as you can have a valid state (i.e. an empty ambient-agent pane) where it is None.
     pub task_id: Option<AmbientAgentTaskId>,
 }
 
@@ -207,7 +207,7 @@ pub struct TerminalPaneSnapshot {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum NotebookPaneSnapshot {
-    CloudNotebook {
+    NotebookObject {
         /// The ID of the notebook that was open in this pane. There are 3 possibilities:
         /// 1. The pane contains a newly-created notebook that has not been edited yet. It might not
         ///    have an ID yet (client or server), so this will be `None`.
@@ -253,7 +253,7 @@ pub enum CodePaneSnapShot {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorkflowPaneSnapshot {
-    CloudWorkflow {
+    WorkflowObject {
         workflow_id: Option<SyncId>,
         // Settings for the workflow pane when it's opened (such as a folder to focus upon opening)
         settings: OpenWarpDriveObjectSettings,
@@ -262,9 +262,9 @@ pub enum WorkflowPaneSnapshot {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EnvVarCollectionPaneSnapshot {
-    // CloudEnvVarCollection snapshots operate under the same heuristics
-    // as NotebookPaneSnapshot::CloudNotebook
-    CloudEnvVarCollection {
+    // EnvVarCollectionObject snapshots operate under the same heuristics
+    // as NotebookPaneSnapshot::NotebookObject
+    EnvVarCollectionObject {
         env_var_collection_id: Option<SyncId>,
     },
 }

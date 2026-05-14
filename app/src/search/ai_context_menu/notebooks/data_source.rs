@@ -1,6 +1,6 @@
 use super::search_item::NotebookSearchItem;
-use crate::cloud_object::model::persistence::CloudModel;
-use crate::cloud_object::CloudModelType;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::StoredObjectModel;
 use crate::notebooks::manager::{NotebookManager, NotebookSource};
 use crate::search::ai_context_menu::mixer::AIContextMenuSearchableAction;
 use crate::search::data_source::{Query, QueryResult};
@@ -35,15 +35,15 @@ impl SyncDataSource for NotebookDataSource {
     ) -> Result<Vec<QueryResult<Self::Action>>, DataSourceRunErrorWrapper> {
         let query_text = &query.text;
 
-        // Get all notebooks from CloudModel
-        let cloud_model = CloudModel::as_ref(app);
+        // Get all notebooks from ObjectStoreModel
+        let object_store_model = ObjectStoreModel::as_ref(app);
         let _user_workspaces = UserWorkspaces::as_ref(app);
 
         // Get notebooks from all spaces the user has access to
         let mut notebook_results = Vec::new();
         let notebook_manager = NotebookManager::as_ref(app);
 
-        let mut notebooks: Vec<_> = cloud_model
+        let mut notebooks: Vec<_> = object_store_model
             .get_all_active_notebooks()
             .filter(|notebook| {
                 // Notebooks and plans have separate filters.

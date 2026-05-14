@@ -1,6 +1,6 @@
-use super::{CloudObject, Space};
+use super::{Space, StoredObject};
 use crate::{
-    drive::{folders::CloudFolder, items::WarpDriveItemId, CloudObjectTypeAndId},
+    drive::{folders::FolderObject, items::WarpDriveItemId, ObjectTypeAndId},
     ui_components::breadcrumb::Breadcrumb,
 };
 use warpui::AppContext;
@@ -23,11 +23,11 @@ impl Breadcrumb for ContainingObject {
     }
 }
 
-impl From<&CloudFolder> for ContainingObject {
-    fn from(folder: &CloudFolder) -> Self {
+impl From<&FolderObject> for ContainingObject {
+    fn from(folder: &FolderObject) -> Self {
         Self {
             name: folder.display_name().clone(),
-            kind: ContainingObjectKind::Object(CloudObjectTypeAndId::Folder(folder.id)),
+            kind: ContainingObjectKind::Object(ObjectTypeAndId::Folder(folder.id)),
         }
     }
 }
@@ -44,7 +44,7 @@ impl Space {
 #[derive(Clone, Copy, Debug)]
 pub enum ContainingObjectKind {
     Space(Space),
-    Object(CloudObjectTypeAndId),
+    Object(ObjectTypeAndId),
 }
 
 impl ContainingObjectKind {

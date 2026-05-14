@@ -1,30 +1,30 @@
 use itertools::Itertools;
 use warpui::{AppContext, SingletonEntity};
 
-use crate::cloud_object::{CloudObject, Space};
-use crate::notebooks::CloudNotebook;
+use crate::cloud_object::{Space, StoredObject};
+use crate::notebooks::NotebookObject;
 use crate::search::notebook_embedding::embedded_fuzzy_match::FuzzyMatchEmbeddedObjectResult;
 use crate::search::notebook_embedding::is_embed_accessible;
 use crate::search::notebook_embedding::searcher::EmbeddingSearchItemAction;
 
-use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
 use crate::search::data_source::{Query, QueryResult};
 use crate::search::mixer::{DataSourceRunErrorWrapper, SyncDataSource};
 
 use super::notebook_search_item::NotebookSearchItem;
 
-pub struct CloudNotebooksDataSource {
+pub struct EmbeddedNotebooksDataSource {
     /// The space containing the object we are embedding into.
     embedding_space: Space,
-    notebooks: Vec<CloudNotebook>,
+    notebooks: Vec<NotebookObject>,
 }
 
-impl CloudNotebooksDataSource {
+impl EmbeddedNotebooksDataSource {
     pub fn new(notebook_space: Space, app: &mut AppContext) -> Self {
-        let cloud_model = CloudModel::as_ref(app);
+        let object_store_model = ObjectStoreModel::as_ref(app);
         Self {
             embedding_space: notebook_space,
-            notebooks: cloud_model
+            notebooks: object_store_model
                 .get_all_active_notebooks()
                 .filter(|notebook| notebook.id.into_server().is_some()) // Filter out local notebooks.
                 .cloned()
@@ -33,7 +33,7 @@ impl CloudNotebooksDataSource {
     }
 }
 
-impl SyncDataSource for CloudNotebooksDataSource {
+impl SyncDataSource for EmbeddedNotebooksDataSource {
     type Action = EmbeddingSearchItemAction;
 
     fn run_query(
@@ -56,7 +56,7 @@ impl SyncDataSource for CloudNotebooksDataSource {
                     let is_accessible =
                         is_embed_accessible(self.embedding_space, notebook.permissions.owner);
                     NotebookSearchItem {
-                        cloud_notebook: notebook,
+                        notebook: notebook,
                         fuzzy_matched_notebook: match_result,
                         is_accessible,
                     }

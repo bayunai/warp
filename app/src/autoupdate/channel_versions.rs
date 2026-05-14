@@ -1,19 +1,14 @@
-use std::{env, fs::read_to_string, sync::Arc};
+use std::{env, fs::read_to_string};
 
 use anyhow::{Context as _, Result};
-use channel_versions::ChannelVersions;
+use channel_versions::{ChannelChangelogs, ChannelVersion, ChannelVersions, VersionInfo};
 
-use crate::{
-    channel::{Channel, ChannelState},
-    report_error,
-    server::server_api::{ServerApi, FETCH_CHANNEL_VERSIONS_TIMEOUT},
-};
+use crate::channel::ChannelState;
 
-// Fetches channel versions asynchronously from the Warp server. If the Warp server request fails,
-// then fetches from GCP JSON storage as a fallback.
+// 只从本地状态加载通道版本。OpenWarp 不再向 Warp 或 GCP 请求 release-channel 元数据。
 pub async fn fetch_channel_versions(
     nonce: &str,
-    server_api: Arc<ServerApi>,
+    client: &http_client::Client,
     include_changelogs: bool,
     is_daily: bool,
 ) -> Result<ChannelVersions> {
@@ -26,50 +21,24 @@ pub async fn fetch_channel_versions(
             .context("Failed to parse channel versions JSON");
     }
 
-    let channel_versions = server_api
-        .fetch_channel_versions(include_changelogs, is_daily)
-        .await
-        .context("Failed to retrieve channel versions from Warp server");
-    match channel_versions {
-        channel_versions @ Ok(_) => channel_versions,
-        Err(err) => {
-            match ChannelState::channel() {
-                // Only log an error on Dev and Preview -- if this is failing, its likely to be
-                // failing for all users, and Stable has too many users (this error would flood
-                // our Sentry logs).
-                Channel::Dev | Channel::Preview => report_error!(err),
-                _ => log::warn!(
-                    "Failed to retrieve channel versions from Warp server, falling \
-                back to GCP JSON storage."
-                ),
-            }
-            fetch_channel_versions_from_json_storage(server_api.http_client(), nonce).await
-        }
-    }
+    let _ = (nonce, client, is_daily);
+    Ok(local_channel_versions(include_changelogs))
 }
 
-// Synchronously fetches updated Warp [`ChannelVersions`] from GCP JSON storage. This will soon
-// be deprecated in favor of retrieving updated channel versions from the Warp Server.
-// Note, in order to run against a test file you can use the "channel_versions_test.json" file
-// and update the file using gsutil cp channel_versions_test.json gs://warp-releases/channel_versions_test.json
-async fn fetch_channel_versions_from_json_storage(
-    client: &http_client::Client,
-    nonce: &str,
-) -> Result<ChannelVersions> {
-    log::info!("Fetching channel versions from GCP JSON storage");
-    let res = client
-        .get(
-            format!(
-                "{}/channel_versions.json?r={}",
-                ChannelState::releases_base_url(),
-                nonce
-            )
-            .as_str(),
-        )
-        .timeout(FETCH_CHANNEL_VERSIONS_TIMEOUT)
-        .send()
-        .await?;
-    let versions: ChannelVersions = res.json().await?;
-    log::info!("Received channel versions from GCP JSON storage: {versions}");
-    Ok(versions)
+fn local_channel_versions(include_changelogs: bool) -> ChannelVersions {
+    let version = ChannelState::app_version()
+        .unwrap_or("v0.local.testing.string_00")
+        .to_string();
+    let channel_version = ChannelVersion::new(VersionInfo::new(version));
+    let changelogs = include_changelogs.then(|| ChannelChangelogs {
+        dev: std::collections::HashMap::new(),
+        preview: std::collections::HashMap::new(),
+        stable: std::collections::HashMap::new(),
+    });
+    ChannelVersions {
+        dev: channel_version.clone(),
+        preview: channel_version.clone(),
+        stable: channel_version,
+        changelogs,
+    }
 }

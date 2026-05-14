@@ -12,9 +12,9 @@ use crate::{
         TemplatableMCPServer, TemplatableMCPServerInstallation, TemplatableMCPServerManager,
     },
     appearance::Appearance,
+    cloud_object::update_manager::InitiatedBy,
     cloud_object::Space,
     modal::{Modal, ModalViewState},
-    server::cloud_objects::update_manager::InitiatedBy,
     settings_view::{
         mcp_servers::{
             edit_page::{MCPServersEditPageView, MCPServersEditPageViewEvent},
@@ -238,7 +238,7 @@ impl MCPServersSettingsPageView {
     ) -> Option<TemplatableMCPServerInstallation> {
         TemplatableMCPServerManager::handle(ctx).update(ctx, |templatable_manager, ctx| {
             if templatable_manager
-                .get_cloud_server(templatable_mcp_server.uuid, ctx)
+                .get_server_object(templatable_mcp_server.uuid, ctx)
                 .is_none()
             {
                 templatable_manager.create_templatable_mcp_server(

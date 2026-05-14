@@ -69,7 +69,7 @@ use super::TextLocation;
 use crate::ai::blocklist::block::view_impl::comments::address_comment_chips;
 use crate::ai::blocklist::block::{DetectedLinksState, RICH_CONTENT_LINK_FIRST_CHAR_POSITION_ID};
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
-use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
 
 use crate::settings_view::SettingsSection;
 use crate::terminal::block_list_element::BlockListMenuSource;
@@ -162,13 +162,13 @@ fn add_slash_command_highlight(
 /// That first prompt is rendered in the ambient-agent query block UI, so this helper only gates
 /// duplicate rendering in the AI block path when that optimistic block was actually inserted.
 fn should_hide_first_ai_block_query_and_header(
-    has_inserted_cloud_mode_user_query_block: bool,
+    has_inserted_ambient_user_query_block: bool,
     is_shared_ambient_agent_session: bool,
     is_first_exchange: bool,
     is_receiving_agent_conversation_replay: bool,
 ) -> bool {
-    FeatureFlag::CloudModeSetupV2.is_enabled()
-        && has_inserted_cloud_mode_user_query_block
+    false
+        && has_inserted_ambient_user_query_block
         && is_shared_ambient_agent_session
         && is_first_exchange
         && !is_receiving_agent_conversation_replay
@@ -683,7 +683,7 @@ pub fn render_citation(
 
     let (icon, name) = match citation {
         AIAgentCitation::WarpDriveObject { uid } => {
-            let item = CloudModel::as_ref(app)
+            let item = ObjectStoreModel::as_ref(app)
                 .get_by_uid(uid)?
                 .to_warp_drive_item(appearance)?;
             (
@@ -854,12 +854,12 @@ impl View for AIBlock {
         let is_first_exchange = conversation
             .first_exchange()
             .is_some_and(|exchange| exchange.id == self.client_ids.client_exchange_id);
-        let has_inserted_cloud_mode_user_query_block = self
+        let has_inserted_ambient_user_query_block = self
             .ambient_agent_view_model
             .as_ref(app)
-            .has_inserted_cloud_mode_user_query_block();
+            .has_inserted_ambient_agent_user_query_block();
         let should_hide_first_block_query_and_header = should_hide_first_ai_block_query_and_header(
-            has_inserted_cloud_mode_user_query_block,
+            has_inserted_ambient_user_query_block,
             is_shared_ambient_agent_session,
             is_first_exchange,
             is_receiving_agent_conversation_replay,
@@ -1192,8 +1192,14 @@ impl View for AIBlock {
 
         let mut selectable = SelectableArea::new(
             self.state_handles.selection_handle.clone(),
-            move |selection_args, _, _| {
-                *selected_text.write() = selection_args.selection;
+            move |selection_args, ctx, _| {
+                let selection = selection_args.selection;
+                if let Some(selection) =
+                    selection.as_ref().filter(|selection| !selection.is_empty())
+                {
+                    ctx.dispatch_typed_action(AIBlockAction::CopyOnSelect(selection.clone()));
+                }
+                *selected_text.write() = selection;
             },
             SavePosition::new(content.finish(), self.saved_position_id().as_str()).finish(),
         )
@@ -1327,7 +1333,6 @@ impl AIAgentInput {
             | AIAgentInput::AutoCodeDiffQuery { .. }
             | AIAgentInput::ResumeConversation { .. }
             | AIAgentInput::InitProjectRules { .. }
-            | AIAgentInput::CreateEnvironment { .. }
             | AIAgentInput::TriggerPassiveSuggestion { .. }
             | AIAgentInput::CreateNewProject { .. }
             | AIAgentInput::CloneRepository { .. }

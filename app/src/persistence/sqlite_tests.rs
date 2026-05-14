@@ -3,18 +3,18 @@ use std::fs;
 use std::{path::PathBuf, sync::Arc};
 
 use warp_core::features::FeatureFlag;
-use warp_graphql::scalars::time::ServerTimestamp;
 
 use crate::{
     app_state::{
         AppState, CodePaneSnapShot, CodePaneTabSnapshot, LeafContents, LeafSnapshot,
         PaneNodeSnapshot, TabSnapshot, TerminalPaneSnapshot, WindowSnapshot,
     },
-    cloud_object::{CloudObjectPermissions, Owner},
+    cloud_object::{Owner, StoredObjectPermissions},
     code::editor_management::CodeSource,
-    notebooks::{CloudNotebook, CloudNotebookModel},
+    notebooks::{NotebookObject, NotebookObjectModel},
     persistence::{model::ObjectPermissions, BlockCompleted, ModelEvent},
     server::ids::ClientId,
+    server_time::ServerTimestamp,
     tab::SelectedTabColor,
     terminal::model::block::SerializedBlock,
     terminal::ShellLaunchData,
@@ -26,8 +26,8 @@ use super::{
 
 #[test]
 fn test_deduplicate_snapshots() {
-    let local_notebook = CloudNotebook::new_local(
-        CloudNotebookModel {
+    let local_notebook = NotebookObject::new_local(
+        NotebookObjectModel {
             title: "Hello".to_string(),
             data: "World".to_string(),
             ai_document_id: None,
@@ -502,7 +502,7 @@ fn test_deserialize_corrupted_guests() {
     let cloud_permissions = super::to_cloud_object_permissions(&db_permissions, None);
     assert_eq!(
         cloud_permissions,
-        Some(CloudObjectPermissions {
+        Some(StoredObjectPermissions {
             owner: Owner::Team {
                 team_uid: crate::server::ids::ServerId::from_string_lossy("team_uid12345678912345"),
             },

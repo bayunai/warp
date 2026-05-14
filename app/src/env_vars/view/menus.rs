@@ -3,19 +3,19 @@ use warp_core::context_flag::ContextFlag;
 use warpui::{keymap::Trigger, SingletonEntity, ViewContext, ViewHandle};
 
 use crate::{
-    cloud_object::{CloudObject, GenericStringObjectFormat, Space},
+    cloud_object::update_manager::UpdateManager,
+    cloud_object::{GenericStringObjectFormat, Space, StoredObject},
     drive::{
         drive_helpers::has_feature_gated_anonymous_user_reached_env_var_limit,
-        export::ExportManager, CloudObjectTypeAndId,
+        export::ExportManager, ObjectTypeAndId,
     },
     env_vars::active_env_var_collection_data::TrashStatus,
     external_secrets::SecretManager,
     menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields},
     pane_group::PaneEvent,
-    server::cloud_objects::update_manager::UpdateManager,
     ui_components::icons::Icon,
     util::bindings::{keybinding_name_to_display_string, trigger_to_keystroke, CustomAction},
-    AppContext, CloudModel, FeatureFlag,
+    AppContext, FeatureFlag, ObjectStoreModel,
 };
 
 use super::env_var_collection::{EnvVarCollectionAction, EnvVarCollectionView, VariableRowIndex};
@@ -415,7 +415,7 @@ impl EnvVarCollectionView {
 
     pub(super) fn env_var_collection_link(&self, ctx: &AppContext) -> Option<String> {
         self.env_var_collection_id(ctx)
-            .and_then(|id| CloudModel::as_ref(ctx).get_env_var_collection(&id))
+            .and_then(|id| ObjectStoreModel::as_ref(ctx).get_env_var_collection(&id))
             .map(|env_var_collection| env_var_collection.object_link())?
     }
 
@@ -427,7 +427,7 @@ impl EnvVarCollectionView {
 
             UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
                 update_manager.untrash_object(
-                    CloudObjectTypeAndId::GenericStringObject {
+                    ObjectTypeAndId::GenericStringObject {
                         object_type: GenericStringObjectFormat::Json(
                             crate::cloud_object::JsonObjectType::EnvVarCollection,
                         ),
@@ -446,7 +446,7 @@ impl EnvVarCollectionView {
 
             UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
                 update_manager.trash_object(
-                    CloudObjectTypeAndId::from_generic_string_object(
+                    ObjectTypeAndId::from_generic_string_object(
                         GenericStringObjectFormat::Json(
                             crate::cloud_object::JsonObjectType::EnvVarCollection,
                         ),
@@ -463,7 +463,7 @@ impl EnvVarCollectionView {
         if let Some(env_var_collection_id) = self.env_var_collection_id(ctx) {
             UpdateManager::handle(ctx).update(ctx, |update_manager, ctx| {
                 update_manager.duplicate_object(
-                    &CloudObjectTypeAndId::from_generic_string_object(
+                    &ObjectTypeAndId::from_generic_string_object(
                         GenericStringObjectFormat::Json(
                             crate::cloud_object::JsonObjectType::EnvVarCollection,
                         ),
@@ -482,7 +482,7 @@ impl EnvVarCollectionView {
             ExportManager::handle(ctx).update(ctx, |export_manager, ctx| {
                 export_manager.export(
                     window_id,
-                    &[CloudObjectTypeAndId::from_generic_string_object(
+                    &[ObjectTypeAndId::from_generic_string_object(
                         GenericStringObjectFormat::Json(
                             crate::cloud_object::JsonObjectType::EnvVarCollection,
                         ),

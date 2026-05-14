@@ -15,10 +15,10 @@ use warpui::AppContext;
 use crate::{
     ai::document::ai_document_model::AIDocumentId,
     appearance::Appearance,
-    cloud_object::{CloudModelType, GenericCloudObject, ObjectType, Owner, ServerCloudObject},
+    cloud_object::{GenericStoredObject, ObjectType, Owner, StoredObjectModel},
     drive::{
         items::{notebook::WarpDriveNotebook, WarpDriveItem},
-        CloudObjectTypeAndId,
+        ObjectTypeAndId,
     },
     persistence::ModelEvent,
     server::ids::{ServerId, SyncId},
@@ -35,9 +35,9 @@ pub(crate) struct SerializedNotebook {
     pub(crate) conversation_id: Option<String>,
 }
 
-/// `CloudNotebook` is a notebook retrieved from the server.
+/// `NotebookObject` is an object-store backed notebook.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct CloudNotebookModel {
+pub struct NotebookObjectModel {
     pub title: String,
     pub data: String,
     pub ai_document_id: Option<AIDocumentId>,
@@ -45,10 +45,10 @@ pub struct CloudNotebookModel {
     pub conversation_id: Option<String>,
 }
 
-pub type CloudNotebook = GenericCloudObject<NotebookId, CloudNotebookModel>;
+pub type NotebookObject = GenericStoredObject<NotebookId, NotebookObjectModel>;
 
-impl CloudModelType for CloudNotebookModel {
-    type CloudObjectType = CloudNotebook;
+impl StoredObjectModel for NotebookObjectModel {
+    type StoredObjectType = NotebookObject;
     type IdType = NotebookId;
 
     fn model_type_name(&self) -> &'static str {
@@ -63,8 +63,8 @@ impl CloudModelType for CloudNotebookModel {
         ObjectType::Notebook
     }
 
-    fn cloud_object_type_and_id(&self, id: SyncId) -> CloudObjectTypeAndId {
-        CloudObjectTypeAndId::Notebook(id)
+    fn object_type_and_id(&self, id: SyncId) -> ObjectTypeAndId {
+        ObjectTypeAndId::Notebook(id)
     }
 
     fn display_name(&self) -> String {
@@ -75,30 +75,18 @@ impl CloudModelType for CloudNotebookModel {
         name.clone_into(&mut self.title);
     }
 
-    fn upsert_event(&self, notebook: &CloudNotebook) -> ModelEvent {
+    fn upsert_event(&self, notebook: &NotebookObject) -> ModelEvent {
         ModelEvent::UpsertNotebook {
             notebook: notebook.clone(),
         }
     }
 
-    fn bulk_upsert_event(objects: &[CloudNotebook]) -> ModelEvent {
+    fn bulk_upsert_event(objects: &[NotebookObject]) -> ModelEvent {
         ModelEvent::UpsertNotebooks(objects.to_vec())
     }
 
     fn should_update_after_server_conflict(&self) -> bool {
         true
-    }
-
-    fn new_from_server_update(&self, server_cloud_object: &ServerCloudObject) -> Option<Self> {
-        if let ServerCloudObject::Notebook(server_notebook) = server_cloud_object {
-            return Some(CloudNotebookModel {
-                title: server_notebook.model.title.clone(),
-                data: server_notebook.model.data.clone(),
-                ai_document_id: server_notebook.model.ai_document_id,
-                conversation_id: None, // conversation_id is not returned from server, just used for initial plan artifact creation
-            });
-        }
-        None
     }
 
     fn serialized(&self) -> SerializedModel {
@@ -123,10 +111,10 @@ impl CloudModelType for CloudNotebookModel {
         &self,
         id: SyncId,
         _appearance: &Appearance,
-        notebook: &CloudNotebook,
+        notebook: &NotebookObject,
     ) -> Option<Box<dyn WarpDriveItem>> {
         Some(Box::new(WarpDriveNotebook::new(
-            self.cloud_object_type_and_id(id),
+            self.object_type_and_id(id),
             notebook.clone(),
             notebook.model().ai_document_id.is_some(),
         )))
@@ -144,12 +132,12 @@ impl From<NotebookId> for SyncId {
     }
 }
 
-/// A notebook location. Mainly, this lets us distinguish between cloud and file-based notebooks.
+/// A notebook location. Mainly, this lets us distinguish between object-backed and file-based notebooks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum NotebookLocation {
-    /// A cloud notebook in the user's personal space.
+    /// An object-backed notebook in the user's personal space.
     PersonalCloud,
-    /// A cloud notebook in a team space.
+    /// An object-backed notebook in a team space.
     Team,
     /// A notebook backed by a local file.
     LocalFile,

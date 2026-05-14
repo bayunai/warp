@@ -23,7 +23,7 @@ use warpui::{
 };
 
 use crate::{
-    cloud_object::{model::persistence::CloudModel, CloudObject},
+    cloud_object::{model::persistence::ObjectStoreModel, StoredObject},
     editor::{
         EditOrigin, EditorView, Event as EditorEvent, PropagateAndNoOpNavigationKeys,
         SingleLineEditorOptions, TextOptions, ValidInputType,
@@ -131,7 +131,7 @@ impl AliasBar {
 
     /// The current workflow's space for telemetry events.
     fn workflow_space(&self, app: &AppContext) -> Option<TelemetrySpace> {
-        let workflow = CloudModel::as_ref(app).get_workflow(&self.workflow_id)?;
+        let workflow = ObjectStoreModel::as_ref(app).get_workflow(&self.workflow_id)?;
         Some(workflow.space(app).into())
     }
 
@@ -210,8 +210,8 @@ impl AliasBar {
                 alias.env_vars = sync_id;
                 self.mark_dirty(true, ctx);
 
-                let env_vars_space = sync_id
-                    .and_then(|id| CloudModel::as_ref(ctx).get_env_var_collection(&id))
+                let env_vars_space: Option<TelemetrySpace> = sync_id
+                    .and_then(|id| ObjectStoreModel::as_ref(ctx).get_env_var_collection(&id))
                     .map(|env_vars| env_vars.space(ctx))
                     .map(Into::into);
 

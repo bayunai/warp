@@ -55,8 +55,7 @@ use crate::terminal::model::session::SessionType;
 use crate::{
     ai::{
         blocklist::{
-            prompt::prompt_alert::{PromptAlertEvent, PromptAlertView},
-            BlocklistAIInputModel, InputConfig, InputType,
+            prompt::prompt_alert::PromptAlertView, BlocklistAIInputModel, InputConfig, InputType,
         },
         execution_profiles::profiles::AIExecutionProfilesModel,
         AIRequestUsageModel,
@@ -70,7 +69,6 @@ use crate::{
         model::{block::BlockMetadata, session::Sessions},
         profile_model_selector::{ProfileModelSelector, ProfileModelSelectorEvent},
         session_settings::{SessionSettings, SessionSettingsChangedEvent},
-        shared_session::permissions_manager::SessionPermissionsManager,
     },
     ui_components::icons::Icon,
     view_components::action_button::{
@@ -316,7 +314,6 @@ pub enum UniversalDeveloperInputButtonBarEvent {
     EnableAutoDetection,
     SelectFile,
     SetAIContextMenuOpen(bool),
-    PromptAlert(PromptAlertEvent),
     ModelSelectorOpened,
     ModelSelectorClosed,
     OpenSettings(SettingsSection),
@@ -522,11 +519,6 @@ impl UniversalDeveloperInputButtonBar {
         });
 
         let prompt_alert = ctx.add_typed_action_view(PromptAlertView::new);
-        ctx.subscribe_to_view(&prompt_alert, |_, _, event, ctx| {
-            ctx.emit(UniversalDeveloperInputButtonBarEvent::PromptAlert(
-                event.clone(),
-            ));
-        });
 
         ctx.subscribe_to_model(&NetworkStatus::handle(ctx), |_, _, _, ctx| {
             ctx.notify();
@@ -582,10 +574,6 @@ impl UniversalDeveloperInputButtonBar {
             me.notify_and_notify_children(ctx);
         });
 
-        // Keep the control disabled state in sync with role changes
-        ctx.subscribe_to_model(&SessionPermissionsManager::handle(ctx), |me, _, _, ctx| {
-            me.update_segmented_control_disabled_state(ctx);
-        });
         // Keep the control disabled state in sync with agent control state
         ctx.subscribe_to_model(&cli_subagent_controller, move |me, _, _, ctx| {
             me.update_segmented_control_disabled_state(ctx);

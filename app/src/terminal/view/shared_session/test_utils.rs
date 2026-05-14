@@ -1,13 +1,13 @@
-use session_sharing_protocol::common::{ParticipantId, ParticipantList, SessionId};
-use session_sharing_protocol::sharer::SessionSourceType;
+use std::{collections::HashMap, sync::Arc};
+
+use crate::terminal::shared_session::protocol::SessionSourceType;
+use crate::terminal::shared_session::protocol::{ParticipantId, ParticipantList, SessionId};
 use warpui::platform::WindowStyle;
-use warpui::{App, SingletonEntity, ViewHandle};
+use warpui::{App, ViewHandle};
 
 use crate::auth::UserUid;
 use crate::editor::ReplicaId;
-use crate::pane_group::PaneGroup;
-use crate::server::server_api::ServerApiProvider;
-use crate::terminal::shared_session::manager::Manager;
+use crate::pane_group::{NewTerminalOptions, PaneGroup, PanesLayout};
 use crate::terminal::TerminalView;
 use crate::test_util::terminal::initialize_app_for_terminal_view;
 use crate::GlobalResourceHandles;
@@ -17,7 +17,6 @@ use crate::GlobalResourceHandles;
 /// set up for the viewer.
 pub fn terminal_view_for_viewer(app: &mut App) -> ViewHandle<TerminalView> {
     initialize_app_for_terminal_view(app);
-    app.add_singleton_model(Manager::new);
 
     let global_resource_handles = GlobalResourceHandles::mock(app);
     let GlobalResourceHandles {
@@ -27,15 +26,12 @@ pub fn terminal_view_for_viewer(app: &mut App) -> ViewHandle<TerminalView> {
         ..
     } = global_resource_handles.clone();
 
-    let session_id = SessionId::new();
-
     let (_, pane_group) = app.add_window(WindowStyle::NotStealFocus, |ctx| {
-        let server_api = ServerApiProvider::as_ref(ctx).get();
-        PaneGroup::new_for_shared_session_viewer(
-            session_id,
+        PaneGroup::new_with_panes_layout(
             tips_completed,
             user_default_shell_unsupported_banner_model_handle,
-            server_api,
+            PanesLayout::SingleTerminal(Box::<NewTerminalOptions>::default()),
+            Arc::new(HashMap::new()),
             model_event_sender,
             ctx,
         )
@@ -48,11 +44,11 @@ pub fn terminal_view_for_viewer(app: &mut App) -> ViewHandle<TerminalView> {
             .to_owned()
     });
 
-    let firebase_uid = UserUid::new("mock_firebase_uid");
+    let user_uid = UserUid::new("mock_user_uid");
     terminal.update(app, |view, ctx| {
         view.on_session_share_joined(
             ParticipantId::new(),
-            firebase_uid,
+            user_uid,
             ReplicaId::random(),
             Box::new(ParticipantList::default()),
             SessionId::new(),

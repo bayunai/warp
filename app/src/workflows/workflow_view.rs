@@ -19,10 +19,14 @@ use crate::{
     cloud_object::{
         breadcrumbs::ContainingObject,
         model::{
-            persistence::{CloudModel, CloudModelEvent},
-            view::CloudViewModel,
+            persistence::{ObjectStoreEvent, ObjectStoreModel},
+            view::ObjectStoreViewModel,
         },
-        CloudObject, CloudObjectEventEntrypoint, ObjectType, Owner, Revision, Space,
+        update_manager::{
+            FetchSingleObjectOption, ObjectOperation, OperationSuccessType, UpdateManager,
+            UpdateManagerEvent,
+        },
+        ObjectType, Owner, Revision, Space, StoredObject, StoredObjectEventEntrypoint,
     },
     drive::{
         cloud_object_styling::warp_drive_icon_color,
@@ -36,7 +40,7 @@ use crate::{
             workflow_arg_selector::{WorkflowArgSelector, WorkflowArgSelectorEvent},
             workflow_arg_type_helpers::{self, ArgumentEditorRowIndex},
         },
-        CloudObjectTypeAndId, DriveObjectType, OpenWarpDriveObjectSettings,
+        DriveObjectType, ObjectTypeAndId, OpenWarpDriveObjectSettings,
     },
     editor::{
         EditorOptions, EditorView, EnterAction, EnterSettings, Event as EditorEvent,
@@ -50,13 +54,8 @@ use crate::{
     },
     send_telemetry_from_ctx,
     server::{
-        cloud_objects::update_manager::{
-            FetchSingleObjectOption, ObjectOperation, OperationSuccessType, UpdateManager,
-            UpdateManagerEvent,
-        },
         ids::{ClientId, ServerId, SyncId},
-        server_api::{ai::AIClient, ServerApiProvider},
-        telemetry::{CloudObjectTelemetryMetadata, TelemetryCloudObjectType, TelemetryEvent},
+        telemetry::{ObjectTelemetryMetadata, TelemetryEvent, TelemetryObjectType},
     },
     settings::{
         app_installation_detection::{UserAppInstallDetectionSettings, UserAppInstallStatus},
@@ -73,7 +72,7 @@ use crate::{
     view_components::{DismissibleToast, ToastType},
     workflows::{
         workflow::{Argument, Workflow},
-        CloudWorkflow,
+        WorkflowObject,
     },
     workspace::ToastStack,
     FeatureFlag,
@@ -103,7 +102,7 @@ use warpui::{
 };
 
 use super::{
-    aliases::WorkflowAliases, command_parser::WorkflowCommandDisplayData, CloudWorkflowModel,
+    aliases::WorkflowAliases, command_parser::WorkflowCommandDisplayData, WorkflowObjectModel,
     WorkflowSource, WorkflowType, WorkflowViewMode,
 };
 
@@ -311,7 +310,6 @@ pub struct WorkflowView {
     pub(super) ai_metadata_assist_state: AiAssistState,
     revision_ts: Option<Revision>,
     pub(super) auth_state: Arc<AuthState>,
-    pub(super) ai_client: Arc<dyn AIClient>,
     owner: Option<Owner>,
     initial_folder_id: Option<SyncId>,
 
@@ -407,8 +405,6 @@ impl WorkflowView {
             me.handle_content_editor_event(event, ctx);
         });
 
-        let ai_client = ServerApiProvider::as_ref(ctx).get_ai_client();
-
         let enum_creation_dialog = ctx.add_typed_action_view(EnumCreationDialog::new);
         ctx.subscribe_to_view(&enum_creation_dialog, |me, _, event, ctx| {
             me.handle_enum_creation_dialog_event(event, ctx);
@@ -459,7 +455,6 @@ impl WorkflowView {
             revision_ts: None,
             command_display_data: WorkflowCommandDisplayData::new_empty(),
             auth_state: AuthStateProvider::as_ref(ctx).get().clone(),
-            ai_client,
             pending_argument_editor_row: None,
             show_enum_creation_dialog: false,
             enum_creation_dialog,
@@ -522,9 +517,10 @@ impl WorkflowView {
     }
 
     fn subscribe_to_model_updates(&self, ctx: &mut ViewContext<Self>) {
-        ctx.subscribe_to_model(&CloudModel::handle(ctx), move |workflow, _, event, ctx| {
-            workflow.handle_cloud_model_event(event, ctx)
-        });
+        ctx.subscribe_to_model(
+            &ObjectStoreModel::handle(ctx),
+            move |workflow, _, event, ctx| workflow.handle_object_store_event(event, ctx),
+        );
 
         let update_manager = UpdateManager::handle(ctx);
         ctx.subscribe_to_model(&update_manager, |me, _, event, ctx| {
@@ -532,19 +528,19 @@ impl WorkflowView {
         });
     }
 
-    fn handle_cloud_model_event(&mut self, event: &CloudModelEvent, ctx: &mut ViewContext<Self>) {
+    fn handle_object_store_event(&mut self, event: &ObjectStoreEvent, ctx: &mut ViewContext<Self>) {
         match event {
-            CloudModelEvent::ObjectUpdated {
-                type_and_id: CloudObjectTypeAndId::Workflow(sync_id),
+            ObjectStoreEvent::ObjectUpdated {
+                type_and_id: ObjectTypeAndId::Workflow(sync_id),
                 source: _,
             } => {
                 if self.workflow_id() == *sync_id && !self.is_editable() {
                     self.reset(ctx);
                 }
             }
-            CloudModelEvent::ObjectTrashed { .. }
-            | CloudModelEvent::ObjectDeleted { .. }
-            | CloudModelEvent::ObjectUntrashed { .. } => ctx.notify(),
+            ObjectStoreEvent::ObjectTrashed { .. }
+            | ObjectStoreEvent::ObjectDeleted { .. }
+            | ObjectStoreEvent::ObjectUntrashed { .. } => ctx.notify(),
             _ => (),
         }
     }
@@ -576,7 +572,7 @@ impl WorkflowView {
                 });
 
                 if let Some(workflow) =
-                    CloudModel::as_ref(ctx).get_workflow_by_uid(&server_id.uid())
+                    ObjectStoreModel::as_ref(ctx).get_workflow_by_uid(&server_id.uid())
                 {
                     self.load(
                         workflow.clone(),
@@ -614,8 +610,8 @@ impl WorkflowView {
     }
 
     fn reset(&mut self, ctx: &mut ViewContext<Self>) {
-        let cloud_workflow = self.get_cloud_workflow(ctx);
-        if let Some(workflow) = cloud_workflow {
+        let workflow = self.get_cloud_workflow(ctx);
+        if let Some(workflow) = workflow {
             self.load(
                 workflow,
                 &OpenWarpDriveObjectSettings::default(),
@@ -634,18 +630,24 @@ impl WorkflowView {
         ctx: &mut ViewContext<Self>,
     ) {
         let initial_load_complete =
-            crate::cloud_object::model::persistence::CloudModel::as_ref(ctx)
+            crate::cloud_object::model::persistence::ObjectStoreModel::as_ref(ctx)
                 .initial_load_complete();
         // TODO @ianhodge CLD-2002: it could be nice to have a loading screen here while we wait for the load
         let settings = settings.clone();
         ctx.spawn(initial_load_complete, move |me, _, ctx| {
-            let workflow = CloudModel::as_ref(ctx).get_workflow(&workflow_id).cloned();
-            // If either the focused folder or the workflow can't be found in cloudmodel, fetch the object from the server
+            let workflow = ObjectStoreModel::as_ref(ctx)
+                .get_workflow(&workflow_id)
+                .cloned();
+            // If either the focused folder or the workflow can't be found in ObjectStoreModel, fetch the object from the server
             let fetch_needed = workflow.is_none()
                 || settings
                     .focused_folder_id
                     .map(SyncId::ServerId)
-                    .map(|folder_id| CloudModel::as_ref(ctx).get_folder(&folder_id).is_none())
+                    .map(|folder_id| {
+                        ObjectStoreModel::as_ref(ctx)
+                            .get_folder(&folder_id)
+                            .is_none()
+                    })
                     .unwrap_or(false);
             if fetch_needed {
                 if let Some(server_id) = workflow_id.into_server() {
@@ -658,7 +660,7 @@ impl WorkflowView {
             } else {
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                     toast_stack.add_ephemeral_toast_by_type(
-                        ToastType::CloudObjectNotFound,
+                        ToastType::StoredObjectNotFound,
                         window_id,
                         ctx,
                     );
@@ -688,7 +690,7 @@ impl WorkflowView {
             });
         let settings = settings.clone();
         ctx.spawn(fetch_cloud_object_rx, move |me, _, ctx| {
-            if let Some(workflow) = CloudModel::as_ref(ctx)
+            if let Some(workflow) = ObjectStoreModel::as_ref(ctx)
                 .get_workflow(&SyncId::ServerId(workflow_id))
                 .cloned()
             {
@@ -696,7 +698,7 @@ impl WorkflowView {
             } else {
                 ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
                     toast_stack.add_ephemeral_toast_by_type(
-                        ToastType::CloudObjectNotFound,
+                        ToastType::StoredObjectNotFound,
                         window_id,
                         ctx,
                     );
@@ -708,7 +710,7 @@ impl WorkflowView {
 
     pub fn load(
         &mut self,
-        workflow: CloudWorkflow,
+        workflow: WorkflowObject,
         settings: &OpenWarpDriveObjectSettings,
         mode: WorkflowViewMode,
         ctx: &mut ViewContext<Self>,
@@ -841,7 +843,7 @@ impl WorkflowView {
 
         if let Some(focused_folder_id) = settings.focused_folder_id.map(SyncId::ServerId) {
             self.view_in_warp_drive(
-                WarpDriveItemId::Object(CloudObjectTypeAndId::Folder(focused_folder_id)),
+                WarpDriveItemId::Object(ObjectTypeAndId::Folder(focused_folder_id)),
                 ctx,
             );
         }
@@ -879,7 +881,7 @@ impl WorkflowView {
     pub fn workflow_link(&self, ctx: &AppContext) -> Option<String> {
         let id = self.workflow_id();
 
-        if let Some(workflow) = CloudModel::as_ref(ctx).get_workflow(&id) {
+        if let Some(workflow) = ObjectStoreModel::as_ref(ctx).get_workflow(&id) {
             return workflow.object_link();
         }
 
@@ -888,13 +890,13 @@ impl WorkflowView {
 
     /// Generic object telemetry metadata for the currently-open object.
     #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
-    fn telemetry_metadata(&self, ctx: &mut ViewContext<Self>) -> CloudObjectTelemetryMetadata {
-        let space = CloudModel::as_ref(ctx)
+    fn telemetry_metadata(&self, ctx: &mut ViewContext<Self>) -> ObjectTelemetryMetadata {
+        let space = ObjectStoreModel::as_ref(ctx)
             .get_workflow(&self.workflow_id)
             .map(|workflow| workflow.space(ctx));
 
-        CloudObjectTelemetryMetadata {
-            object_type: TelemetryCloudObjectType::Workflow,
+        ObjectTelemetryMetadata {
+            object_type: TelemetryObjectType::Workflow,
             object_uid: self.workflow_id.into_server(),
             space: space.map(Into::into),
             team_uid: match self.owner {
@@ -910,12 +912,12 @@ impl WorkflowView {
 
     /// The current user's access level for this workflow.
     fn access_level(&self, app: &AppContext) -> SharingAccessLevel {
-        CloudViewModel::as_ref(app).access_level(&self.workflow_id.uid(), app)
+        ObjectStoreViewModel::as_ref(app).access_level(&self.workflow_id.uid(), app)
     }
 
     /// Whether or not the current user is allowed to edit this workflow.
     fn editability(&self, app: &AppContext) -> ContentEditability {
-        CloudViewModel::as_ref(app).object_editability(&self.workflow_id.uid(), app)
+        ObjectStoreViewModel::as_ref(app).object_editability(&self.workflow_id.uid(), app)
     }
 
     pub fn pane_configuration(&self) -> &ModelHandle<PaneConfiguration> {
@@ -1271,7 +1273,7 @@ impl WorkflowView {
         let mut sent_requests: HashSet<SyncId> = HashSet::new();
         let owner = match self.workflow_view_mode {
             WorkflowViewMode::View => None,
-            WorkflowViewMode::Edit => CloudModel::as_ref(ctx)
+            WorkflowViewMode::Edit => ObjectStoreModel::as_ref(ctx)
                 .get_workflow(&self.workflow_id)
                 .map(|workflow| workflow.permissions().owner),
             WorkflowViewMode::Create => self.owner,
@@ -1407,7 +1409,7 @@ impl WorkflowView {
     fn try_set_view_mode(&mut self, ctx: &mut ViewContext<Self>) {
         self.workflow_view_mode =
             WorkflowViewMode::supported_view_mode(Some(self.workflow_id), ctx);
-        // always reset with the cloudmodel version whether or not we successfully
+        // always reset with the ObjectStoreModel version whether or not we successfully
         // transition to the view mode. This reset doesn't always set the correct revision_ts
         // we rely on the load called when we handle the update_manager's change event.
         self.reset(ctx);
@@ -1457,7 +1459,7 @@ impl WorkflowView {
             WorkflowViewMode::Create => WorkflowViewMode::Create,
         };
 
-        // Always reset the view with cloud model when we transition to the view or edit mode.
+        // Always reset the view with object store when we transition to the view or edit mode.
         // This reset is necessary when transitioning to edit mode so that we can reset the `revision_ts`.
         // Without this, any updates after a first update will get rejected, due to a perceived conflict.
         if matches!(self.workflow_view_mode, WorkflowViewMode::View)
@@ -1478,14 +1480,14 @@ impl WorkflowView {
     fn copy_to_command_line(&mut self, ctx: &mut ViewContext<Self>) {
         // If we are in a context where we can run workflows AND the content is dirty (e.g. not
         // saved). Copy the current workflow to the command line buffer.
-        // Otherwise use the workflow that exists in cloud model cache.
+        // Otherwise use the workflow that exists in object store cache.
         // This is because we want to use the version of the edited command that a user has in the
         // buffer if they click to execute a command from the workflow in pane.
         if self.is_workflow_dirty(ctx) {
             let new_workflow = self.create_workflow_object_from_input(ctx);
-            if let Some(cloud_workflow) = self.get_cloud_workflow(ctx) {
-                let mut cloned_cloud_workflow = cloud_workflow.clone();
-                cloned_cloud_workflow.set_model(CloudWorkflowModel::new(new_workflow));
+            if let Some(workflow) = self.get_cloud_workflow(ctx) {
+                let mut cloned_cloud_workflow = workflow.clone();
+                cloned_cloud_workflow.set_model(WorkflowObjectModel::new(new_workflow));
                 if let Some(owner) = self.owner {
                     ctx.emit(WorkflowViewEvent::RunWorkflow {
                         workflow: Arc::new(WorkflowType::Cloud(Box::new(cloned_cloud_workflow))),
@@ -1631,7 +1633,7 @@ impl WorkflowView {
                             space,
                             self.initial_folder_id,
                             client_id,
-                            CloudObjectEventEntrypoint::Unknown,
+                            StoredObjectEventEntrypoint::Unknown,
                             true,
                             ctx,
                         );
@@ -1816,7 +1818,7 @@ impl WorkflowView {
                 .map(BreadcrumbState::new)
                 .collect();
         } else {
-            log::warn!("Workflow not found from cloudmodel, could not update breadcrumb");
+            log::warn!("Workflow not found from ObjectStoreModel, could not update breadcrumb");
         }
     }
 
@@ -2004,7 +2006,7 @@ impl WorkflowView {
 
         UpdateManager::handle(ctx).update(ctx, |update_manager, ctx| {
             update_manager.duplicate_object(
-                &CloudObjectTypeAndId::from_id_and_type(self.workflow_id, ObjectType::Workflow),
+                &ObjectTypeAndId::from_id_and_type(self.workflow_id, ObjectType::Workflow),
                 ctx,
             );
         });
@@ -2020,7 +2022,7 @@ impl WorkflowView {
 
         UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
             update_manager.trash_object(
-                CloudObjectTypeAndId::from_id_and_type(self.workflow_id, ObjectType::Workflow),
+                ObjectTypeAndId::from_id_and_type(self.workflow_id, ObjectType::Workflow),
                 ctx,
             );
         });
@@ -2033,18 +2035,20 @@ impl WorkflowView {
 
         UpdateManager::handle(ctx).update(ctx, move |update_manager, ctx| {
             update_manager.untrash_object(
-                CloudObjectTypeAndId::from_id_and_type(self.workflow_id, ObjectType::Workflow),
+                ObjectTypeAndId::from_id_and_type(self.workflow_id, ObjectType::Workflow),
                 ctx,
             );
         });
     }
 
-    fn get_cloud_workflow(&mut self, ctx: &mut ViewContext<Self>) -> Option<CloudWorkflow> {
-        if let Some(workflow) = CloudModel::as_ref(ctx).get_workflow(&self.workflow_id.clone()) {
+    fn get_cloud_workflow(&mut self, ctx: &mut ViewContext<Self>) -> Option<WorkflowObject> {
+        if let Some(workflow) =
+            ObjectStoreModel::as_ref(ctx).get_workflow(&self.workflow_id.clone())
+        {
             return Some(workflow.clone());
         } else {
             log::warn!(
-                "Workflow for id: {} not found in cloudmodel",
+                "Workflow for id: {} not found in ObjectStoreModel",
                 self.workflow_id
             );
         }
@@ -2759,13 +2763,13 @@ impl WorkflowView {
     }
 
     pub(super) fn render_trash_banner(&self, app: &AppContext) -> Option<Box<dyn Element>> {
-        let cloud_model = CloudModel::as_ref(app);
+        let object_store_model = ObjectStoreModel::as_ref(app);
         let deleted = if matches!(self.workflow_view_mode, WorkflowViewMode::Create) {
             return None;
         } else {
-            match cloud_model.get_workflow(&self.workflow_id) {
+            match object_store_model.get_workflow(&self.workflow_id) {
                 Some(notebook) => {
-                    if notebook.is_trashed(cloud_model) {
+                    if notebook.is_trashed(object_store_model) {
                         false
                     } else {
                         return None;
@@ -3110,7 +3114,7 @@ impl TypedActionView for WorkflowView {
             #[cfg(target_family = "wasm")]
             WorkflowAction::OpenLinkOnDesktop(url) => {
                 send_telemetry_from_ctx!(
-                    TelemetryEvent::WebCloudObjectOpenedOnDesktop {
+                    TelemetryEvent::WebObjectOpenedOnDesktop {
                         object_metadata: self.telemetry_metadata(ctx)
                     },
                     ctx
@@ -3167,7 +3171,7 @@ impl BackingView for WorkflowView {
             }
         }
 
-        let space = CloudViewModel::as_ref(ctx).object_space(&self.workflow_id.uid(), ctx);
+        let space = ObjectStoreViewModel::as_ref(ctx).object_space(&self.workflow_id.uid(), ctx);
 
         // Add "Duplicate" to menu
         if space != Some(Space::Shared) {

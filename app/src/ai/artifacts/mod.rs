@@ -1,16 +1,10 @@
 use std::path::Path;
 
 use anyhow::anyhow;
-use ui_components::lightbox::{LightboxImage, LightboxImageSource};
 use warp_core::report_error;
 use warp_multi_agent_api as api;
-use warpui::SingletonEntity;
 
-use crate::ai::artifact_download::sanitized_basename;
 use crate::notebooks::NotebookId;
-use crate::view_components::DismissibleToast;
-use crate::workspace::ToastStack;
-use crate::workspace::WorkspaceAction;
 
 pub mod buttons;
 pub use buttons::{ArtifactButtonsRow, ArtifactButtonsRowEvent};
@@ -198,47 +192,6 @@ impl From<api::message::artifact_event::PlanArtifact> for Artifact {
     }
 }
 
-impl TryFrom<warp_graphql::ai::AIConversationArtifact> for Artifact {
-    type Error = ();
-
-    fn try_from(value: warp_graphql::ai::AIConversationArtifact) -> Result<Self, Self::Error> {
-        match value {
-            warp_graphql::ai::AIConversationArtifact::PlanArtifact(plan) => Ok(Artifact::Plan {
-                document_uid: plan.document_uid.into_inner(),
-                notebook_uid: plan
-                    .notebook_uid
-                    .map(|id| NotebookId::from(id.into_inner())),
-                title: plan.title,
-            }),
-            warp_graphql::ai::AIConversationArtifact::PullRequestArtifact(pr) => {
-                let (repo, number) = parse_github_pr_url(&pr.url).unzip();
-                Ok(Artifact::PullRequest {
-                    url: pr.url,
-                    branch: pr.branch,
-                    repo,
-                    number,
-                })
-            }
-            warp_graphql::ai::AIConversationArtifact::ScreenshotArtifact(screenshot) => {
-                Ok(Artifact::Screenshot {
-                    artifact_uid: screenshot.artifact_uid.into_inner(),
-                    mime_type: screenshot.mime_type,
-                    description: screenshot.description,
-                })
-            }
-            warp_graphql::ai::AIConversationArtifact::FileArtifact(file) => Ok(Artifact::File {
-                artifact_uid: file.artifact_uid.into_inner(),
-                filepath: file.filepath.clone(),
-                filename: sanitized_basename(&file.filepath).unwrap_or(file.filepath),
-                mime_type: file.mime_type,
-                description: file.description,
-                size_bytes: file.size_bytes,
-            }),
-            warp_graphql::ai::AIConversationArtifact::Unknown => Err(()),
-        }
-    }
-}
-
 /// Parse GitHub PR URL to extract repo and number.
 /// Expected format: https://github.com/{owner}/{repo}/pull/{number}
 pub fn parse_github_pr_url(url: &str) -> Option<(String, u32)> {
@@ -271,74 +224,6 @@ where
             }
         })
         .collect())
-}
-
-pub fn file_button_label(filename: &str, filepath: &str) -> String {
-    if let Some(filename) = non_empty_trimmed(filename) {
-        return filename.to_string();
-    }
-    if let Some(filepath_basename) = sanitized_basename(filepath)
-        .as_deref()
-        .and_then(non_empty_trimmed)
-    {
-        return filepath_basename.to_string();
-    }
-    "File".to_string()
-}
-
-pub fn open_screenshot_lightbox<V: warpui::View>(
-    artifact_uids: &[String],
-    ctx: &mut warpui::ViewContext<V>,
-) {
-    let images: Vec<LightboxImage> = artifact_uids
-        .iter()
-        .map(|artifact_uid| {
-            log::warn!(
-                "Screenshot artifact {artifact_uid} cannot be loaded because cloud artifact \
-                 storage is removed in OpenWarp"
-            );
-            LightboxImage {
-                source: LightboxImageSource::Loading,
-                description: Some("Failed to load".to_string()),
-            }
-        })
-        .collect();
-    ctx.dispatch_typed_action(&WorkspaceAction::OpenLightbox {
-        images,
-        initial_index: 0,
-    });
-}
-
-pub fn download_file_artifact<V: warpui::View>(
-    artifact_uid: &str,
-    ctx: &mut warpui::ViewContext<V>,
-) {
-    log::warn!(
-        "File artifact {artifact_uid} cannot be downloaded because cloud artifact storage is \
-         removed in OpenWarp"
-    );
-    show_file_download_toast(
-        artifact_uid,
-        DismissibleToast::error(crate::t!("ai-artifact-prepare-download-failed")),
-        ctx,
-    );
-}
-
-fn show_file_download_toast<V: warpui::View>(
-    artifact_uid: &str,
-    toast: DismissibleToast<WorkspaceAction>,
-    ctx: &mut warpui::ViewContext<V>,
-) {
-    let toast_id = format!("artifact_download:{artifact_uid}");
-    let window_id = ctx.window_id();
-    ToastStack::handle(ctx).update(ctx, move |toast_stack, ctx| {
-        toast_stack.add_ephemeral_toast(toast.with_object_id(toast_id), window_id, ctx);
-    });
-}
-
-fn non_empty_trimmed(value: &str) -> Option<&str> {
-    let trimmed = value.trim();
-    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 #[cfg(test)]

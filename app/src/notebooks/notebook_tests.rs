@@ -2,13 +2,11 @@ use std::sync::Arc;
 
 use chrono::{Duration, Utc};
 use futures_util::future::BoxFuture;
-use itertools::Itertools;
 use warp_core::ui::appearance::Appearance;
 use warp_editor::editor::EditorView;
 use warpui::{
-    platform::WindowStyle, presenter::ChildView, r#async::Timer, telemetry::EventPayload,
-    AddSingletonModel, App, AppContext, Element, Entity, SingletonEntity, TypedActionView, View,
-    ViewHandle, WindowId,
+    platform::WindowStyle, presenter::ChildView, r#async::Timer, AddSingletonModel, App,
+    AppContext, Element, Entity, SingletonEntity, TypedActionView, View, ViewHandle, WindowId,
 };
 
 use crate::{
@@ -16,10 +14,11 @@ use crate::{
     cloud_object::{
         model::{
             actions::ObjectActions,
-            persistence::CloudModel,
-            view::{CloudViewModel, Editor, EditorState},
+            persistence::ObjectStoreModel,
+            view::{Editor, EditorState, ObjectStoreViewModel},
         },
-        Owner, Revision, ServerMetadata, ServerNotebook, ServerPermissions,
+        update_manager::UpdateManager,
+        Owner, StoredObjectMetadata, StoredObjectPermissions,
     },
     drive::OpenWarpDriveObjectSettings,
     editor::{DisplayPoint, EditorAction, SelectAction},
@@ -30,37 +29,31 @@ use crate::{
             keys::NotebookKeybindings, notebook_command::NotebookCommand, view::EditorViewAction,
         },
         notebook::FocusedComponent,
-        CloudNotebook, CloudNotebookModel, NotebookLocation,
+        NotebookLocation, NotebookObject, NotebookObjectModel,
     },
     pane_group::PaneEvent,
     search::files::model::FileSearchModel,
-    server::{
-        cloud_objects::update_manager::{InitialLoadResponse, UpdateManager},
-        ids::{ClientId, SyncId::ServerId},
-        server_api::ServerApiProvider,
-        telemetry::context_provider::AppTelemetryContextProvider,
-    },
+    server::ids::{ClientId, ServerId, SyncId},
     settings_view::keybindings::KeybindingChangedNotifier,
     terminal::keys::TerminalKeybindings,
     test_util::settings::initialize_settings_for_tests,
     workflows::{workflow::Workflow, WorkflowSource, WorkflowType},
     workspace::ActiveSession,
     workspaces::{
-        team_tester::TeamTesterStatus,
         user_profiles::{UserProfileWithUID, UserProfiles},
         user_workspaces::UserWorkspaces,
     },
     GlobalResourceHandles, GlobalResourceHandlesProvider, PrivacySettings,
 };
 
-use super::{NotebookEvent, NotebookView, EDIT_WINDOW_DURATION, SAVE_PERIOD};
+use super::{NotebookEvent, NotebookView, SAVE_PERIOD};
 
 fn initialize_app(app: &mut App) {
     initialize_settings_for_tests(app);
 
     let global_resources = GlobalResourceHandles::mock(app);
     app.add_singleton_model(|_| GlobalResourceHandlesProvider::new(global_resources));
-    app.add_singleton_model(CloudModel::mock);
+    app.add_singleton_model(ObjectStoreModel::mock);
     app.add_singleton_model(|_| NetworkStatus::new());
     app.add_singleton_model(|_| Appearance::mock());
     app.add_singleton_model(|_| KeybindingChangedNotifier::new());
@@ -72,15 +65,12 @@ fn initialize_app(app: &mut App) {
     app.add_singleton_model(TerminalKeybindings::new);
     app.add_singleton_model(PrivacySettings::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
-    app.add_singleton_model(TeamTesterStatus::mock);
     app.add_singleton_model(UpdateManager::mock);
-    app.add_singleton_model(CloudViewModel::mock);
+    app.add_singleton_model(ObjectStoreViewModel::mock);
     app.add_singleton_model(|_| UserProfiles::new(vec![]));
-    app.add_singleton_model(|_| ServerApiProvider::new_for_test());
     app.add_singleton_model(|_| ActiveSession::default());
     app.add_singleton_model(|_| ObjectActions::new(Vec::new()));
     app.add_singleton_model(|_| AuthStateProvider::new_for_test());
-    app.add_singleton_model(AppTelemetryContextProvider::new_context_provider);
     app.add_singleton_model(AuthManager::new_for_test);
     #[cfg(feature = "voice_input")]
     app.add_singleton_model(voice_input::VoiceInput::new);
@@ -131,7 +121,7 @@ fn create_notebook(app: &mut App) -> (WindowId, ViewHandle<NotebookView>, ViewHa
 fn open_notebook(
     app: &mut App,
     handle: &ViewHandle<NotebookView>,
-    notebook: CloudNotebook,
+    notebook: NotebookObject,
 ) -> BoxFuture<'static, ()> {
     let load_future = handle.update(app, |view, ctx| {
         view.load(notebook, &OpenWarpDriveObjectSettings::default(), ctx)
@@ -139,72 +129,42 @@ fn open_notebook(
     app.update(|ctx| ctx.await_spawned_future(load_future.future_id()))
 }
 
-fn cloud_notebook(title: impl Into<String>, data: impl Into<String>) -> CloudNotebook {
-    CloudNotebook::new_local(
-        CloudNotebookModel {
+fn cloud_notebook(title: impl Into<String>, data: impl Into<String>) -> NotebookObject {
+    local_notebook_with_id(SyncId::ClientId(ClientId::new()), title, data)
+}
+
+fn local_notebook_with_id(
+    id: crate::server::ids::SyncId,
+    title: impl Into<String>,
+    data: impl Into<String>,
+) -> NotebookObject {
+    NotebookObject::new(
+        id,
+        NotebookObjectModel {
             title: title.into(),
             data: data.into(),
             ai_document_id: None,
             conversation_id: None,
         },
-        Owner::mock_current_user(),
-        None,
-        ClientId::new(),
+        StoredObjectMetadata::mock(),
+        StoredObjectPermissions::mock_personal(),
     )
 }
 
-/// Mock a server notebook
-fn mock_server_notebook(title: impl Into<String>, data: impl Into<String>) -> ServerNotebook {
-    let metadata_ts = Utc::now().into();
-    ServerNotebook {
-        id: ServerId(123.into()),
-        model: CloudNotebookModel {
-            title: title.into(),
-            data: data.into(),
-            ai_document_id: None,
-            conversation_id: None,
-        },
-        metadata: ServerMetadata {
-            uid: 123.into(),
-            revision: Revision::now(),
-            metadata_last_updated_ts: metadata_ts,
-            trashed_ts: None,
-            folder_id: None,
-            is_welcome_object: false,
-            creator_uid: None,
-            last_editor_uid: None,
-            current_editor_uid: None,
-        },
-        permissions: ServerPermissions {
-            space: Owner::mock_current_user(),
-            guests: Vec::new(),
-            anyone_link_sharing: None,
-            permissions_last_updated_ts: metadata_ts,
-        },
-    }
+fn mock_stored_notebook(title: impl Into<String>, data: impl Into<String>) -> NotebookObject {
+    local_notebook_with_id(ServerId::from(123).into(), title, data)
 }
 
-/// Send changed objects to [`UpdateManager`] so that tests requiring "up-to-date" metadata can run.
-async fn initial_load(app: &mut App, updated_notebooks: impl Into<Vec<ServerNotebook>>) {
-    let response = InitialLoadResponse {
-        updated_notebooks: updated_notebooks.into(),
-        deleted_notebooks: Default::default(),
-        updated_workflows: Default::default(),
-        deleted_workflows: Default::default(),
-        updated_folders: Default::default(),
-        deleted_folders: Default::default(),
-        user_profiles: Default::default(),
-        updated_generic_string_objects: Default::default(),
-        deleted_generic_string_objects: Default::default(),
-        action_histories: Default::default(),
-        mcp_gallery: Default::default(),
-    };
-
-    UpdateManager::handle(app).update(app, |update_manager, ctx| {
-        update_manager.mock_initial_load(response, ctx);
+/// Seed changed objects directly into [`ObjectStoreModel`] so tests can simulate local restore.
+async fn initial_load(app: &mut App, updated_notebooks: impl Into<Vec<NotebookObject>>) {
+    ObjectStoreModel::handle(app).update(app, |model, _| {
+        for notebook in updated_notebooks.into() {
+            model.add_object(notebook.id, notebook);
+        }
     });
     let load_complete = app.read(|ctx| {
-        crate::cloud_object::model::persistence::CloudModel::as_ref(ctx).initial_load_complete()
+        crate::cloud_object::model::persistence::ObjectStoreModel::as_ref(ctx)
+            .initial_load_complete()
     });
     load_complete.await
 }
@@ -383,96 +343,6 @@ fn test_focus_tracking() {
     });
 }
 
-#[test]
-#[ignore]
-fn test_edit_telemetry() {
-    fn edit_events() -> Vec<serde_json::Value> {
-        warpui::telemetry::flush_events()
-            .into_iter()
-            .filter_map(|event| match event.payload {
-                EventPayload::NamedEvent { name, value, .. } if name == "Notebook Edited" => value,
-                _ => None,
-            })
-            .collect_vec()
-    }
-
-    App::test((), |mut app| async move {
-        initialize_app(&mut app);
-        initial_load(&mut app, []).await;
-
-        let (_, notebook, _) = create_notebook(&mut app);
-        open_notebook(
-            &mut app,
-            &notebook,
-            cloud_notebook("Test Notebook", "This is a notebook"),
-        )
-        .await;
-        let input_view = notebook.read(&app, |notebook, _| notebook.input.clone());
-
-        // The notebook should show in edit mode, with telemetry recording.
-        notebook.update(&mut app, |notebook, ctx| {
-            notebook.grab_edit_access(true, ctx);
-            assert_eq!(
-                notebook.active_notebook_data.as_ref(ctx).mode,
-                Mode::Editing
-            );
-            assert!(notebook.edit_telemetry_handle.is_some());
-            notebook.focus_input(ctx);
-        });
-
-        // With no edits, there are no events.
-        ensure_saved(&mut app, &notebook).await;
-        Timer::after(2 * EDIT_WINDOW_DURATION).await;
-        assert!(edit_events().is_empty());
-
-        // Make a small edit, which should get reported as non-meaningful.
-        input_view.update(&mut app, |input, ctx| {
-            input.user_typed("Hi", ctx);
-        });
-
-        ensure_saved(&mut app, &notebook).await;
-        Timer::after(2 * EDIT_WINDOW_DURATION).await;
-        assert_eq!(
-            edit_events(),
-            vec![serde_json::json!({
-                "notebook_id": None::<()>,
-                "meaningful_change": false,
-            })]
-        );
-
-        // If we switch to view mode, we stop recording elemetry.
-        notebook.update(&mut app, |notebook, ctx| {
-            notebook.switch_to_view(ctx);
-            assert!(notebook.edit_telemetry_handle.is_none());
-        });
-
-        // Telemetry resumes when we switch to editing.
-        notebook.update(&mut app, |notebook, ctx| {
-            notebook.switch_to_edit(ctx);
-            notebook.focus_input(ctx);
-            assert!(notebook.edit_telemetry_handle.is_some());
-        });
-
-        // Finally, a meaningful edit is recorded as such.
-        input_view.update(&mut app, |input, ctx| {
-            input.user_typed(
-                "This is a very very very very long edit. This is a heavy notebook user.",
-                ctx,
-            );
-        });
-
-        ensure_saved(&mut app, &notebook).await;
-        Timer::after(2 * EDIT_WINDOW_DURATION).await;
-        assert_eq!(
-            edit_events(),
-            vec![serde_json::json!({
-                "notebook_id": None::<()>,
-                "meaningful_change": true,
-            })]
-        );
-    });
-}
-
 /// Test to make sure we eagerly enter edit mode when user is already the current editor
 #[test]
 fn test_eager_baton_grab_same_current_editor() {
@@ -488,8 +358,8 @@ fn test_eager_baton_grab_same_current_editor() {
         // Set the current editor of the notebook to be the test notebook
         cloud_notebook.metadata.current_editor_uid = Some(TEST_USER_UID.to_string().clone());
 
-        // Add the notebook to cloud model
-        CloudModel::handle(&app).update(&mut app, |model, _| {
+        // Add the notebook to object store
+        ObjectStoreModel::handle(&app).update(&mut app, |model, _| {
             model.add_object(cloud_notebook.id, cloud_notebook.clone())
         });
 
@@ -535,15 +405,15 @@ fn test_not_eager_baton_grab_different_editor() {
         cloud_notebook.metadata.current_editor_uid = Some(uid.clone());
         UserProfiles::handle(&app).update(&mut app, |user_profiles, _| {
             user_profiles.insert_profiles(&vec![UserProfileWithUID {
-                firebase_uid: UserUid::new(&uid),
+                local_user_uid: UserUid::new(&uid),
                 display_name: Some(email.clone()),
                 email: email.clone(),
                 photo_url: "".to_string(),
             }]);
         });
 
-        // Add the notebook to cloud model
-        CloudModel::handle(&app).update(&mut app, |model, _| {
+        // Add the notebook to object store
+        ObjectStoreModel::handle(&app).update(&mut app, |model, _| {
             model.add_object(cloud_notebook.id, cloud_notebook.clone())
         });
 
@@ -584,31 +454,31 @@ fn test_baton_grab_editor_changed_offline() {
         let (_, notebook_view, _) = create_notebook(&mut app);
 
         // Create a notebook with no editor.
-        let mut server_notebook = mock_server_notebook("Test Notebook", "Some text");
-        let cloud_notebook = CloudNotebook::new_from_server(server_notebook.clone());
+        let mut updated_notebook = mock_stored_notebook("Test Notebook", "Some text");
+        let cloud_notebook = updated_notebook.clone();
 
-        // Add the notebook to the cloud model, with no editor.
-        CloudModel::handle(&app).update(&mut app, |cloud_model, _| {
-            cloud_model.add_object(cloud_notebook.id, cloud_notebook.clone());
+        // Add the notebook to the object store, with no editor.
+        ObjectStoreModel::handle(&app).update(&mut app, |object_store_model, _| {
+            object_store_model.add_object(cloud_notebook.id, cloud_notebook.clone());
         });
 
         // Open the notebook, before initial load has finished.
         let open_future = open_notebook(&mut app, &notebook_view, cloud_notebook);
 
         // In the meantime, complete initial load with a new editor.
-        server_notebook.metadata.metadata_last_updated_ts =
-            (Utc::now() + Duration::seconds(1)).into();
-        server_notebook.metadata.current_editor_uid = Some(other_uid.to_string());
+        updated_notebook.metadata.metadata_last_updated_ts =
+            Some((Utc::now() + Duration::seconds(1)).into());
+        updated_notebook.metadata.current_editor_uid = Some(other_uid.to_string());
         UserProfiles::handle(&app).update(&mut app, |user_profiles, _| {
             user_profiles.insert_profiles(&vec![UserProfileWithUID {
-                firebase_uid: UserUid::new(other_uid),
+                local_user_uid: UserUid::new(other_uid),
                 display_name: Some(other_email.to_string()),
                 email: other_email.to_string(),
                 photo_url: "".to_string(),
             }]);
         });
 
-        initial_load(&mut app, vec![server_notebook]).await;
+        initial_load(&mut app, vec![updated_notebook]).await;
 
         // The notebook should load and not take the baton.
         open_future.await;
@@ -639,23 +509,23 @@ fn test_baton_grab_editor_left_offline() {
         let (_, notebook_view, _) = create_notebook(&mut app);
 
         // Create a notebook with an editor.
-        let mut server_notebook = mock_server_notebook("Test Notebook", "Some text");
-        server_notebook.metadata.current_editor_uid = Some(other_uid.to_string());
-        let cloud_notebook = CloudNotebook::new_from_server(server_notebook.clone());
+        let mut updated_notebook = mock_stored_notebook("Test Notebook", "Some text");
+        updated_notebook.metadata.current_editor_uid = Some(other_uid.to_string());
+        let cloud_notebook = updated_notebook.clone();
 
-        // Add the notebook to the cloud model, with the saved editor.
-        CloudModel::handle(&app).update(&mut app, |cloud_model, _| {
-            cloud_model.add_object(cloud_notebook.id, cloud_notebook.clone());
+        // Add the notebook to the object store, with the saved editor.
+        ObjectStoreModel::handle(&app).update(&mut app, |object_store_model, _| {
+            object_store_model.add_object(cloud_notebook.id, cloud_notebook.clone());
         });
 
         // Open the notebook, before initial load has finished.
         let open_future = open_notebook(&mut app, &notebook_view, cloud_notebook);
 
         // In the meantime, complete initial load with no editor.
-        server_notebook.metadata.metadata_last_updated_ts =
-            (Utc::now() + Duration::seconds(1)).into();
-        server_notebook.metadata.current_editor_uid = None;
-        initial_load(&mut app, vec![server_notebook]).await;
+        updated_notebook.metadata.metadata_last_updated_ts =
+            Some((Utc::now() + Duration::seconds(1)).into());
+        updated_notebook.metadata.current_editor_uid = None;
+        initial_load(&mut app, vec![updated_notebook]).await;
 
         // The notebook should load and take the baton.
         open_future.await;
@@ -685,13 +555,11 @@ fn test_close_unmodified() {
 
         // OpenWarp(Wave 4):SyncQueue 整删,原 stop_dequeueing + assert queue 长度不适用。
 
-        // Create a notebook with a server ID, so it can be synced.
-        let cloud_notebook =
-            CloudNotebook::new_from_server(mock_server_notebook("Test", "Some text"));
+        let cloud_notebook = mock_stored_notebook("Test", "Some text");
         let notebook_id = cloud_notebook.id;
 
-        CloudModel::handle(&app).update(&mut app, |cloud_model, _| {
-            cloud_model.add_object(cloud_notebook.id, cloud_notebook.clone());
+        ObjectStoreModel::handle(&app).update(&mut app, |object_store_model, _| {
+            object_store_model.add_object(cloud_notebook.id, cloud_notebook.clone());
         });
 
         let (_, notebook_view, _) = create_notebook(&mut app);
@@ -702,7 +570,7 @@ fn test_close_unmodified() {
         notebook_view.update(&mut app, |notebook, ctx| notebook.on_detach(ctx));
 
         app.read(|ctx| {
-            let object = CloudModel::as_ref(ctx)
+            let object = ObjectStoreModel::as_ref(ctx)
                 .get_by_uid(&notebook_id.uid())
                 .expect("Notebook should exist");
             assert!(!object.metadata().has_pending_content_changes());
