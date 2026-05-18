@@ -29,11 +29,9 @@ use code_page::{CodeSettingsPageAction, CodeSettingsPageEvent};
 use features_page::{FeaturesPageView, FeaturesSettingsPageEvent};
 use itertools::Itertools as _;
 use keybindings::KeybindingsView;
-use main_page::{MainSettingsPageEvent, MainSettingsPageView};
 use mcp_servers_page::MCPServersSettingsPageView;
 use nav::{SettingsNavItem, SettingsUmbrella};
 use pathfinder_geometry::vector::Vector2F;
-use privacy_page::{PrivacyPageView, PrivacyPageViewEvent};
 use settings_file_footer::{render_footer, SettingsFooterKind, SettingsFooterMouseStates};
 use settings_page::{
     MatchData, SettingsPage, SettingsPageEvent, SettingsPageMeta, SettingsPageViewHandle,
@@ -75,15 +73,13 @@ mod execution_profile_view;
 mod features;
 mod features_page;
 pub mod keybindings;
-mod main_page;
 pub mod mcp_servers;
 pub mod mcp_servers_page;
 mod nav;
+mod network_page;
 pub mod pane_manager;
 // OpenWarp Wave 3-1:`platform` / `platform_page` 随 `OzCloudAPIKeys` settings 入口 +
 // Warp Inc 云端 API key 管理 UI 一同物理删。
-mod privacy;
-mod privacy_page;
 // OpenWarp Wave 6-8:`referrals_page` / `show_blocks_view` 随 `ReferralsClient` /
 // `BlockClient` trait 物理删 —— 两个页面全部 stub Err / 空列表,本地无价值。
 mod settings_file_footer;
@@ -99,7 +95,6 @@ mod warpify_page;
 pub(crate) use ai_page::cli_agent_settings_widget_id;
 pub use code_page::CodeSettingsPageView;
 pub use features_page::FeaturesPageAction;
-pub use privacy_page::PrivacyPageAction;
 pub use settings_page::{
     render_body_item_label, render_info_icon, render_input_list, render_separator, AdditionalInfo,
     InputListItem, LocalOnlyIconState, ToggleState,
@@ -147,8 +142,8 @@ pub(super) fn editor_text_colors(appearance: &Appearance) -> TextColors {
 pub enum SettingsViewEvent {
     Pane(PaneEvent),
     StartResize,
-    CheckForUpdate,
-    OpenWarpDrive,
+    // OpenWarp 去中心化分支:`CheckForUpdate` / `OpenWarpDrive` 变体随 Account
+    // 主设置页唯一发射者(`MainSettingsPageView`)一同物理删。
     ShowToast {
         message: String,
         flavor: ToastFlavor,
@@ -165,13 +160,10 @@ pub enum SettingsViewEvent {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub enum SettingsSection {
     About,
-    // 去中心化分支:Account 不再作为默认页(已从侧栏移除),保留枚举值避免外部引用断裂。
-    Account,
     MCPServers,
     Appearance,
     Features,
     Keybindings,
-    Privacy,
     WarpDrive,
     Warpify,
     /// Internal backing-page identifier for AISettingsPageView. Multiple subpages
@@ -189,6 +181,8 @@ pub enum SettingsSection {
     AgentProviders,
     Knowledge,
     ThirdPartyCLIAgents,
+    /// 全局 HTTP 代理设置页。受 `FeatureFlag::HttpProxySettings` 门控。
+    Network,
     /// Internal backing-page identifier for CodeSettingsPageView. EditorAndCodeReview
     /// is currently the only sub-page label, but we keep `Code` as the backing-page
     /// key so that page lookup still works after the LSP-management subpage was
@@ -207,12 +201,10 @@ impl Display for SettingsSection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s: String = match self {
             SettingsSection::About => crate::t!("settings-section-about"),
-            SettingsSection::Account => crate::t!("settings-section-account"),
             SettingsSection::MCPServers => crate::t!("settings-section-mcp-servers"),
             SettingsSection::Appearance => crate::t!("settings-section-appearance"),
             SettingsSection::Features => crate::t!("settings-section-features"),
             SettingsSection::Keybindings => crate::t!("settings-section-keybindings"),
-            SettingsSection::Privacy => crate::t!("settings-section-privacy"),
             SettingsSection::WarpDrive => crate::t!("settings-section-warp-drive"),
             SettingsSection::Warpify => crate::t!("settings-section-warpify"),
             SettingsSection::AI => crate::t!("settings-section-ai"),
@@ -227,8 +219,11 @@ impl Display for SettingsSection {
             SettingsSection::Code => crate::t!("settings-section-code"),
             SettingsSection::EditorAndCodeReview => {
                 crate::t!("settings-section-editor-and-code-review")
-            } // OpenWarp Wave 3-1:`OzCloudAPIKeys` Display arm 随 variant 一同物理删。
-              // OpenWarp Wave 7-3:`CloudEnvironments` Display arm 随 variant 物理删。
+            }
+            // 代理设置页面。i18n key `settings-section-network` 已在 en / zh-CN / ja 三种语言中齐全。
+            SettingsSection::Network => crate::t!("settings-section-network"),
+            // OpenWarp Wave 3-1:`OzCloudAPIKeys` Display arm 随 variant 一同物理删。
+            // OpenWarp Wave 7-3:`CloudEnvironments` Display arm 随 variant 物理删。
         };
         write!(f, "{s}")
     }
@@ -288,14 +283,12 @@ impl FromStr for SettingsSection {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "About" => Ok(Self::About),
-            "Account" => Ok(Self::Account),
             "AI" => Ok(Self::AI),
             "MCP Servers" => Ok(Self::MCPServers),
             "Appearance" => Ok(Self::Appearance),
             "Code" => Ok(Self::Code),
             "Features" => Ok(Self::Features),
             "Keyboard shortcuts" => Ok(Self::Keybindings),
-            "Privacy" => Ok(Self::Privacy),
             "Warpify" => Ok(Self::Warpify),
             "WarpDrive" | "Warp Drive" => Ok(Self::WarpDrive),
             // This page was called "Oz" at one point, keep for backward compatibility.
@@ -306,6 +299,7 @@ impl FromStr for SettingsSection {
             "Knowledge" => Ok(Self::Knowledge),
             "Third party CLI agents" | "ThirdPartyCLIAgents" => Ok(Self::ThirdPartyCLIAgents),
             "Editor and Code Review" | "EditorAndCodeReview" => Ok(Self::EditorAndCodeReview),
+            "Network" | "网络" => Ok(Self::Network),
             // OpenWarp Wave 3-1:`OzCloudAPIKeys` 随 UI 一同物理删。
             // OpenWarp Wave 7-3:`CloudEnvironments` FromStr arm 随 variant 物理删。
             _ => Err(()),
@@ -461,7 +455,6 @@ pub fn init_actions_from_parent_view<T: Action + Clone>(
     appearance_page::init_actions_from_parent_view(app, context, builder);
     features_page::init_actions_from_parent_view(app, context, builder);
     warpify_page::init_actions_from_parent_view(app, context, builder);
-    privacy_page::init_actions_from_parent_view(app, context, builder);
     ai_page::init_actions_from_parent_view(app, context, builder);
     code_page::init_actions_from_parent_view(app, context, builder);
 
@@ -770,7 +763,6 @@ pub enum SettingsAction {
     ToggleUmbrella(usize),
     AppearancePageToggle(AppearancePageAction),
     FeaturesPageToggle(FeaturesPageAction),
-    PrivacyPageToggle(PrivacyPageAction),
     AI(AISettingsPageAction),
     Code(CodeSettingsPageAction),
     WarpDrive(warp_drive_page::WarpDriveSettingsPageAction),
@@ -914,7 +906,6 @@ fn next_stop_index(current: usize, len: usize, direction: CycleDirection) -> usi
 macro_rules! update_page {
     ($handle:expr, $update:expr, $ctx:expr) => {
         match $handle {
-            SettingsPageViewHandle::Main(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Appearance(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Features(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Keybindings(handle) => $ctx.update_view(handle, $update),
@@ -922,12 +913,13 @@ macro_rules! update_page {
             // OpenWarp Wave 3-1:`OzCloudAPIKeys` arm 随 variant 一同物理删。
             // OpenWarp Wave 6-8:`SharedBlocks` / `Referrals` arm 随 variant 物理删。
             // OpenWarp Wave 7-3:`CloudEnvironments` arm 随 ambient-agent UI 一同物理删。
-            SettingsPageViewHandle::Privacy(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::AI(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::About(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Code(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::MCPServers(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::WarpDrive(handle) => $ctx.update_view(handle, $update),
+            // Issue #72: 全局 HTTP 代理设置页。
+            SettingsPageViewHandle::Network(handle) => $ctx.update_view(handle, $update),
         }
     };
 }
@@ -970,11 +962,6 @@ impl SettingsView {
             ctx.add_model(|_ctx| PaneConfiguration::new(crate::t!("settings-title")));
 
         let global_resource_handles = GlobalResourceHandlesProvider::as_ref(ctx).get().clone();
-        // Main settings page with accounts info
-        let main_page_handle = ctx.add_typed_action_view(MainSettingsPageView::new);
-        ctx.subscribe_to_view(&main_page_handle, |me, _, event, ctx| {
-            me.handle_main_page_event(event, ctx);
-        });
 
         // Appearance & themes page
         let appearance_page_handle = ctx.add_typed_action_view(AppearanceSettingsPageView::new);
@@ -1022,12 +1009,6 @@ impl SettingsView {
             me.handle_warpify_page_event(event, ctx);
         });
 
-        // Render the privacy page only if telemetry opt-out is enabled.
-        let privacy_page_handle = ctx.add_typed_action_view(PrivacyPageView::new);
-        ctx.subscribe_to_view(&privacy_page_handle, |me, _, event, ctx| {
-            me.handle_privacy_page_event(event, ctx);
-        });
-
         // OpenWarp Wave 6-8:Referrals 设置页随 `ReferralsPageView` / `ReferralsClient`
         // 物理删,handle / 事件订阅一同移除。
 
@@ -1042,6 +1023,10 @@ impl SettingsView {
         ctx.subscribe_to_view(&mcp_servers_page_handle, |me, _, event, ctx| {
             me.handle_mcp_servers_page_event(event, ctx);
         });
+
+        // Network (HTTP 代理) 设置页。受 FeatureFlag::HttpProxySettings 门控。
+        let network_page_handle =
+            ctx.add_typed_action_view(network_page::NetworkPageView::new);
 
         let font_family = Appearance::as_ref(ctx).ui_font_family();
         let search_editor = ctx.add_typed_action_view(|ctx| {
@@ -1072,7 +1057,6 @@ impl SettingsView {
         });
 
         let mut settings_pages = vec![
-            SettingsPage::new(main_page_handle),
             SettingsPage::new(ai_page_handle),
             SettingsPage::new(code_page_handle),
             SettingsPage::new(appearance_page_handle),
@@ -1085,9 +1069,13 @@ impl SettingsView {
 
         settings_pages.extend(vec![
             SettingsPage::new(mcp_servers_page_handle),
-            SettingsPage::new(privacy_page_handle),
             SettingsPage::new(about_page_handle),
         ]);
+
+        // 仅在 flag 启用时装配 Network page。
+        if warp_core::features::FeatureFlag::HttpProxySettings.is_enabled() {
+            settings_pages.push(SettingsPage::new(network_page_handle));
+        }
 
         // 去中心化分支:本地模式下移除所有云端账号 / 计费 / 团队 / 同步 / 分享相关的
         // 设置入口。
@@ -1101,11 +1089,17 @@ impl SettingsView {
             SettingsNavItem::Page(SettingsSection::Features),
             SettingsNavItem::Page(SettingsSection::Keybindings),
             SettingsNavItem::Page(SettingsSection::Warpify),
-            // 去中心化分支:Privacy 页保留本地 SecretRedactionWidget 与 PrivacyPolicyWidget。
-            // AppAnalyticsWidget / CrashReportsWidget 自身有 should_render 在 OpenWarp 自动隐藏。
-            SettingsNavItem::Page(SettingsSection::Privacy),
             SettingsNavItem::Page(SettingsSection::About),
         ];
+
+        // 仅在 flag 启用时在侧栏加 Network 页。插在 About 之前。
+        if warp_core::features::FeatureFlag::HttpProxySettings.is_enabled() {
+            let about_pos = nav_items
+                .iter()
+                .position(|i| matches!(i, SettingsNavItem::Page(SettingsSection::About)))
+                .unwrap_or(nav_items.len());
+            nav_items.insert(about_pos, SettingsNavItem::Page(SettingsSection::Network));
+        }
 
         // Resolve the initial page: map internal backing-page sections to their default subpage.
         let initial_page = match page {
@@ -1456,17 +1450,6 @@ impl SettingsView {
             .collect();
     }
 
-    fn handle_main_page_event(
-        &mut self,
-        event: &MainSettingsPageEvent,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        match event {
-            MainSettingsPageEvent::CheckForUpdate => ctx.emit(SettingsViewEvent::CheckForUpdate),
-            _ => (),
-        }
-    }
-
     fn handle_appearance_page_event(
         &mut self,
         event: &SettingsPageEvent,
@@ -1506,23 +1489,6 @@ impl SettingsView {
             SettingsPageEvent::Pane(_) => {
                 // These events are not handled in standalone settings - only used
                 // when the view is hosted inside a pane.
-            }
-        }
-    }
-
-    fn handle_privacy_page_event(
-        &mut self,
-        event: &PrivacyPageViewEvent,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        match event {
-            PrivacyPageViewEvent::ShowAddRegexModal => {
-                // Modal rendering is handled in get_modal_content_for_page
-                ctx.notify();
-            }
-            PrivacyPageViewEvent::HideAddRegexModal => {
-                // Modal rendering is handled in get_modal_content_for_page
-                ctx.notify();
             }
         }
     }
@@ -1709,19 +1675,19 @@ impl SettingsView {
 
     fn should_render_page(&self, settings_page: &SettingsPage, app: &AppContext) -> bool {
         match &settings_page.view_handle {
-            SettingsPageViewHandle::Main(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Keybindings(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Features(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Appearance(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::About(v) => v.as_ref(app).should_render(app),
             // OpenWarp Wave 3-1:`OzCloudAPIKeys` arm 随 variant 一同物理删。
             // OpenWarp Wave 6-8:`SharedBlocks` / `Referrals` arm 随 variant 物理删。
-            SettingsPageViewHandle::Privacy(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Warpify(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::AI(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::MCPServers(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Code(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::WarpDrive(v) => v.as_ref(app).should_render(app),
+            // Issue #72: 全局 HTTP 代理设置页。
+            SettingsPageViewHandle::Network(v) => v.as_ref(app).should_render(app),
         }
     }
 
@@ -1853,11 +1819,8 @@ impl SettingsView {
 
     fn input_tab(&mut self, ctx: &mut ViewContext<Self>) {
         if let Some(current_page) = self.current_settings_page() {
-            match &current_page.view_handle {
-                SettingsPageViewHandle::Keybindings(view_handle) => {
-                    view_handle.update(ctx, |view, ctx| view.on_tab_pressed(ctx));
-                }
-                _ => (),
+            if let SettingsPageViewHandle::Keybindings(view_handle) = &current_page.view_handle {
+                view_handle.update(ctx, |view, ctx| view.on_tab_pressed(ctx));
             };
         }
     }
@@ -1911,9 +1874,6 @@ impl SettingsView {
         app: &AppContext,
     ) -> Option<Box<dyn Element>> {
         match page_handle {
-            SettingsPageViewHandle::Privacy(view) => {
-                view.read(app, |view, _| view.get_modal_content())
-            }
             // OpenWarp Wave 3-1:`OzCloudAPIKeys` modal arm 随 UI 一同物理删。
             SettingsPageViewHandle::MCPServers(view) => {
                 view.read(app, |view, _| view.get_modal_content(app))
@@ -2261,15 +2221,6 @@ impl TypedActionView for SettingsView {
                     if let SettingsPageViewHandle::Features(view) = &features_page.view_handle {
                         view.update(ctx, |view, ctx| {
                             view.handle_action(feature_action, ctx);
-                        })
-                    }
-                }
-            }
-            SettingsAction::PrivacyPageToggle(privacy_action) => {
-                if let Some(privacy_page) = self.settings_page(SettingsSection::Privacy) {
-                    if let SettingsPageViewHandle::Privacy(view) = &privacy_page.view_handle {
-                        view.update(ctx, |view, ctx| {
-                            view.handle_action(privacy_action, ctx);
                         })
                     }
                 }

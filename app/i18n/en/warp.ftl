@@ -562,17 +562,17 @@ language-restart-required-body = Warp's UI language has been updated. Some text 
 
 # Sidebar / SettingsSection labels (Display impl)
 settings-section-about = About
-settings-section-account = Account
+# OpenWarp: settings-section-account removed alongside the Account settings page.
 settings-section-mcp-servers = MCP Servers
 settings-section-billing-and-usage = Billing and usage
 settings-section-appearance = Appearance
 settings-section-features = Features
 settings-section-keybindings = Keyboard shortcuts
-settings-section-privacy = Privacy
 settings-section-referrals = Referrals
 settings-section-shared-blocks = Shared blocks
 settings-section-warp-drive = Warp Drive
 settings-section-warpify = Warpify
+settings-section-network = Network
 settings-section-ai = AI
 settings-section-warp-agent = Warp Agent
 settings-section-agent-profiles = Profiles
@@ -613,29 +613,9 @@ settings-about-update-available = New version { $version } is available.
 settings-about-update-check-now = Check for updates
 settings-about-update-open-release = Download from GitHub
 
-# main_page.rs — account
-settings-main-sign-up = Local profile
-settings-main-local-profile = Local profile
-settings-main-plan-free = Free
-settings-main-compare-plans = Compare plans
-settings-main-contact-support = Contact support
-settings-main-manage-billing = Manage billing
-settings-main-upgrade-to-turbo = Upgrade to Turbo plan
-settings-main-upgrade-to-lightspeed = Upgrade to Lightspeed plan
+# OpenWarp: main_page.rs (Account / version / autoupdate) strings removed alongside
+# the Account settings page. The About page now owns version / update CTAs.
 
-# main_page.rs — version / autoupdate
-settings-main-version-label = Version
-settings-main-status-up-to-date = Up to date
-settings-main-cta-check-for-updates = Check for updates
-settings-main-status-checking = checking for update...
-settings-main-status-downloading = downloading update...
-settings-main-status-update-available = Update available
-settings-main-cta-relaunch-warp = Relaunch Warp
-settings-main-status-updating = Updating...
-settings-main-status-installed-update = Installed update
-settings-main-status-cant-install = A new version of Warp is available but can't be installed
-settings-main-status-cant-launch = A new version of Warp is installed but can't be launched.
-settings-main-cta-update-manually = Update Warp manually
 
 # --- ANCHOR-SUB-MCP (agent-settings-mcp) ---
 # 此锚点下放 settings_view/mcp_servers_page.rs 字符串
@@ -835,6 +815,39 @@ settings-warpify-use-tmux = Use Tmux Warpification
 settings-warpify-tmux-description = The tmux ssh wrapper works in many situations where the default one does not, but may require you to hit a button to warpify. Takes effect in new tabs.
 settings-warpify-ssh-tmux-toggle-binding-label = SSH session detection for Warpification
 
+# --- ANCHOR-SUB-NETWORK (network-settings) ---
+# Global HTTP proxy settings page (see Issue #72).
+settings-network-page-title = Network
+settings-network-header = HTTP proxy
+settings-network-description = Configure a global proxy for all outbound HTTP / WebSocket requests. Press Enter after editing a field to save.\nNew requests (BYOP model list, test connection, conversation loading, etc.) take effect immediately; long-lived clients constructed at startup (autoupdate, changelog) require an app restart.
+settings-network-mode-label = Proxy mode
+settings-network-mode-description = System follows OS / env vars (default); Custom uses the URL below; Off disables all proxying.
+settings-network-mode-system = System
+settings-network-mode-custom = Custom
+settings-network-mode-off = Off
+settings-network-url-label = Proxy URL
+settings-network-url-placeholder = http://proxy.example.com:8080
+settings-network-url-description = e.g. http://proxy.corp:8080
+settings-network-username-label = Username
+settings-network-username-placeholder = Username (optional)
+settings-network-username-description = If the proxy requires Basic Auth, fill in the username here.
+settings-network-password-label = Password
+settings-network-password-placeholder = Password (saved to the OS keyring on submit)
+settings-network-password-description = Submitted password is stored in the OS keyring (not in settings.toml).
+settings-network-no-proxy-label = No-proxy list
+settings-network-no-proxy-placeholder = localhost,127.0.0.1,.internal
+settings-network-no-proxy-description = Comma-separated hosts.
+settings-network-save = Save
+settings-network-clear = Clear
+settings-network-test-button = Test connection
+settings-network-test-idle-tcp = Probes the proxy host:port via TCP. Tests reachability of the proxy itself, not internet egress — suitable for intranet-only proxies.
+settings-network-test-idle-http = Sends a GET to {$url} through the current configuration. Tests internet egress.
+settings-network-test-running = Testing…
+settings-network-test-success-tcp = ✅ Proxy reachable ({$latency} ms)
+settings-network-test-success-http = ✅ Internet reachable ({$latency} ms)
+settings-network-test-failed-tcp = ❌ Cannot reach proxy: {$error}
+settings-network-test-failed-http = ❌ Connection failed: {$error}
+
 # --- ANCHOR-SUB-AI-PAGE (agent-settings-ai-page) ---
 # Section / sub-headers
 settings-ai-warp-agent-header = Warp Agent
@@ -901,7 +914,6 @@ settings-ai-profiles-description = Profiles let you define how your Agent operat
 # Anonymous / org gates
 settings-ai-sign-up = Enable local AI
 settings-ai-anonymous-create-account = Local AI features do not require an account.
-settings-ai-org-disallows-remote-session = Your organization disallows AI when the active pane contains content from a remote session
 settings-ai-org-enforced-tooltip = This option is enforced by your organization's settings and cannot be customized.
 settings-ai-restricted-billing = Restricted due to billing issue
 settings-ai-unlimited = Unlimited
@@ -909,6 +921,7 @@ settings-ai-unlimited = Unlimited
 # AI Input section
 settings-ai-show-input-hint-text = Show input hint text
 settings-ai-show-agent-tips = Show agent tips
+settings-ai-show-agent-zero-state-hints = Show Agent shortcut hints
 settings-ai-include-agent-commands-in-history = Include agent-executed commands in history
 settings-ai-autodetect-agent-prompts = Autodetect agent prompts in terminal input
 settings-ai-autodetect-terminal-commands = Autodetect terminal commands in agent input
@@ -962,8 +975,6 @@ settings-ai-coding-agent-select-header = Select coding agent
 # Experimental / Agent
 settings-ai-cloud-agent-computer-use = Computer use in agents
 settings-ai-cloud-agent-computer-use-description = Enable computer use in agent conversations started from the Warp app.
-settings-ai-orchestration-label = Orchestration
-settings-ai-orchestration-description = Enable multi-agent orchestration, allowing the agent to spawn and coordinate parallel sub-agents.
 
 # AWS Bedrock
 settings-ai-aws-bedrock-toggle = Use AWS Bedrock credentials
@@ -1134,42 +1145,6 @@ settings-code-project-explorer = Project explorer
 settings-code-project-explorer-desc = Adds an IDE-style project explorer / file tree to the left side tools panel.
 settings-code-global-search = Global file search
 settings-code-global-search-desc = Adds global file search to the left side tools panel.
-
-# --- ANCHOR-SUB-PRIVACY (agent-settings-privacy) ---
-settings-privacy-page-title = Privacy
-settings-privacy-modal-add-regex-title = Add regex pattern
-settings-privacy-safe-mode-title = Secret redaction
-settings-privacy-safe-mode-description = When this setting is enabled, Warp will scan blocks, the contents of Warp Drive objects, and Oz prompts for potential sensitive information and prevent saving or sending this data to any servers. You can customize this list via regexes.
-settings-privacy-user-secret-regex-title = Custom secret redaction
-settings-privacy-user-secret-regex-description = Use regex to define additional secrets or data you'd like to redact. This will take effect when the next command runs. You can use the inline (?i) flag as a prefix to your regex to make it case-insensitive.
-settings-privacy-telemetry-title = Help improve Warp
-settings-privacy-telemetry-description = OpenWarp keeps diagnostics local by default. Local Agent features do not require remote collection.
-settings-privacy-telemetry-description-old = OpenWarp keeps diagnostics local by default. Console input and output stay local unless you configure an external provider.
-settings-privacy-telemetry-free-tier-note = Local Agent features do not require analytics.
-settings-privacy-telemetry-docs-link = Read more about Warp's use of data
-settings-privacy-policy-title = Privacy policy
-settings-privacy-policy-link = Read Warp's privacy policy
-settings-privacy-tab-personal = Personal
-settings-privacy-tab-enterprise = Enterprise
-settings-privacy-enterprise-readonly = Enterprise secret redaction cannot be modified.
-settings-privacy-enterprise-empty = No enterprise regexes have been configured by your organization.
-settings-privacy-recommended = Recommended
-settings-privacy-add-all = Add all
-settings-privacy-add-regex-button = Add regex
-settings-privacy-enterprise-enabled-by-org = Enabled by your organization.
-settings-privacy-zdr-badge = ZDR
-settings-privacy-zdr-tooltip = Your administrator has enabled zero data retention for your team. User generated content will never be collected.
-settings-privacy-secret-display-mode-title = Secret visual redaction mode
-settings-privacy-secret-display-mode-description = Choose how secrets are visually presented in the block list while keeping them searchable. This setting only affects what you see in the block list.
-settings-privacy-crash-reports-title = Send crash reports
-settings-privacy-crash-reports-description = Crash reports assist with debugging and stability improvements.
-settings-privacy-cloud-conv-title = Store AI conversations locally
-settings-privacy-cloud-conv-description-on = Agent conversations are stored on this machine for local product functionality.
-settings-privacy-cloud-conv-description-off = Agent conversations are stored locally on this machine and are removed when local data is cleared.
-settings-privacy-org-managed-tooltip = This setting is managed by your organization.
-settings-privacy-network-log-title = Network log console
-settings-privacy-network-log-description = We've built a native console that allows you to view all communications from Warp to external servers to ensure you feel comfortable that your work is always kept safe.
-settings-privacy-network-log-link = View network logging
 
 # --- ANCHOR-SUB-EXEC-MODAL-BLOCKS (agent-settings-misc) ---
 # ---- execution_profile_view ----
@@ -1762,12 +1737,12 @@ keybinding-desc-workspace-open-ai-fact-collection = Open AI Rules
 keybinding-desc-workspace-open-mcp-servers = Open MCP Servers
 keybinding-desc-workspace-jump-to-latest-toast = Jump to latest agent task
 keybinding-desc-workspace-toggle-notification-mailbox = Toggle notification mailbox
-keybinding-desc-workspace-toggle-agent-management-view = Toggle the agent management view
 
 # Settings pages
 keybinding-desc-workspace-show-settings = Open Settings
 keybinding-desc-workspace-show-settings-menu = Settings
-keybinding-desc-workspace-show-settings-account = Open Settings: Account
+# OpenWarp: keybinding-desc-workspace-show-settings-account removed alongside the
+# Account settings page.
 keybinding-desc-workspace-show-settings-appearance = Open Settings: Appearance
 keybinding-desc-workspace-show-settings-appearance-menu = Appearance...
 keybinding-desc-workspace-show-settings-features = Open Settings: Features
@@ -1777,7 +1752,6 @@ keybinding-desc-workspace-show-settings-keyboard-shortcuts = Open Settings: Keyb
 keybinding-desc-workspace-show-settings-keyboard-shortcuts-menu = Configure Keyboard Shortcuts...
 keybinding-desc-workspace-show-settings-about = Open Settings: About
 keybinding-desc-workspace-show-settings-about-menu = About Warp
-keybinding-desc-workspace-show-settings-privacy = Open Settings: Privacy
 keybinding-desc-workspace-show-settings-warpify = Open Settings: Warpify
 keybinding-desc-workspace-show-settings-warpify-menu = Configure Warpify...
 keybinding-desc-workspace-show-settings-ai = Open Settings: AI
@@ -2126,6 +2100,7 @@ agent-zero-state-title = New Oz agent conversation
 agent-zero-state-description = Send a prompt below to start a new conversation
 agent-zero-state-description-with-location = Send a prompt below to start a new conversation in `{ $location }`
 agent-zero-state-recent-activity = RECENT ACTIVITY
+agent-zero-state-hide-hints-tooltip = Hide shortcut hints (re-enable in Settings)
 inline-agent-header-prompt-to-interact-command = Prompt agent to interact with `{ $command }`
 inline-agent-header-prompt-to-interact-running-command = Prompt agent to interact with the running command
 inline-agent-header-waiting-on-instructions = Agent is waiting for instructions
@@ -2139,8 +2114,6 @@ agent-toolbar-available-chips = Available chips
 agent-message-bar-get-figma-mcp = Get Figma MCP
 agent-message-bar-enable-figma-mcp = Enable Figma MCP
 agent-message-bar-enabling = Enabling...
-orchestration-parent-conversation = Parent conversation
-orchestration-back-to-parent-conversation = Back to parent conversation
 child-agent-default-name = Agent
 agent-zero-state-switch-model = switch model
 agent-zero-state-go-back-to-terminal = go back to terminal
@@ -2180,7 +2153,6 @@ agent-error-attempting-resume-conversation = Attempting to resume conversation..
 toggle-setting-enable = Enable { $suffix }
 toggle-setting-disable = Disable { $suffix }
 
-toggle-suffix-ai = AI
 toggle-suffix-active-ai = Active AI
 toggle-suffix-ai-input-autodetect-agent = terminal command autodetection in agent input
 toggle-suffix-ai-input-autodetect-nld = natural language detection
@@ -2405,8 +2377,6 @@ slash-cmd-model-desc = Switch the base agent model
 slash-cmd-profile-desc = Switch the active execution profile
 slash-cmd-plan-desc = Prompt the agent to do some research and create a plan for a task
 slash-cmd-plan-hint = <describe your task>
-slash-cmd-orchestrate-desc = Break a task into subtasks and run them in parallel with multiple agents
-slash-cmd-orchestrate-hint = <describe your task>
 slash-cmd-compact-desc = Free up context by summarizing convo history
 slash-cmd-compact-hint = <optional custom summarization instructions>
 slash-cmd-compact-and-desc = Compact conversation and then send a follow-up prompt
@@ -2664,14 +2634,6 @@ workflow-ai-assist-error-rate-limited = Looks like you're out of AI credits. Ple
 workflow-enum-new = New
 workflow-alias-name-placeholder = alias name
 workflow-add-argument-tooltip = Add a workflow argument
-
-# --- ANCHOR-SUB-SETTINGS-PRIVACY-ADD-REGEX ---
-# Privacy settings add regex modal (app/src/settings_view/privacy/add_regex_modal.rs)
-settings-privacy-add-regex-name-placeholder = e.g. "Google API Key"
-settings-privacy-add-regex-name-label = Name (optional)
-settings-privacy-add-regex-pattern-label = Regex pattern
-settings-privacy-add-regex-invalid = Invalid regex
-settings-privacy-add-regex-cancel = Cancel
 
 # Workspace panels (app/src/workspace/view/*)
 workspace-conversation-list-search = Search
@@ -3434,7 +3396,6 @@ notifications-banner-allow-permissions-title = Don't forget to 'Allow' the permi
 notifications-banner-configure-notifications = Configure notifications
 notifications-banner-set-permissions = Set permissions
 ai-edit-api-keys = Edit API Keys
-ai-manage-privacy-settings = Manage privacy settings
 ai-block-manage-agent-permissions = Manage Agent permissions
 agent-zero-state-visit-docs = Visit docs
 ai-execution-profile-agent-decides = Agent decides

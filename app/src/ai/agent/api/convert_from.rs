@@ -58,7 +58,7 @@ pub(crate) fn convert_user_query_mode(mode: Option<&api::UserQueryMode>) -> User
 
     match &mode.r#type {
         Some(api::user_query_mode::Type::Plan(_)) => UserQueryMode::Plan,
-        Some(api::user_query_mode::Type::Orchestrate(_)) => UserQueryMode::Orchestrate,
+        Some(api::user_query_mode::Type::Orchestrate(_)) => UserQueryMode::Normal,
         None => UserQueryMode::Normal,
     }
 }
@@ -619,7 +619,7 @@ impl ConvertAPIToolCallToAIAgentAction for api::message::ToolCall {
             api::message::tool_call::Tool::UseComputer(_)
             | api::message::tool_call::Tool::RequestComputerUse(_) => {
                 // Computer Use 已被移除,模型即便发起这两类调用也不 dispatch。
-                return Err(ToolToAIAgentActionError::UnexpectedTool);
+                Err(ToolToAIAgentActionError::UnexpectedTool)
             }
             api::message::tool_call::Tool::Subagent(subagent) => {
                 use api::message::tool_call::subagent::Metadata;

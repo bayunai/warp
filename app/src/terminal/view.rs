@@ -2339,6 +2339,9 @@ pub struct TerminalView {
     /// `pane_tree_from_template_recursive` when a tab config has both
     /// commands and `PaneMode::Agent`.
     enter_agent_view_after_pending_commands: bool,
+    /// SSH 管理器创建的 tab 会先启动本地 shell，再执行 ssh 并等待远端 shell
+    /// bootstrap；默认 Agent 模式必须延后到远端会话可用后再进入。
+    enter_agent_view_after_ssh_bootstrap: bool,
     slow_bootstrap_banner: ViewHandle<Banner<TerminalAction>>,
     is_slow_bootstrap_banner_open: bool,
 
@@ -3772,6 +3775,7 @@ impl TerminalView {
             is_login_shell_bootstrapped: false,
             awaiting_pending_command_completion: false,
             enter_agent_view_after_pending_commands: false,
+            enter_agent_view_after_ssh_bootstrap: false,
             slow_bootstrap_banner,
             is_slow_bootstrap_banner_open: false,
             incompatible_configuration_banner,
@@ -6487,7 +6491,6 @@ impl TerminalView {
         }
 
         let is_active_and_long_running = active_command_block.is_active_and_long_running();
-        let is_oz_env_startup_command = active_command_block.is_oz_environment_startup_command();
         let is_running_in_band_command =
             model.block_list().is_writing_or_executing_in_band_command();
 
@@ -6496,7 +6499,6 @@ impl TerminalView {
 
         if (active_ai_block.is_none() || has_active_long_running_agent_interaction)
             && is_active_and_long_running
-            && (!false || !is_oz_env_startup_command)
             && !is_running_in_band_command
             && model.block_list().is_bootstrapped()
         {
@@ -11286,6 +11288,8 @@ impl TerminalView {
         }
 
         let is_subshell_or_ssh = session.is_subshell_or_ssh();
+        let is_ssh_session = matches!(session.session_type(), SessionType::WarpifiedRemote { .. })
+            || session.is_legacy_ssh_session();
 
         // Make sure we decorate any text that is already in the input.  We
         // need to make sure external commands have finished loading before
@@ -11314,6 +11318,15 @@ impl TerminalView {
         self.any_session_contains_restored_remote_blocks = self.contains_restored_remote_blocks();
         self.any_session_contains_remote_blocks |= self.active_block_is_considered_remote(ctx);
         self.update_focused_terminal_info(ctx);
+
+        if self.enter_agent_view_after_ssh_bootstrap && is_ssh_session {
+            self.enter_agent_view_after_ssh_bootstrap = false;
+            self.enter_agent_view_for_new_conversation(
+                None,
+                AgentViewEntryOrigin::DefaultSessionMode,
+                ctx,
+            );
+        }
 
         // At the end of bootstrapping, set the title to the title of
         // the selected conversation. If there is no selected conversation,
@@ -13279,6 +13292,10 @@ impl TerminalView {
     /// guided tutorial.
     pub fn clear_enter_agent_view_after_pending_commands(&mut self) {
         self.enter_agent_view_after_pending_commands = false;
+    }
+
+    pub fn set_enter_agent_view_after_ssh_bootstrap(&mut self) {
+        self.enter_agent_view_after_ssh_bootstrap = true;
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -18747,27 +18764,6 @@ impl TerminalView {
         }
     }
 
-    pub(crate) fn enter_ambient_agent_setup(
-        &mut self,
-        initial_prompt: Option<String>,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        if !false || !self.model.lock().shared_session_status().is_view_pending() {
-            // Ambient agent setup can only be done inside a shared session viewer; otherwise the backing terminal manager is incorrect.
-            return;
-        }
-
-        // Don't pass an initial prompt, which auto-sends the request.
-        self.enter_agent_view_for_new_conversation(None, AgentViewEntryOrigin::AmbientAgent, ctx);
-
-        if let Some(prompt) = initial_prompt {
-            self.input.update(ctx, |input, ctx| {
-                input.replace_buffer_content(&prompt, ctx);
-            });
-        }
-        self.focus_input_box(ctx);
-    }
-
     fn last_visible_item_is_agent_view_block_for_conversation(
         &self,
         conversation_id: AIConversationId,
@@ -23941,16 +23937,14 @@ impl View for TerminalView {
             self.render_grid_tooltip(&mut stack, &model, appearance, app);
         }
 
-        if !false {
-            // Show progress steps while waiting for an ambient agent to start.
-            if self
-                .ambient_agent_view_model
-                .as_ref(app)
-                .agent_progress()
-                .is_some()
-            {
-                stack.add_child(self.render_ambient_agent_progress(appearance, app));
-            }
+        // Show progress steps while waiting for an ambient agent to start.
+        if self
+            .ambient_agent_view_model
+            .as_ref(app)
+            .agent_progress()
+            .is_some()
+        {
+            stack.add_child(self.render_ambient_agent_progress(appearance, app));
         }
 
         self.maybe_render_onboarding_callout(
@@ -24217,9 +24211,6 @@ impl View for TerminalView {
                 stack.add_child(ChildView::new(sharer.inactivity_modal()).finish())
             }
         }
-
-        // First-time ambient-agent setup has been removed in OpenWarp.
-        if self.ambient_agent_view_model.as_ref(app).is_in_setup() {}
 
         if self.ssh_file_upload.as_ref(app).has_upload() {
             stack.add_child(

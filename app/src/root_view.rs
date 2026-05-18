@@ -1758,12 +1758,11 @@ impl RootView {
                 if matches!(
                     event,
                     AuthManagerEvent::AuthComplete | AuthManagerEvent::SkippedLogin
-                ) {
-                    if matches!(event, AuthManagerEvent::AuthComplete) {
-                        LLMPreferences::handle(ctx).update(ctx, |prefs, ctx| {
-                            prefs.refresh_available_models(ctx);
-                        });
-                    }
+                ) && matches!(event, AuthManagerEvent::AuthComplete)
+                {
+                    LLMPreferences::handle(ctx).update(ctx, |prefs, ctx| {
+                        prefs.refresh_available_models(ctx);
+                    });
                 }
             },
         );
@@ -2426,7 +2425,6 @@ impl RootView {
     /// OpenWarp(本地化,Phase 5):原 `handle_preferences_syncer_event` 在云端
     /// preferences 同步初始加载完成后应用 onboarding settings,随同步器物理删除。
     /// onboarding settings 现在在 onboarding 完成时直接应用,不需要延迟到 cloud sync 后。
-
     /// If onboarding stored a pending tutorial (because login was required first),
     /// start it now that the workspace exists.
     fn start_pending_tutorial(&mut self, ctx: &mut ViewContext<Self>) {
@@ -2454,7 +2452,7 @@ impl RootView {
                     view.open_vertical_tabs_panel_if_enabled(ctx);
                 });
             }
-        } else if *AISettings::as_ref(ctx).is_any_ai_enabled {
+        } else if AISettings::as_ref(ctx).is_any_ai_enabled(ctx) {
             workspace.update(ctx, |view, ctx| {
                 view.start_agent_onboarding_tutorial(tutorial, ctx);
             });

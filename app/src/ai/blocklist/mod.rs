@@ -5,8 +5,6 @@ pub mod block;
 pub mod code_block;
 mod context_model;
 mod controller;
-pub(crate) mod orchestration_event_streamer;
-pub(crate) mod orchestration_events;
 mod passive_suggestions;
 pub(super) use controller::RequestInput;
 pub mod history_model;
@@ -19,7 +17,6 @@ pub mod suggested_agent_mode_workflow_modal;
 pub mod suggested_rule_modal;
 mod suggestion_chip_view;
 pub mod summarization_cancel_dialog;
-pub(crate) mod telemetry;
 pub mod usage;
 
 pub(crate) mod telemetry_banner;
@@ -69,6 +66,9 @@ pub(crate) use view_util::format_credits;
 pub use crate::ai::blocklist::block::{secret_redaction, TextLocation};
 pub use block::keyboard_navigable_buttons;
 pub use block::toggleable_items;
+pub(crate) use controller::input_context::{
+    drive_object_attachment_for_reference, plan_attachment_for_reference,
+};
 pub use controller::input_context::{
     BLOCK_CONTEXT_ATTACHMENT_REGEX, DIFF_HUNK_ATTACHMENT_REGEX, DRIVE_OBJECT_ATTACHMENT_REGEX,
 };

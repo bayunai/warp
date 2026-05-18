@@ -43,14 +43,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::StreamExt;
+use instant::Instant;
 use serde_json::{json, Value};
 use uuid::Uuid;
 use warp_multi_agent_api as api;
 
 use genai::adapter::AdapterKind;
 use genai::chat::{
-    Binary, CacheControl, ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent,
-    ContentPart, MessageContent, Tool as GenaiTool, ToolCall, ToolResponse,
+    Binary, BinarySource, CacheControl, ChatMessage, ChatOptions, ChatRequest, ChatRole,
+    ChatStreamEvent, ContentPart, MessageContent, Tool as GenaiTool, ToolCall, ToolResponse,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget, WebConfig};
@@ -224,12 +225,14 @@ fn xml_attr(s: &str) -> String {
 ///
 /// **thinking-mode reasoning_content 回传 gate**(双向)。
 ///
-/// `force_echo_reasoning` 同时控制两件事,语义统一为「这个 endpoint 接受/需要
-/// `reasoning_content` 顶层字段」:
+/// `force_echo_reasoning` 同时控制两件事,语义统一为「这个 model 的 capability 声明了
+/// `interleaved.field = reasoning_content`」(对齐 opencode `model.capabilities.interleaved`):
 ///
-/// - `true`(DeepSeek api_type / OpenAI+kimi|moonshot):每条 assistant 必挂
-///   `reasoning_content`(有真实 reasoning 用之,无则挂非空占位)— 满足
-///   DeepSeek-v4-flash / Kimi 等 thinking-mode 服务端「字段必须存在」校验。
+/// - `true`(model_id 命中 `reasoning::INTERLEAVED_RULES` 子串表 — DeepSeek / Kimi /
+///   MiMo / Qwen3 / GLM thinking / MiniMax / Hunyuan / Ernie / Doubao / Yi 等;
+///   或 api_type 为 DeepSeek 整体 adapter):每条 assistant 必挂 `reasoning_content`
+///   (有真实 reasoning 用之,无则挂非空占位)— 满足 thinking-mode 服务端
+///   「字段必须存在」校验。
 /// - `false`(其他):**即便 stream 收到了真实 reasoning_content,回放时也丢弃**,
 ///   不在历史 assistant 上挂 `with_reasoning_content`。
 ///
@@ -410,6 +413,111 @@ fn mime_to_modality(mime: &str) -> &'static str {
     }
 }
 
+/// 把 `params.tasks` 收集成稳定的线性消息序,修复 Issue #94。
+///
+/// `params.tasks` 来自 [`crate::ai::agent::conversation::AIConversation::compute_active_tasks`],
+/// 后者用 `HashMap::into_values()` 收集 → task 间顺序不确定。旧实现直接
+/// `flat_map(|t| t.messages.iter())` 朴素拼接,在多 task 场景(LRC CLI subagent /
+/// `subagent` 工具衍生 subtask)下有两个缺陷:
+///   1. task 间相对顺序随机 → 历史轮的 user 消息可能被排到序列末尾,被上游模型
+///      当作"最新一轮 user message"(Issue #94 的直接现象)。
+///   2. LRC subagent spawn 时,当前轮 UserQuery 会被**同时**复制进 root task 和
+///      新建 subtask(见 `generate_byop_output` 流内的 subtask UserQuery 注入,
+///      该副本是 `CLISubagentView` 渲染所必需,不能在源头删),朴素拼接会让同一条
+///      user query 在请求里出现两次。
+///
+/// 修复:以 root task(无 parent,或 parent 不在 tasks 集合内)为起点做 DFS,遇到
+/// `Subagent` ToolCall 就下钻到对应 subtask —— 与 [`crate::ai::agent::task_store::TaskStore::all_linearized_messages`]
+/// 同一套确定性遍历;并对 UserQuery 按 `(request_id, query)` 去重,丢弃 LRC 复制出的
+/// subtask 副本。不同用户轮次 `request_id` 不同,不会被误删;`request_id` 为空的老
+/// 数据 / 测试桩则退回不去重,避免误伤。tasks 里没被 DFS 命中的孤儿 task 按 id 排序
+/// 追加到末尾兜底,确保不丢消息。
+fn collect_linearized_task_messages(tasks: &[api::Task]) -> Vec<&api::Message> {
+    use std::collections::{HashMap, HashSet};
+
+    if tasks.is_empty() {
+        return Vec::new();
+    }
+
+    let by_id: HashMap<&str, &api::Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
+
+    // root = 没有 parent,或 parent 不在当前 tasks 集合里的 task。
+    let root = tasks.iter().find(|t| match t.dependencies.as_ref() {
+        None => true,
+        Some(dep) => {
+            dep.parent_task_id.is_empty() || !by_id.contains_key(dep.parent_task_id.as_str())
+        }
+    });
+
+    fn push_msg<'a>(
+        msg: &'a api::Message,
+        out: &mut Vec<&'a api::Message>,
+        seen_user_queries: &mut HashSet<(&'a str, &'a str)>,
+    ) {
+        if let Some(api::message::Message::UserQuery(u)) = &msg.message {
+            if !msg.request_id.is_empty()
+                && !seen_user_queries.insert((msg.request_id.as_str(), u.query.as_str()))
+            {
+                return;
+            }
+        }
+        out.push(msg);
+    }
+
+    fn dfs<'a>(
+        task: &'a api::Task,
+        by_id: &HashMap<&'a str, &'a api::Task>,
+        visited_tasks: &mut HashSet<&'a str>,
+        out: &mut Vec<&'a api::Message>,
+        seen_user_queries: &mut HashSet<(&'a str, &'a str)>,
+    ) {
+        if !visited_tasks.insert(task.id.as_str()) {
+            return;
+        }
+        for msg in &task.messages {
+            push_msg(msg, out, seen_user_queries);
+            if let Some(api::message::Message::ToolCall(tc)) = &msg.message {
+                if let Some(api::message::tool_call::Tool::Subagent(sub)) = &tc.tool {
+                    if let Some(subtask) = by_id.get(sub.task_id.as_str()) {
+                        dfs(subtask, by_id, visited_tasks, out, seen_user_queries);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut out: Vec<&api::Message> = Vec::new();
+    let mut visited_tasks: HashSet<&str> = HashSet::new();
+    let mut seen_user_queries: HashSet<(&str, &str)> = HashSet::new();
+
+    if let Some(root) = root {
+        dfs(
+            root,
+            &by_id,
+            &mut visited_tasks,
+            &mut out,
+            &mut seen_user_queries,
+        );
+    }
+
+    // 孤儿 task 兜底:按 id 排序保证确定性。
+    let mut orphans: Vec<&api::Task> = tasks
+        .iter()
+        .filter(|t| !visited_tasks.contains(t.id.as_str()))
+        .collect();
+    orphans.sort_by(|a, b| a.id.cmp(&b.id));
+    for task in orphans {
+        if !visited_tasks.insert(task.id.as_str()) {
+            continue;
+        }
+        for msg in &task.messages {
+            push_msg(msg, &mut out, &mut seen_user_queries);
+        }
+    }
+
+    out
+}
+
 /// 把 RequestParams 翻译为 genai `ChatRequest`(含 system + messages + tools)。
 ///
 /// `force_echo_reasoning`:由 `super::reasoning::model_requires_reasoning_echo`
@@ -441,18 +549,10 @@ fn build_chat_request(
 
     let mut messages: Vec<ChatMessage> = Vec::new();
 
-    // 收集所有 task 的 messages,按时间戳排序。
-    let mut all_msgs: Vec<&api::Message> = params
-        .tasks
-        .iter()
-        .flat_map(|t| t.messages.iter())
-        .collect();
-    all_msgs.sort_by_key(|m| {
-        m.timestamp
-            .as_ref()
-            .map(|ts| (ts.seconds, ts.nanos))
-            .unwrap_or((0, 0))
-    });
+    // 收集所有 task 的 messages,经 `collect_linearized_task_messages` 做确定性
+    // DFS 线性化 + UserQuery 去重(修复 Issue #94 —— 历史轮 user 消息被乱序排到
+    // 末尾、或 LRC subagent 副本导致重复)。详见该函数文档。
+    let all_msgs: Vec<&api::Message> = collect_linearized_task_messages(&params.tasks);
 
     // OpenWarp BYOP 本地会话压缩:把 conversation.compaction_state 应用到 message 序列。
     //   1. 过滤已被某次压缩覆盖的 (user, assistant) 对(`hidden_message_ids`)
@@ -598,11 +698,22 @@ fn build_chat_request(
                             .collect()
                     })
                     .unwrap_or_default();
+                let mut history_prefixes: Vec<String> = Vec::new();
+                if let Some(prefix) =
+                    user_context::render_api_referenced_attachments(&u.referenced_attachments)
+                {
+                    history_prefixes.push(prefix);
+                }
+                let history_text = if history_prefixes.is_empty() {
+                    u.query.clone()
+                } else {
+                    format!("{}\n\n{}", history_prefixes.join("\n\n"), u.query)
+                };
                 if history_binaries.is_empty() {
-                    messages.push(ChatMessage::user(u.query.clone()));
+                    messages.push(ChatMessage::user(history_text));
                 } else {
                     messages.push(build_user_message_with_binaries(
-                        u.query.clone(),
+                        history_text,
                         history_binaries,
                         api_type,
                         model_id,
@@ -692,6 +803,7 @@ fn build_chat_request(
             AIAgentInput::UserQuery {
                 query,
                 context,
+                referenced_attachments,
                 running_command,
                 ..
             } => {
@@ -730,6 +842,10 @@ fn build_chat_request(
                 let user_attachments = user_context::collect_user_attachments(context);
                 if let Some(p) = &user_attachments.prefix {
                     prefixes.push(p.clone());
+                }
+                if let Some(p) = user_context::render_referenced_attachments(referenced_attachments)
+                {
+                    prefixes.push(p);
                 }
                 let full_text = match (prefixes.is_empty(), suffixes.is_empty()) {
                     (true, true) => query.clone(),
@@ -856,7 +972,26 @@ fn build_chat_request(
     // 这里统一兜底:末尾若是 assistant,追加一条隐式 user 消息让上游继续。
     ensure_ends_with_user(&mut messages);
 
-    let tools_array = build_tools_array(params);
+    let mut tools_array = build_tools_array(params);
+
+    // Anthropic 路径:给 tools 数组**最后一个 tool**打 1h cache_control breakpoint,
+    // 使整个 tools 段成为长 TTL 的静态前缀(对齐 Zed
+    // `crates/anthropic/src/completion.rs::254-258`)。
+    //
+    // 处理顺序 `tools → system → messages`,长 TTL 必须在短 TTL 之前。本路径下:
+    // - tools 末尾 1h(此处)
+    // - system 1h(`apply_caching_anthropic` 给 ChatRole::System message)
+    // - messages 尾部 5m(`apply_caching_anthropic` 给 last 2 non-system)
+    //
+    // tools 段在 session 内变化最少(切 web_search / plan_mode / LRC 才变),命中率
+    // 极高,1h 写入 2× base 摊到多次复用,等效近 0 — 同时挡住外部反代在 system
+    // 上注入 5m 引发的 1h-after-5m 排序错误(让 tools 1h 这一个 breakpoint 接管
+    // 整个 tools+system 静态前缀)。
+    if matches!(api_type, AgentProviderApiType::Anthropic) {
+        if let Some(last_tool) = tools_array.last_mut() {
+            last_tool.cache_control = Some(CacheControl::Ephemeral1h);
+        }
+    }
 
     // 出站消息文本透传给 `serde_json` 处理 JSON escape,不再做激进的字符级
     // sanitize(参考 zed `into_anthropic` / opencode `provider/transform.ts`,
@@ -877,7 +1012,7 @@ fn build_chat_request(
     //   里设置(请求级别),也来自 opencode 同一组规则的下游 fallback。
     let messages = if matches!(api_type, AgentProviderApiType::Anthropic) {
         let mut msgs: Vec<ChatMessage> = std::iter::once(ChatMessage::system(system_text.clone()))
-            .chain(messages.into_iter())
+            .chain(messages)
             .collect();
         apply_caching_anthropic(&mut msgs);
         msgs
@@ -898,6 +1033,307 @@ fn build_chat_request(
     req
 }
 
+const BYOP_DIAG_SNIPPET_CHARS: usize = 240;
+
+fn is_placeholder_tool_response_content(content: &str) -> bool {
+    content == "(tool 执行结果未保留)"
+}
+
+fn snippet_for_log(s: &str, max_chars: usize) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    for (idx, ch) in s.chars().enumerate() {
+        if idx >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        match ch {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                let _ = write!(out, "\\u{{{:04x}}}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn json_value_for_log(value: &Value) -> (usize, String) {
+    let json = serde_json::to_string(value)
+        .unwrap_or_else(|_| "<failed-to-serialize-json-value>".to_owned());
+    (json.len(), snippet_for_log(&json, BYOP_DIAG_SNIPPET_CHARS))
+}
+
+fn binary_for_log(binary: &Binary) -> String {
+    let name = binary
+        .name
+        .as_deref()
+        .map(|n| snippet_for_log(n, 80))
+        .unwrap_or_default();
+    match &binary.source {
+        BinarySource::Base64(data) => format!(
+            "mime={} name={} source=base64 chars={}",
+            binary.content_type,
+            name,
+            data.len()
+        ),
+        BinarySource::Url(url) => format!(
+            "mime={} name={} source=url chars={} url={}",
+            binary.content_type,
+            name,
+            url.len(),
+            snippet_for_log(url, 120)
+        ),
+    }
+}
+
+fn log_chat_request_details(
+    chat_req: &ChatRequest,
+    model_id: &str,
+    api_type: AgentProviderApiType,
+) {
+    let system_in_head = matches!(api_type, AgentProviderApiType::Anthropic)
+        && chat_req
+            .messages
+            .first()
+            .map(|m| matches!(m.role, ChatRole::System))
+            .unwrap_or(false);
+    let tool_count = chat_req.tools.as_ref().map(|t| t.len()).unwrap_or(0);
+    let tool_names: Vec<String> = chat_req
+        .tools
+        .as_ref()
+        .map(|tools| tools.iter().map(|t| t.name.as_str().to_owned()).collect())
+        .unwrap_or_default();
+    log::info!(
+        "[byop-diag] request summary: adapter={:?} model={} system_len={} \
+         system_in_messages_head={} messages={} tools={} tool_names={:?} \
+         previous_response_id_present={} store={:?} system_snippet={:?}",
+        adapter_kind_for(api_type),
+        model_id,
+        chat_req.system.as_deref().map(str::len).unwrap_or(0),
+        system_in_head,
+        chat_req.messages.len(),
+        tool_count,
+        tool_names,
+        chat_req.previous_response_id.is_some(),
+        chat_req.store,
+        chat_req
+            .system
+            .as_deref()
+            .map(|s| snippet_for_log(s, BYOP_DIAG_SNIPPET_CHARS))
+            .unwrap_or_default(),
+    );
+
+    if let Some(tools) = &chat_req.tools {
+        for (idx, tool) in tools.iter().enumerate() {
+            let schema_len = tool
+                .schema
+                .as_ref()
+                .and_then(|schema| serde_json::to_string(schema).ok())
+                .map(|schema| schema.len())
+                .unwrap_or(0);
+            log::info!(
+                "[byop-diag] request tool[{idx}]: name={} desc_len={} schema_len={} \
+                 strict={:?} cache_control={:?}",
+                tool.name.as_str(),
+                tool.description.as_deref().map(str::len).unwrap_or(0),
+                schema_len,
+                tool.strict,
+                tool.cache_control,
+            );
+        }
+    }
+
+    let flow: Vec<String> = chat_req
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(idx, msg)| {
+            let text_len: usize = msg.content.texts().iter().map(|t| t.len()).sum();
+            let tool_call_ids: Vec<String> = msg
+                .content
+                .tool_calls()
+                .iter()
+                .map(|tc| tc.call_id.clone())
+                .collect();
+            let tool_response_ids: Vec<String> = msg
+                .content
+                .tool_responses()
+                .iter()
+                .map(|tr| tr.call_id.clone())
+                .collect();
+            format!(
+                "{idx}:{:?}(text_len={text_len},tool_calls={tool_call_ids:?},tool_responses={tool_response_ids:?})",
+                msg.role
+            )
+        })
+        .collect();
+    log::info!("[byop-diag] request message_flow={flow:?}");
+
+    for (idx, msg) in chat_req.messages.iter().enumerate() {
+        let mut text_count = 0;
+        let mut text_total_len = 0;
+        let mut first_text_snippet: Option<String> = None;
+        let mut binary_summaries: Vec<String> = Vec::new();
+        let mut tool_call_summaries: Vec<String> = Vec::new();
+        let mut tool_response_summaries: Vec<String> = Vec::new();
+        let mut thought_count = 0;
+        let mut thought_total_len = 0;
+        let mut reasoning_count = 0;
+        let mut reasoning_total_len = 0;
+        let mut custom_count = 0;
+
+        for part in &msg.content {
+            match part {
+                ContentPart::Text(text) => {
+                    text_count += 1;
+                    text_total_len += text.len();
+                    if first_text_snippet.is_none() {
+                        first_text_snippet = Some(snippet_for_log(text, BYOP_DIAG_SNIPPET_CHARS));
+                    }
+                }
+                ContentPart::Binary(binary) => {
+                    binary_summaries.push(binary_for_log(binary));
+                }
+                ContentPart::ToolCall(tool_call) => {
+                    let (args_len, args_snippet) = json_value_for_log(&tool_call.fn_arguments);
+                    tool_call_summaries.push(format!(
+                        "call_id={} name={} args_len={} args={} thought_signatures={}",
+                        tool_call.call_id,
+                        tool_call.fn_name,
+                        args_len,
+                        args_snippet,
+                        tool_call
+                            .thought_signatures
+                            .as_ref()
+                            .map(|s| s.len())
+                            .unwrap_or(0)
+                    ));
+                }
+                ContentPart::ToolResponse(tool_response) => {
+                    tool_response_summaries.push(format!(
+                        "call_id={} content_len={} placeholder={} content={}",
+                        tool_response.call_id,
+                        tool_response.content.len(),
+                        is_placeholder_tool_response_content(&tool_response.content),
+                        snippet_for_log(&tool_response.content, BYOP_DIAG_SNIPPET_CHARS)
+                    ));
+                }
+                ContentPart::ThoughtSignature(thought) => {
+                    thought_count += 1;
+                    thought_total_len += thought.len();
+                }
+                ContentPart::ReasoningContent(reasoning) => {
+                    reasoning_count += 1;
+                    reasoning_total_len += reasoning.len();
+                }
+                ContentPart::Custom(_) => {
+                    custom_count += 1;
+                }
+            }
+        }
+
+        let cache_control = msg
+            .options
+            .as_ref()
+            .and_then(|options| options.cache_control.as_ref())
+            .map(|cache| format!("{cache:?}"))
+            .unwrap_or_else(|| "None".to_owned());
+        log::info!(
+            "[byop-diag] request message[{idx}]: role={:?} parts={} size={} \
+             cache_control={} text_parts={} text_total_len={} first_text={:?} \
+             binaries={:?} tool_calls={:?} tool_responses={:?} \
+             thought_signatures={} thought_total_len={} reasoning_parts={} \
+             reasoning_total_len={} custom_parts={}",
+            msg.role,
+            msg.content.len(),
+            msg.content.size(),
+            cache_control,
+            text_count,
+            text_total_len,
+            first_text_snippet.unwrap_or_default(),
+            binary_summaries,
+            tool_call_summaries,
+            tool_response_summaries,
+            thought_count,
+            thought_total_len,
+            reasoning_count,
+            reasoning_total_len,
+            custom_count,
+        );
+    }
+
+    for (idx, msg) in chat_req.messages.iter().enumerate() {
+        let expected_call_ids: Vec<String> = msg
+            .content
+            .tool_calls()
+            .iter()
+            .map(|tc| tc.call_id.clone())
+            .collect();
+        if expected_call_ids.is_empty() {
+            continue;
+        }
+        let next = chat_req.messages.get(idx + 1);
+        let next_role = next.map(|m| format!("{:?}", m.role)).unwrap_or_default();
+        let response_call_ids: Vec<String> = next
+            .filter(|m| matches!(m.role, ChatRole::Tool))
+            .map(|m| {
+                m.content
+                    .tool_responses()
+                    .iter()
+                    .map(|tr| tr.call_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let matched = response_call_ids == expected_call_ids;
+        if matched {
+            log::info!(
+                "[byop-diag] request tool_pair idx={idx}: expected_call_ids={expected_call_ids:?} \
+                 next_role={next_role} response_call_ids={response_call_ids:?}"
+            );
+        } else {
+            log::warn!(
+                "[byop-diag] request tool_pair mismatch idx={idx}: \
+                 expected_call_ids={expected_call_ids:?} next_role={next_role} \
+                 response_call_ids={response_call_ids:?}"
+            );
+        }
+    }
+
+    for (idx, msg) in chat_req.messages.iter().enumerate() {
+        if !matches!(msg.role, ChatRole::Tool) {
+            continue;
+        }
+        let response_call_ids: Vec<String> = msg
+            .content
+            .tool_responses()
+            .iter()
+            .map(|tr| tr.call_id.clone())
+            .collect();
+        let previous_expected: Vec<String> = idx
+            .checked_sub(1)
+            .and_then(|prev_idx| chat_req.messages.get(prev_idx))
+            .filter(|prev| matches!(prev.role, ChatRole::Assistant))
+            .map(|prev| {
+                prev.content
+                    .tool_calls()
+                    .iter()
+                    .map(|tc| tc.call_id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if response_call_ids != previous_expected {
+            log::warn!(
+                "[byop-diag] request orphan_or_misordered_tool_response idx={idx}: \
+                 response_call_ids={response_call_ids:?} previous_assistant_call_ids={previous_expected:?}"
+            );
+        }
+    }
+}
+
 /// 1:1 移植自 opencode `provider/transform.ts::applyCaching` 的 Anthropic 分支:
 /// 给 first 2 个 system message + last 2 个 non-system message 打 cache 标记。
 ///
@@ -905,41 +1341,31 @@ fn build_chat_request(
 /// `MessageOptions::cache_control` 落到该 message 最后一个 content part 上,
 /// 行为与 opencode 给 lastContent.providerOptions.anthropic.cacheControl 一致。
 ///
-/// **TTL 选择 / P0-4**:统一使用 `Ephemeral1h`(1 小时 TTL)。
+/// **TTL 选择(修订自 P0-4,对齐 Zed `crates/anthropic/src/completion.rs:219-274`)**:
+/// 静态前缀 system 用 1h;会话尾部 last 2 non-system 用 5m;同时 `build_chat_request`
+/// 在 Anthropic 路径给 tools 末尾打 1h(genai Tool struct 已加 cache_control 字段)。
 ///
-/// 决策依据(2026-05 Anthropic 官方文档):
-/// - 5m TTL 适合「使用频率高于每 5 分钟」的场景,refresh 不另外计费。
-/// - 1h TTL 官方原话:
-///   > The 1-hour cache is best used in the following scenarios:
-///   > * when an agentic side-agent will take longer than 5 minutes,
-///   > * when storing a long chat conversation with a user and you generally
-///   >   expect that user may not respond in the next 5 minutes.
-///   > * When latency is important and your follow up prompts may be sent
-///   >   beyond 5 minutes.
-/// - OpenWarp BYOP 是终端 agent 场景:工具长任务、用户思考间隔、agent
-///   step-by-step 都可能 > 5min;Claude Code CLI 在同类场景实际默认就是 1h。
+/// **混合策略动机**:
+/// - 旧策略"全部 1h"无法和外部 5m breakpoint 共存。BYOP 反代 / 上游网关在更早
+///   位置(tools/system)注入默认 5m 时,Anthropic 排序约束会拒绝随后的 1h:
+///   `a ttl='1h' cache_control block must not come after a ttl='5m'`,触发 400。
+/// - 新策略:长 TTL 全部前置(tools / system 1h),短 TTL 落在序列尾(messages 5m),
+///   严格符合 Anthropic 处理顺序 `tools → system → messages`,外部如果在 tools/
+///   system 上多塞 5m 也只会变成"两个 5m 在前 + tail 5m",不再触发 1h-after-5m。
 ///
-/// **成本影响**:1h cache 写入价 2× base(对比 5m 的 1.25×),read 价不变
-/// (0.1× base)。只要同一 prefix 在 1h 内复用 ≥ 1 次,就比 5m 反复 refresh 划算
-/// (5m 模式每 5min 必须有请求触发 refresh,否则失效;1h 模式 1 小时内任意请求
-/// 都直接命中)。
+/// **成本影响**:
+/// - tools/system 是 session 内的静态前缀,1h 写入 2× base 摊到整个 session 内多次
+///   命中,等效近 0(对比"全 1h"反复重写 tail 的总成本明显下降)。
+/// - messages 尾部每轮变,5m 写入 1.25× base,5min 内下一轮命中即免费续期,不会
+///   反复重写,且无需提交 1h 的高额一次性写入。
 ///
 /// **TTL 排序约束**:Anthropic API 要求长 TTL 的 breakpoint 必须排在短 TTL 之前
 /// (`https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
-///  #mixing-different-ttls`)。这里全部统一 1h,无混用,天然合规。
+///  #mixing-different-ttls`)。本函数把 system 标 1h、非 system 末尾标 5m,顺序
+///  天然 system(1h) → messages(5m) 合规;`build_chat_request` 给 tools 末尾打 1h
+///  也在 system 之前,整体顺序 tools(1h) → system(1h) → messages(5m) 仍合规。
 /// genai 在 `into_anthropic_request_parts` 内会按顺序检查,违反时 warn(见
 /// `lib/rust-genai/src/adapter/adapters/anthropic/adapter_impl.rs`)。
-///
-/// **为什么不给 tools 打独立 breakpoint(P1-11 调研后决定推迟)**:
-/// Anthropic API 原生支持 tools 数组末尾独立 cache_control,但 vendored
-/// `lib/rust-genai` 的 `Tool` struct 不带 cache_control 字段,要启用需:
-/// 1. 修改 genai `Tool` 加 `cache_control: Option<CacheControl>`
-/// 2. 修改 `tool_to_anthropic_tool` 输出 `cache_control` 到 JSON
-/// 3. 这里调整为“1 system + 2 messages tail + 1 tools” 总计 4 个 breakpoint
-/// 实测现有 4 breakpoint(2 system + 2 tail)在典型场景中命中率已达 99.9%,
-/// tools 段独立 breakpoint 仅在 system 字段频繁变动(如切 web_search 开关)
-/// 时才能带来额外复用,边际收益小,暂不实施。如后期出现 tools 失效问题
-/// 再走 P1-11 未使用路径(需同步 patch genai 上游)。
 fn apply_caching_anthropic(messages: &mut Vec<ChatMessage>) {
     let n = messages.len();
     if n == 0 {
@@ -980,8 +1406,15 @@ fn apply_caching_anthropic(messages: &mut Vec<ChatMessage>) {
                 // `MessageOptions` 上,通过 `with_options` 注入。
                 // `MessageOptions: From<CacheControl>` 由 genai 提供
                 // (`chat_message.rs::impl From<CacheControl> for MessageOptions`)。
-                // P0-4:全部统一 1h,顺序天然 system→messages 兼容 genai 排序约束。
-                m.with_options(CacheControl::Ephemeral1h)
+                // 混合 TTL:system 用 1h(静态前缀,session 内多次命中摊薄写入),
+                // 非 system 用 5m(会话尾部每轮变,5min 内下一轮命中即免费续期)。
+                // 顺序 system(1h) → messages(5m) 满足 Anthropic 排序约束。
+                let ttl = if matches!(m.role, ChatRole::System) {
+                    CacheControl::Ephemeral1h
+                } else {
+                    CacheControl::Ephemeral5m
+                };
+                m.with_options(ttl)
             } else {
                 m
             }
@@ -989,85 +1422,146 @@ fn apply_caching_anthropic(messages: &mut Vec<ChatMessage>) {
         .collect();
 }
 
-/// 重排 messages 中所有 Tool 消息,确保:
-/// 每个含 tool_calls 的 Assistant message 后面紧跟**且仅紧跟**一条 Tool message,
-/// 内含该 Assistant **每个** call_id 的 ToolResponse(按 tool_calls 顺序,缺失补 placeholder)。
+/// 兜底:确保每个含 `tool_calls` 的 Assistant 后面紧跟一条覆盖**全部** call_id 的
+/// Tool message,缺失的 call_id 补 placeholder ToolResponse `"(tool 执行结果未保留)"`。
+/// 多条相邻 Tool message 会被合并为一条,并按 Assistant `tool_calls` 的 call_id 顺序
+/// 重组 ToolResponse 数组(与 Anthropic `tool_result` block 必须按 `tool_use` 序对齐的
+/// 语义一致)。
 ///
-/// **为什么需要重排,而不是只补 placeholder / 剔孤儿**:
-/// `build_chat_request` 按时间戳 chronological 排序合并所有 task 的历史 messages。
-/// 当模型在一轮内发起多个 tool_call,且这些 tool 的执行时长差异较大时(如 read_skill
-/// 立即返回错误,而 git/PowerShell 命令稍慢),后到的 ToolCallResult 时间戳可能晚于
-/// 模型紧接着发起的**下一轮** Assistant tool_calls,导致历史 messages 被排成:
+/// **触发场景(全部是异常路径,正常 push 路径不会进入补码/合并分支)**:
+/// 1. `fork_conversation_at_exchange` 按 message_ids 截断对话,分叉点可能恰好落在
+///    Assistant 的 `tool_calls` 与 ToolCallResult 之间 — 截后只剩 Assistant 含
+///    tool_calls 但没有对应 Tool。
+/// 2. 历史 conversation 从 SQLite 反序列化时,某次写入失败漏了 ToolCallResult,
+///    加载回来是孤儿。
+/// 3. 持久化损坏 / 测试 stub 等其他异常路径。
 ///
-/// ```text
-/// Asst-X(tc_a, tc_b, tc_c)
-/// Tool(tc_c real)         ← read_skill 错误,快
-/// Asst-Y(tc_d, tc_e)      ← 模型基于 tc_c 错误立刻发了下一轮
-/// Tool(tc_a real)         ← git 命令慢,落到 Asst-Y 后面
-/// Tool(tc_b real)
-/// ```
+/// **跨位置重排 Tool messages(本函数会做)**:把所有 Tool message 抽出到
+/// `call_id → response` 表(同 call_id 真实 result 优先于 placeholder),再按每个
+/// Assistant.tool_calls 顺序在 Assistant 后重装。早期实现刻意回避这一步,因为
+/// 旧云端路径 `build_chat_request` 会按 timestamp chronological 排序,跨位置重排
+/// 会与之冲突;OpenWarp 已移除云端,生产路径 `make_*_message` 一律填
+/// `timestamp: None`、`build_chat_request` 也不再排序,本函数才放开重排。
 ///
-/// Anthropic API 把连续 Tool block 合并视作"上一条 Assistant 的 tool_results",
-/// 于是 Asst-Y 后面的 Tool block 含 tc_a/tc_b 这种 Asst-Y 不认识的 call_id → 400
-/// `unexpected tool_use_id ... no corresponding tool_use block in the previous message`。
+/// **触发该重排的真实场景**:用户在工具执行/取消结果落盘前提交新 query,
+/// `params.input` 顺序为 `[ActionResult, UserQuery]`,持久化后历史就会是
+/// `Assistant(tool_call) → UserQuery → ToolCallResult`。如果只看 Assistant 后
+/// 紧邻的 Tool message,会误把这条真实 result 当成孤儿并补一条 placeholder。
+/// 全局收集 → 按位置重装可避免该误判。
 ///
-/// 旧实现只做"剔孤儿(整序列匹配)+补 placeholder(向前看相邻 Tool)",前者不会剔除
-/// 这类**位置错误但 call_id 合法**的 ToolResponse,后者也不会重定位 — 所以 400 重现。
-///
-/// 新实现:抽出所有 ToolResponse 进 `call_id → response` 表,然后按每个 Assistant
-/// tool_calls 的 call_id 顺序重新组装紧随其后的 Tool message。剩余未消费的 ToolResponse
-/// (call_id 完全不在历史 Assistant tool_calls 里)即真孤儿,丢弃。
+/// **对 Anthropic prompt cache 的影响**:跨位置重排会改变 messages 物理序,
+/// `apply_caching_anthropic` 对 last 2 non-system message 打 5m breakpoint 时,
+/// 同一会话跨轮的 cache prefix 字节序可能漂移 → 偶发 cache miss。这是已知
+/// 取舍:不重排 → tool_use/tool_result 配对失败上游直接 400(致命);重排 →
+/// 极少数竞态轮次 cache miss(可恢复)。日志里 `byop-diag` 的
+/// `reordered_call_ids=` 字段标记本轮是否发生重排,便于在
+/// `[byop-cache]` miss 突增时定位归因。
 fn sanitize_tool_call_pairs(messages: &mut Vec<ChatMessage>) {
     use std::collections::HashMap;
 
-    // 抽取所有 ToolResponse(同 call_id 后到的覆盖前面,符合"最新结果优先"语义)。
-    let mut response_by_call_id: HashMap<String, ToolResponse> = HashMap::new();
-    let original = std::mem::take(messages);
-    let mut non_tool_msgs: Vec<ChatMessage> = Vec::with_capacity(original.len());
-    for msg in original {
-        if msg.role == genai::chat::ChatRole::Tool {
-            for resp in msg.content.tool_responses() {
-                response_by_call_id.insert(resp.call_id.clone(), (*resp).clone());
+    let mut placeholders_inserted: Vec<String> = Vec::new();
+    let mut orphan_call_ids: Vec<String> = Vec::new();
+    // 记录每个 ToolResponse 在原 messages 中的索引,用于在重装后判定是否发生
+    // 跨位置重排(影响 prompt cache prefix 稳定性,见函数 doc)。
+    let mut original_positions: HashMap<String, usize> = HashMap::new();
+
+    fn is_placeholder_response(resp: &ToolResponse) -> bool {
+        is_placeholder_tool_response_content(&resp.content)
+    }
+
+    // 先全局收集所有 ToolResponse。真实场景里用户可在工具执行/取消结果落盘前
+    // 继续发送 query,历史会形成 Assistant(tool_call) → UserQuery → ToolCallResult。
+    // 只看 Assistant 后面的连续 Tool message 会误补 placeholder,并把真实 result 留成孤儿。
+    //
+    // 覆盖规则(语义保持不变,改写为更易读形式):
+    //   - 表里没有 → 写入
+    //   - 表里是 placeholder → 真实 / placeholder 都覆盖(后到为准)
+    //   - 表里是真实 → 仅当新值也是真实时覆盖(后到为准),placeholder 不能覆盖真实
+    let mut responses_by_call_id: HashMap<String, ToolResponse> = HashMap::new();
+    for (idx, msg) in messages.iter().enumerate() {
+        if msg.role != genai::chat::ChatRole::Tool {
+            continue;
+        }
+        for resp in msg.content.tool_responses() {
+            let should_replace = match responses_by_call_id.get(&resp.call_id) {
+                None => true,
+                Some(existing) => {
+                    is_placeholder_response(existing) || !is_placeholder_response(resp)
+                }
+            };
+            if should_replace {
+                responses_by_call_id.insert(resp.call_id.clone(), (*resp).clone());
             }
-        } else {
-            non_tool_msgs.push(msg);
+            // 原位置只在首次见到该 call_id 时记录;若同 call_id 多次出现
+            // (持久化重复),保留最早出现的位置 — 该位置最能代表"上轮请求里它
+            // 落在哪里",用于判定跨位置重排。
+            original_positions.entry(resp.call_id.clone()).or_insert(idx);
         }
     }
 
-    // 重组:每个 Assistant 含 tool_calls 后紧跟一条 Tool message,按 call_id 顺序绑定。
-    let mut placeholders_inserted: Vec<String> = Vec::new();
-    for msg in non_tool_msgs {
-        let call_ids: Vec<String> = msg
-            .content
-            .tool_calls()
-            .iter()
-            .map(|tc| tc.call_id.clone())
-            .collect();
-        let is_assistant = msg.role == genai::chat::ChatRole::Assistant;
-        messages.push(msg);
+    // 重排追踪:记录被搬到 Assistant 后面但**原位置不在 Assistant 紧邻位**的 call_id。
+    let mut reordered_call_ids: Vec<String> = Vec::new();
 
-        if is_assistant && !call_ids.is_empty() {
-            let bundled: Vec<ToolResponse> = call_ids
+    let mut rewritten: Vec<ChatMessage> = Vec::with_capacity(messages.len());
+    for (orig_idx, msg) in messages.drain(..).enumerate() {
+        if msg.role == genai::chat::ChatRole::Tool {
+            continue;
+        }
+
+        let expected_call_ids: Vec<String> = if msg.role == genai::chat::ChatRole::Assistant {
+            msg.content
+                .tool_calls()
                 .iter()
-                .map(|cid| {
-                    response_by_call_id.remove(cid).unwrap_or_else(|| {
+                .map(|tc| tc.call_id.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        rewritten.push(msg);
+
+        if expected_call_ids.is_empty() {
+            continue;
+        }
+
+        // 按 Assistant.tool_calls 顺序重组,缺失补 placeholder。
+        // Assistant 重装后位于 rewritten 末尾;"紧邻"意味着原 messages 中
+        // Tool 落在 orig_idx + 1 处。其它位置即视为跨位置重排。
+        let expected_tool_idx = orig_idx + 1;
+        let bundled: Vec<ToolResponse> = expected_call_ids
+            .iter()
+            .map(|cid| {
+                match responses_by_call_id.remove(cid) {
+                    Some(resp) => {
+                        if let Some(orig_pos) = original_positions.get(cid) {
+                            if *orig_pos != expected_tool_idx {
+                                reordered_call_ids.push(cid.clone());
+                            }
+                        }
+                        resp
+                    }
+                    None => {
                         placeholders_inserted.push(cid.clone());
                         ToolResponse::new(cid.clone(), "(tool 执行结果未保留)".to_owned())
-                    })
-                })
-                .collect();
-            messages.push(ChatMessage::from(bundled));
-        }
+                    }
+                }
+            })
+            .collect();
+
+        rewritten.push(ChatMessage::from(bundled));
     }
 
-    // 剩余 response_by_call_id 是真孤儿(没有任何 Assistant tool_call 与之配对),丢弃。
-    if !response_by_call_id.is_empty() {
-        let orphan_ids: Vec<&String> = response_by_call_id.keys().collect();
+    if !responses_by_call_id.is_empty() {
+        orphan_call_ids.extend(responses_by_call_id.into_keys());
+    }
+    *messages = rewritten;
+
+    if !orphan_call_ids.is_empty() {
         log::warn!(
             "[byop-diag] sanitize_tool_call_pairs: 丢弃 {} 个孤儿 ToolResponse: \
              orphan_call_ids={:?}",
-            response_by_call_id.len(),
-            orphan_ids
+            orphan_call_ids.len(),
+            orphan_call_ids
         );
     }
     if !placeholders_inserted.is_empty() {
@@ -1076,6 +1570,15 @@ fn sanitize_tool_call_pairs(messages: &mut Vec<ChatMessage>) {
              ToolResponse: missing_call_ids={:?}",
             placeholders_inserted.len(),
             placeholders_inserted
+        );
+    }
+    if !reordered_call_ids.is_empty() {
+        // 标记本轮发生跨位置重排,后续 `[byop-cache]` miss 突增时可与此关联。
+        log::warn!(
+            "[byop-diag] sanitize_tool_call_pairs: 跨位置重排 {} 个 ToolResponse(cache prefix \
+             可能漂移): reordered_call_ids={:?}",
+            reordered_call_ids.len(),
+            reordered_call_ids
         );
     }
 }
@@ -1926,33 +2429,47 @@ pub struct TitleGenInput {
     pub reasoning_effort: crate::settings::ReasoningEffortSetting,
 }
 
+pub struct ByopOutputInput {
+    pub params: RequestParams,
+    pub base_url: String,
+    pub api_key: String,
+    pub model_id: String,
+    pub api_type: AgentProviderApiType,
+    pub reasoning_effort: crate::settings::ReasoningEffortSetting,
+    pub extra_headers: Vec<(String, String)>,
+    pub task_id: String,
+    pub target_task_id: String,
+    pub needs_create_task: bool,
+    pub lrc_command_id: Option<String>,
+    pub lrc_should_spawn_subagent: bool,
+    pub context_window: Option<u32>,
+    pub cancellation_rx: futures::channel::oneshot::Receiver<()>,
+}
+
 /// `task_id`: conversation 的 root task id(controller 端从 history model 取)。
 /// `target_task_id`: 本轮模型输出应该写入的 task id;普通对话等于 root,
 /// CLI subagent 后续轮为已有 subtask。
 /// `needs_create_task`: 仅首轮(root 还是 Optimistic)需要 emit `CreateTask`。
 pub async fn generate_byop_output(
-    params: RequestParams,
-    base_url: String,
-    api_key: String,
-    model_id: String,
-    api_type: AgentProviderApiType,
-    reasoning_effort: crate::settings::ReasoningEffortSetting,
-    extra_headers: Vec<(String, String)>,
-    task_id: String,
-    target_task_id: String,
-    needs_create_task: bool,
-    // LRC 场景绑定的 CLI subagent `command_id`(= LRC block id 字符串)。
-    lrc_command_id: Option<String>,
-    // 仅 tag-in 首轮为 true:流头会合成虚拟 `tool_call::Subagent` + CreateTask,
-    // 用 server subtask 升级 master 路径已经创建的 optimistic CLI subtask。
-    lrc_should_spawn_subagent: bool,
-    // 选中模型的 context window(tokens)。Some 时:流末用 genai captured_usage
-    // 计算 (prompt_tokens + completion_tokens) / context_window 写回
-    // ConversationUsageMetadata,驱动 footer 的 "X% context remaining" 实时更新。
-    // None ⇒ 跳过(用户未填 + catalog 无),UI 维持 100% 占位。
-    context_window: Option<u32>,
-    _cancellation_rx: futures::channel::oneshot::Receiver<()>,
+    input: ByopOutputInput,
 ) -> Result<ResponseStream, ConvertToAPITypeError> {
+    let ByopOutputInput {
+        params,
+        base_url,
+        api_key,
+        model_id,
+        api_type,
+        reasoning_effort,
+        extra_headers,
+        task_id,
+        target_task_id,
+        needs_create_task,
+        lrc_command_id,
+        lrc_should_spawn_subagent,
+        context_window,
+        cancellation_rx: _cancellation_rx,
+    } = input;
+
     let force_echo_reasoning = super::reasoning::model_requires_reasoning_echo(api_type, &model_id);
     let chat_req = build_chat_request(&params, force_echo_reasoning, api_type, &model_id);
     let conversation_id = params
@@ -1984,9 +2501,10 @@ pub async fn generate_byop_output(
     // 否则下一轮 `compute_active_tasks` 只看到模型产出(reasoning/output/tool_call),
     // 缺失对应的 user_query 和 tool_call_result,模型 context 严重断裂。
     //
-    // 这里在流开始后 emit 两类事件:
-    //   1. AddMessagesToTask{UserQuery}    ← 当前轮所有 UserQuery input
-    //   2. AddMessagesToTask{ToolCallResult} ← 当前轮所有 ActionResult input
+    // 这里在流开始后把当前轮 UserQuery / ToolCallResult 按 `params.input` 原顺序写入。
+    // 用户打断 pending tool 后继续输入时,controller 会传入 ActionResult → UserQuery;
+    // 持久化不能拆成"所有 UserQuery 先写,所有 ActionResult 后写",否则历史会变成
+    // Assistant(tool_call) → UserQuery → ToolCallResult。
     //
     // emit 时机必须在 CreateTask 之后(任务已升级为 Server 状态),
     // 在模型响应开始之前(UI 顺序:user 显示 → thinking/answer)。
@@ -2008,27 +2526,6 @@ pub async fn generate_byop_output(
             _ => None,
         })
         .collect();
-    // ToolCallResult 持久化:用 `tools::serialize_action_result` 把 ActionResult
-    // 序列化为 JSON 字符串,装进 Message 的 server_message_data 字段
-    // (warp protobuf 的 `tool_call_result.result` oneof 都是结构化 variant,
-    // 没有通用 string 兜底;但 server_message_data 是自由字符串字段,刚好够用)。
-    // 下一轮 build_chat_request 在 ToolCallResult 分支:result=None 时从
-    // server_message_data 读 content,result=Some 时走 tools::serialize_result。
-    let pending_tool_results: Vec<(String, String)> = params
-        .input
-        .iter()
-        .filter_map(|i| match i {
-            AIAgentInput::ActionResult { result, .. } => {
-                let id = result.id.to_string();
-                let content = tools::serialize_action_result(result).unwrap_or_else(|| {
-                    serde_json::json!({ "result": result.result.to_string() }).to_string()
-                });
-                Some((id, content))
-            }
-            _ => None,
-        })
-        .collect();
-
     // INFO 级别一行总览 + 每条 message 一行简报(role + 文本长度 + tool 计数 + reasoning 标记),
     // 默认日志配置即可看到,便于诊断"历史是否完整传上去"等问题。
     //
@@ -2036,32 +2533,7 @@ pub async fn generate_byop_output(
     // 推到 messages[0] 以便打 `cache_control`，所以 `chat_req.system` 会是 None、`system_len`
     // 显示为 0；实际 system 内容仍然在 messages[0] 里(看下面逐条报告)。为避免误
     // 导诊断者，这里加上 `system_in_messages_head` 提示。
-    let system_in_head = matches!(api_type, AgentProviderApiType::Anthropic)
-        && chat_req
-            .messages
-            .first()
-            .map(|m| matches!(m.role, ChatRole::System))
-            .unwrap_or(false);
-    log::info!(
-        "[byop] adapter={:?} model={} system_len={} messages={} tools={} system_in_messages_head={}",
-        adapter_kind_for(api_type),
-        model_id,
-        chat_req.system.as_deref().map(str::len).unwrap_or(0),
-        chat_req.messages.len(),
-        chat_req.tools.as_ref().map(|t| t.len()).unwrap_or(0),
-        system_in_head,
-    );
-    for (idx, m) in chat_req.messages.iter().enumerate() {
-        let role = format!("{:?}", m.role);
-        let text_len = m.content.first_text().map(str::len).unwrap_or(0);
-        let tc_count = m.content.tool_calls().len();
-        let tr_count = m.content.tool_responses().len();
-        // reasoning_content 检测 — genai 把它存为 ContentPart::ReasoningContent,
-        // 没有公开 getter,这里通过 size() 与 first_text+tool_count 的和差异粗判。
-        log::info!(
-            "[byop]  [{idx}] role={role} text_len={text_len} tool_calls={tc_count} tool_responses={tr_count}"
-        );
-    }
+    log_chat_request_details(&chat_req, &model_id, api_type);
 
     // 诊断:构造包含 system / messages / tools 的完整 ChatRequest JSON dump,保存到
     // stream 闭包。真实 Anthropic wire body 会由 genai adapter 再转换一层,但这里已经
@@ -2154,22 +2626,74 @@ pub async fn generate_byop_output(
             target_task_id.as_str()
         };
         let mut persistence_messages: Vec<api::Message> = Vec::new();
-        for (q, imgs) in &pending_user_queries {
-            persistence_messages.push(make_user_query_message(
-                persistence_task_id,
-                &request_id,
-                q.clone(),
-                imgs,
-            ));
+        let mut persistence_order: Vec<String> = Vec::new();
+        for (input_idx, input) in params.input.iter().enumerate() {
+            match input {
+                AIAgentInput::UserQuery {
+                    query,
+                    context,
+                    running_command,
+                    ..
+                } => {
+                    let attachments = user_context::collect_user_attachments(context);
+                    log::info!(
+                        "[byop-diag] persistence input[{input_idx}]: task_id={} \
+                         kind=UserQuery query_len={} binaries={} running_command={} \
+                         lrc_command_id={} query={:?}",
+                        persistence_task_id,
+                        query.len(),
+                        attachments.binaries.len(),
+                        running_command.is_some(),
+                        lrc_command_id.as_deref().unwrap_or(""),
+                        snippet_for_log(query, BYOP_DIAG_SNIPPET_CHARS),
+                    );
+                    persistence_order.push(format!(
+                        "{input_idx}:UserQuery(query_len={},binaries={})",
+                        query.len(),
+                        attachments.binaries.len()
+                    ));
+                    persistence_messages.push(make_user_query_message(
+                        persistence_task_id,
+                        &request_id,
+                        query.clone(),
+                        &attachments.binaries,
+                    ));
+                }
+                AIAgentInput::ActionResult { result, .. } => {
+                    let content = tools::serialize_action_result(result).unwrap_or_else(|| {
+                        serde_json::json!({ "result": result.result.to_string() }).to_string()
+                    });
+                    log::info!(
+                        "[byop-diag] persistence input[{input_idx}]: task_id={} \
+                         kind=ActionResult call_id={} content_len={} content={:?}",
+                        persistence_task_id,
+                        result.id,
+                        content.len(),
+                        snippet_for_log(&content, BYOP_DIAG_SNIPPET_CHARS),
+                    );
+                    persistence_order.push(format!(
+                        "{input_idx}:ActionResult(call_id={},content_len={})",
+                        result.id,
+                        content.len()
+                    ));
+                    persistence_messages.push(make_tool_call_result_message(
+                        persistence_task_id,
+                        &request_id,
+                        result.id.to_string(),
+                        content,
+                    ));
+                }
+                _ => {}
+            }
         }
-        for (call_id, content) in &pending_tool_results {
-            persistence_messages.push(make_tool_call_result_message(
-                persistence_task_id,
-                &request_id,
-                call_id.clone(),
-                content.clone(),
-            ));
-        }
+        log::info!(
+            "[byop-diag] persistence summary: request_id={} task_id={} emitted_messages={} \
+             input_order={:?}",
+            request_id,
+            persistence_task_id,
+            persistence_messages.len(),
+            persistence_order,
+        );
         if !persistence_messages.is_empty() {
             yield Ok(make_add_messages_event(persistence_task_id, persistence_messages));
         }
@@ -2293,6 +2817,7 @@ pub async fn generate_byop_output(
         // (since 0.4.0 行为),但跨 chunk 同一 call_id 可能多次出现 args 增量,
         // 用 HashMap 按 id 累积后在流末统一 emit。
         let mut tool_bufs: HashMap<String, ToolCall> = HashMap::new();
+        let mut tool_order: Vec<String> = Vec::new();
         // call_id → 首帧占位 ToolCall message 的 id。
         // 首次 ToolCallChunk 到达且可解析时立即 emit 一条占位卡(让 UI 在 stream End
         // 之前就能看到"调用 X 工具"反馈),流末用 update_message 原地刷新为最终 args。
@@ -2301,7 +2826,7 @@ pub async fn generate_byop_output(
         // call_id → 上次 update_message 增量刷新的时刻。
         // 长 args 工具(create_or_edit_document、长 grep query)args 跨多 chunk 累积时,
         // 节流 ≥ 200ms reparse + update,体感跟文本流一样连续而不是首帧定格到 End。
-        let mut tool_last_update: HashMap<String, std::time::Instant> = HashMap::new();
+        let mut tool_last_update: HashMap<String, Instant> = HashMap::new();
         // 增量刷新节流阈值:小于此值的连续 chunk 不再 update_message,避免频繁 UI 重排。
         // 注:SDK stream 每个 ChatStreamEvent 独立 await,多 tool 并发时本就是顺序到达,
         // 同 tick batch emit 在此层意义不大;真正降抖在节流上,这条注释提醒后续不要瞎引入 batch。
@@ -2386,6 +2911,11 @@ pub async fn generate_byop_output(
                 ChatStreamEvent::ReasoningChunk(c) if !c.content.is_empty() => {
                     reasoning_count += 1;
                     reasoning_bytes += c.content.len();
+                    // 运行时 latch:该 (api_type, model_id) 发过 reasoning chunk →
+                    // 标记下一轮起强制 echo reasoning_content,覆盖 INTERLEAVED_RULES
+                    // 静态表外的任意国产/第三方 thinking 模型(对齐 opencode 数据驱动思路,
+                    // 用 stream 探测代替外置 catalog)。
+                    super::reasoning::note_reasoning_seen(api_type, &model_id);
                     if let Some(id) = reasoning_msg_id.clone() {
                         yield Ok(make_append_event(&current_task_id, &id, AppendKind::Reasoning(c.content)));
                     } else {
@@ -2420,7 +2950,7 @@ pub async fn generate_byop_output(
                     {
                         if let Some(msg_id) = tool_msg_ids.get(&call.call_id).cloned() {
                             // 已 emit 占位 → 节流增量刷新。
-                            let now = std::time::Instant::now();
+                            let now = Instant::now();
                             let last = tool_last_update.get(&call.call_id).copied();
                             let elapsed_ok = last
                                 .map(|t| now.duration_since(t).as_millis() as u64 >= TOOL_ARGS_UPDATE_THROTTLE_MS)
@@ -2464,7 +2994,7 @@ pub async fn generate_byop_output(
                             tool_msg_ids.insert(call.call_id.clone(), msg_id);
                             tool_last_update.insert(
                                 call.call_id.clone(),
-                                std::time::Instant::now(),
+                                Instant::now(),
                             );
                             yield Ok(make_add_messages_event(
                                 &current_task_id,
@@ -2475,6 +3005,9 @@ pub async fn generate_byop_output(
                         // 等下次 chunk 再尝试或 End 时走老路径,避免视觉抖动。
                     }
                     // 同一 call_id 多次 chunk:后到的覆盖(genai 已合并 args)。
+                    if !tool_bufs.contains_key(&call.call_id) {
+                        tool_order.push(call.call_id.clone());
+                    }
                     tool_bufs.insert(call.call_id.clone(), call);
                 }
                 ChatStreamEvent::End(end) => {
@@ -2483,8 +3016,20 @@ pub async fn generate_byop_output(
                     // 优先用 captured_content 里的 tool_calls(更完整),
                     // 否则用 streaming 中累积的 tool_bufs。
                     if let Some(content) = end.captured_content.as_ref() {
+                        let mut captured_order: Vec<String> = Vec::new();
                         for call in content.tool_calls() {
-                            tool_bufs.entry(call.call_id.clone()).or_insert_with(|| call.clone());
+                            if !captured_order.contains(&call.call_id) {
+                                captured_order.push(call.call_id.clone());
+                            }
+                            tool_bufs.insert(call.call_id.clone(), call.clone());
+                        }
+                        if !captured_order.is_empty() {
+                            for call_id in &tool_order {
+                                if !captured_order.contains(call_id) {
+                                    captured_order.push(call_id.clone());
+                                }
+                            }
+                            tool_order = captured_order;
                         }
                     }
                     if let Some(usage) = end.captured_usage.as_ref() {
@@ -2574,7 +3119,29 @@ pub async fn generate_byop_output(
 
         // 流结束:把累积的 tool_calls 一次性发出。
         let mut final_messages: Vec<api::Message> = Vec::new();
-        for call in tool_bufs.into_values() {
+        let mut ordered_tool_calls: Vec<ToolCall> = Vec::with_capacity(tool_bufs.len());
+        for call_id in tool_order {
+            if let Some(call) = tool_bufs.remove(&call_id) {
+                ordered_tool_calls.push(call);
+            }
+        }
+        let mut unordered_tool_calls: Vec<ToolCall> = tool_bufs.into_values().collect();
+        if !unordered_tool_calls.is_empty() {
+            // 正常路径下 ChunkArgs / End 两处都会同步维护 `tool_order`,所以走到这里
+            // `tool_bufs` 应为空。仅在 provider 异常(例如 captured_content 与 ChunkArgs
+            // 互相缺失某 call_id) 才会命中此 fallback。dict-sort 能保证 OpenAI 兼容
+            // 路径 `tool_calls[]` 顺序跨调用稳定(不漂移 cache prefix),但应告警。
+            log::warn!(
+                "[byop] {} tool_calls fell through to dict-sort fallback — \
+                 provider inconsistency between ChunkArgs and captured_content; \
+                 call_ids={:?}",
+                unordered_tool_calls.len(),
+                unordered_tool_calls.iter().map(|t| t.call_id.as_str()).collect::<Vec<_>>(),
+            );
+        }
+        unordered_tool_calls.sort_by(|a, b| a.call_id.cmp(&b.call_id));
+        ordered_tool_calls.extend(unordered_tool_calls);
+        for call in ordered_tool_calls {
             // 诊断:dump 模型实际发的 tool_call raw payload
             // (call_id / fn_name / fn_arguments JSON 原文 + 类型标注),
             // 便于核对模型是否按 schema 出入参(常见问题:bool 字段被字符串化、
@@ -3167,11 +3734,8 @@ fn make_append_event(task_id: &str, message_id: &str, kind: AppendKind) -> api::
 /// 让模型看到标准 tool_result。
 async fn dispatch_byop_web_tool(tool_name: &str, args_str: &str) -> Value {
     use tools::web_runtime;
-    // 短超时 + 默认安全配置;系统全局共享一个 client 也可,这里每次新建以避免污染。
-    let client = match reqwest::Client::builder()
-        .pool_idle_timeout(std::time::Duration::from_secs(30))
-        .build()
-    {
+    // 为 webfetch 构建带 SSRF 防护的 client：自定义重定向策略会校验每一跳目标。
+    let client = match web_runtime::build_ssrf_safe_client() {
         Ok(c) => c,
         Err(e) => {
             log::warn!("[byop] reqwest client build failed: {e:#}");
@@ -4175,22 +4739,25 @@ mod cache_boundary_stability_tests {
         );
     }
 
-    /// **P0-4 TTL 验收**:全部走 1h(Ephemeral1h)而非旧版的 5m(Ephemeral)。
+    /// **TTL 混合策略验收**:system 走 1h(静态前缀),非 system 走 5m(会话尾)。
+    /// 顺序 system(1h) → messages(5m) 满足 Anthropic 排序约束,且对外部注入 5m 免疫。
     #[test]
-    fn anthropic_cache_uses_1h_ttl() {
+    fn anthropic_cache_uses_mixed_ttl() {
         let mut msgs = build_three_turn_conversation();
         apply_caching_anthropic(&mut msgs);
         let tagged: Vec<_> = msgs
             .iter()
-            .filter_map(|m| extract_cache_control(m))
+            .filter(|m| extract_cache_control(m).is_some())
             .collect();
         assert!(!tagged.is_empty(), "必须至少打一个 breakpoint");
-        for cc in &tagged {
-            assert!(
-                matches!(cc, CacheControl::Ephemeral1h),
-                "P0-4 要求全部使用 1h TTL,实际={:?}",
-                cc
-            );
+        for m in &tagged {
+            let cc = extract_cache_control(m).unwrap();
+            let expected = if matches!(m.role, ChatRole::System) {
+                CacheControl::Ephemeral1h
+            } else {
+                CacheControl::Ephemeral5m
+            };
+            assert_eq!(cc, expected, "role={:?} 的 TTL 不匹配预期", m.role);
         }
     }
 
@@ -4383,6 +4950,283 @@ mod cache_boundary_stability_tests {
     }
 }
 
+/// **`sanitize_tool_call_pairs` 行为验证**:
+///
+/// 本模块覆盖各种 push 路径 / fork 截断 / 持久化损坏场景下该函数的修复行为,
+/// 确保下游 Anthropic / OpenAI 不会踩到 "unexpected tool_use_id" / "tool_result
+/// without tool_use" 这类 400。
+#[cfg(test)]
+mod sanitize_tool_call_pairs_tests {
+    use super::*;
+    use genai::chat::{ChatMessage, ChatRole, ToolCall};
+
+    fn make_tool_call(call_id: &str) -> ToolCall {
+        ToolCall {
+            call_id: call_id.to_owned(),
+            fn_name: "dummy".to_owned(),
+            fn_arguments: serde_json::json!({}),
+            thought_signatures: None,
+        }
+    }
+
+    fn assistant_with_calls(call_ids: &[&str]) -> ChatMessage {
+        let calls: Vec<ToolCall> = call_ids.iter().map(|cid| make_tool_call(cid)).collect();
+        ChatMessage::from(calls)
+    }
+
+    fn tool_response(call_id: &str, content: &str) -> ChatMessage {
+        ChatMessage::from(ToolResponse::new(call_id.to_owned(), content.to_owned()))
+    }
+
+    /// 单条 Tool message 中所有 ToolResponse 的 (call_id, content) 折平,便于断言。
+    fn responses_of(msg: &ChatMessage) -> Vec<(String, String)> {
+        msg.content
+            .tool_responses()
+            .iter()
+            .map(|r| (r.call_id.clone(), r.content.clone()))
+            .collect()
+    }
+
+    /// 正常 push 路径:[user, asst(a,b), tool_a, tool_b] → 合并为单条 bundled,不补码。
+    #[test]
+    fn normal_push_path_merges_adjacent_tool_messages_without_placeholder() {
+        let mut msgs = vec![
+            ChatMessage::user("hi"),
+            assistant_with_calls(&["a", "b"]),
+            tool_response("a", "resp_a"),
+            tool_response("b", "resp_b"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 3, "两条相邻 Tool 合并为一条");
+        assert_eq!(msgs[0].role, ChatRole::User);
+        assert_eq!(msgs[1].role, ChatRole::Assistant);
+        assert_eq!(msgs[2].role, ChatRole::Tool);
+        assert_eq!(
+            responses_of(&msgs[2]),
+            vec![
+                ("a".to_owned(), "resp_a".to_owned()),
+                ("b".to_owned(), "resp_b".to_owned()),
+            ],
+            "bundled response 顺序必须与 Assistant.tool_calls 一致"
+        );
+    }
+
+    /// fork 截断场景 A:Assistant 有 tool_calls 但**所有** ToolCallResult 缺失 →
+    /// 在 Assistant 后插入一条全 placeholder 的 Tool message。
+    #[test]
+    fn fork_truncated_missing_all_tool_responses_inserts_placeholders() {
+        let mut msgs = vec![ChatMessage::user("q"), assistant_with_calls(&["a", "b"])];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 3, "Assistant 后必须补一条 Tool message");
+        assert_eq!(msgs[2].role, ChatRole::Tool);
+        let responses = responses_of(&msgs[2]);
+        assert_eq!(
+            responses.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>(),
+            vec!["a".to_owned(), "b".to_owned()]
+        );
+        for (_, content) in &responses {
+            assert!(
+                content.contains("未保留"),
+                "placeholder 内容应含提示文本: {content}"
+            );
+        }
+    }
+
+    /// fork 截断场景 B:Assistant 有 (a, b) 但只有 tool_a 被保留 → b 补 placeholder,
+    /// 顺序仍按 Assistant.tool_calls 重组为 (real_a, placeholder_b)。
+    #[test]
+    fn fork_truncated_partial_tool_responses_fills_missing_only() {
+        let mut msgs = vec![
+            ChatMessage::user("q"),
+            assistant_with_calls(&["a", "b"]),
+            tool_response("a", "real_a"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[2].role, ChatRole::Tool);
+        let responses = responses_of(&msgs[2]);
+        assert_eq!(responses[0], ("a".to_owned(), "real_a".to_owned()));
+        assert_eq!(responses[1].0, "b".to_owned());
+        assert!(responses[1].1.contains("未保留"));
+    }
+
+    /// 孤儿 ToolResponse(call_id 不在 Assistant.tool_calls 里)被丢弃,不会污染输出。
+    #[test]
+    fn orphan_tool_response_with_unknown_call_id_is_dropped() {
+        let mut msgs = vec![
+            ChatMessage::user("q"),
+            assistant_with_calls(&["a"]),
+            tool_response("a", "real_a"),
+            tool_response("z", "orphan_z"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 3, "两条相邻 Tool 合并,孤儿 z 丢弃");
+        let responses = responses_of(&msgs[2]);
+        assert_eq!(
+            responses,
+            vec![("a".to_owned(), "real_a".to_owned())],
+            "只保留 Assistant 认识的 call_id"
+        );
+    }
+
+    /// Assistant.tool_calls 顺序为 (a, b) 但现有 Tool 顺序为 (b, a) →
+    /// bundled 输出重组为 (real_a, real_b),对齐 Anthropic tool_use 序。
+    #[test]
+    fn out_of_order_tool_responses_are_reordered_per_assistant_calls() {
+        let mut msgs = vec![
+            ChatMessage::user("q"),
+            assistant_with_calls(&["a", "b"]),
+            tool_response("b", "real_b"),
+            tool_response("a", "real_a"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(
+            responses_of(&msgs[2]),
+            vec![
+                ("a".to_owned(), "real_a".to_owned()),
+                ("b".to_owned(), "real_b".to_owned()),
+            ]
+        );
+    }
+
+    /// 用户打断/继续输入时,完成的工具结果可能晚于新 UserQuery 落盘。
+    /// 出站请求必须把 result 搬回对应 Assistant 后,否则上游会看到孤儿 ToolResponse。
+    #[test]
+    fn late_tool_response_after_user_query_is_moved_back_to_tool_call() {
+        let mut msgs = vec![
+            ChatMessage::user("q1"),
+            assistant_with_calls(&["a"]),
+            ChatMessage::user("interrupt"),
+            tool_response("a", "real_a"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs[0].role, ChatRole::User);
+        assert_eq!(msgs[1].role, ChatRole::Assistant);
+        assert_eq!(msgs[2].role, ChatRole::Tool);
+        assert_eq!(
+            responses_of(&msgs[2]),
+            vec![("a".to_owned(), "real_a".to_owned())]
+        );
+        assert_eq!(msgs[3].role, ChatRole::User);
+    }
+
+    /// 同一 call_id 连续两条真实 ToolResponse(重复持久化 / 手动重试等场景),
+    /// 后到的真实值应覆盖早到的真实值 — 保持与旧实现"后到 insert 覆盖"语义一致。
+    #[test]
+    fn real_tool_response_is_replaced_by_later_real_tool_response() {
+        let mut msgs = vec![
+            ChatMessage::user("q1"),
+            assistant_with_calls(&["a"]),
+            tool_response("a", "real_a_v1"),
+            tool_response("a", "real_a_v2"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[2].role, ChatRole::Tool);
+        assert_eq!(
+            responses_of(&msgs[2]),
+            vec![("a".to_owned(), "real_a_v2".to_owned())],
+            "同 call_id 多条真实 response,后到者胜出"
+        );
+    }
+
+    /// placeholder 不能覆盖已存在的真实 result。
+    /// 该场景出现在:上轮补过 placeholder 作为占位 → 本轮着落真实结果 →
+    /// 又遇到同 call_id 的 placeholder(比如 fork 后拼接)。需保证真实不会被陯害。
+    #[test]
+    fn placeholder_does_not_overwrite_existing_real_response() {
+        let mut msgs = vec![
+            ChatMessage::user("q1"),
+            assistant_with_calls(&["a"]),
+            tool_response("a", "real_a"),
+            tool_response("a", "(tool 执行结果未保留)"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(
+            responses_of(&msgs[2]),
+            vec![("a".to_owned(), "real_a".to_owned())],
+            "placeholder 不能覆盖真实值"
+        );
+    }
+
+    /// 已污染历史可能同时含 placeholder 和晚到的真实 result;真实 result 应覆盖占位。
+    #[test]
+    fn placeholder_is_replaced_by_late_real_tool_response() {
+        let mut msgs = vec![
+            ChatMessage::user("q1"),
+            assistant_with_calls(&["a"]),
+            tool_response("a", "(tool 执行结果未保留)"),
+            ChatMessage::user("interrupt"),
+            tool_response("a", "real_a"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs[2].role, ChatRole::Tool);
+        assert_eq!(
+            responses_of(&msgs[2]),
+            vec![("a".to_owned(), "real_a".to_owned())]
+        );
+        assert_eq!(msgs[3].role, ChatRole::User);
+    }
+
+    /// 多个 Assistant tool_calls 段都能独立被处理:每段 Assistant + Tool 不会互相影响。
+    #[test]
+    fn multiple_assistant_tool_call_groups_handled_independently() {
+        let mut msgs = vec![
+            ChatMessage::user("q1"),
+            assistant_with_calls(&["a", "b"]),
+            tool_response("a", "real_a"),
+            tool_response("b", "real_b"),
+            ChatMessage::user("q2"),
+            assistant_with_calls(&["c"]),
+            tool_response("c", "real_c"),
+        ];
+        sanitize_tool_call_pairs(&mut msgs);
+
+        // 期望结果:user, asst(a,b), bundled(a,b), user, asst(c), bundled(c)
+        assert_eq!(msgs.len(), 6);
+        assert_eq!(msgs[2].role, ChatRole::Tool);
+        assert_eq!(
+            responses_of(&msgs[2]),
+            vec![
+                ("a".to_owned(), "real_a".to_owned()),
+                ("b".to_owned(), "real_b".to_owned()),
+            ]
+        );
+        assert_eq!(msgs[5].role, ChatRole::Tool);
+        assert_eq!(
+            responses_of(&msgs[5]),
+            vec![("c".to_owned(), "real_c".to_owned())]
+        );
+    }
+
+    /// 不含 tool_calls 的 Assistant message 不被动 — 不会付加多余 Tool。
+    #[test]
+    fn assistant_without_tool_calls_is_untouched() {
+        let mut msgs = vec![
+            ChatMessage::user("q"),
+            ChatMessage::assistant("plain reply"),
+        ];
+        let before = msgs.len();
+        sanitize_tool_call_pairs(&mut msgs);
+        assert_eq!(msgs.len(), before);
+        assert_eq!(msgs[1].role, ChatRole::Assistant);
+        assert!(msgs[1].content.tool_calls().is_empty());
+    }
+}
+
 // ---------------------------------------------------------------------------
 // 测试辅助: 给同一 crate 内的 `cache_stability_tests` 使用。
 // ---------------------------------------------------------------------------
@@ -4396,4 +5240,181 @@ pub(super) fn serialize_outgoing_tool_call_for_test(
     server_message_data: &str,
 ) -> (String, Value) {
     serialize_outgoing_tool_call(tc, mcp_ctx, server_message_data)
+}
+
+/// Issue #94 回归测试:`build_chat_request` 收集多 task 消息时,历史轮 user 消息
+/// 不能被乱序排到末尾、也不能因 LRC subagent 副本而重复。
+#[cfg(test)]
+mod issue_94_task_linearization_tests {
+    use super::*;
+    use crate::test_util::ai_agent_tasks::{
+        create_api_subtask, create_api_task, create_message, create_subagent_tool_call_message,
+    };
+
+    /// 构造一条带 `request_id` 的 UserQuery message。
+    fn user_query_msg(id: &str, task_id: &str, request_id: &str, query: &str) -> api::Message {
+        api::Message {
+            id: id.to_string(),
+            task_id: task_id.to_string(),
+            server_message_data: String::new(),
+            citations: vec![],
+            message: Some(api::message::Message::UserQuery(api::message::UserQuery {
+                query: query.to_string(),
+                ..Default::default()
+            })),
+            request_id: request_id.to_string(),
+            timestamp: None,
+        }
+    }
+
+    /// 复刻 Issue #94 的 01.json / 02.json 场景:用户只发过一句话,但在 LRC CLI
+    /// subagent 派生后,这句 UserQuery 同时存在于 root task 与 subtask。
+    ///
+    /// - root: [UserQuery, AgentOutput, Subagent ToolCall→subtask]
+    /// - subtask: [UserQuery(同 request_id+query 的副本), AgentOutput]
+    fn issue_94_tasks() -> (api::Task, api::Task) {
+        const REQ: &str = "req-1";
+        const QUERY: &str = "帮我在这个服务器上搭建一个dns(doh)分流服务";
+        let root = create_api_task(
+            "root",
+            vec![
+                user_query_msg("m1", "root", REQ, QUERY),
+                create_message("m2", "root"),
+                create_subagent_tool_call_message("m3", "root", "sub-1", None),
+            ],
+        );
+        let subtask = create_api_subtask(
+            "sub-1",
+            "root",
+            vec![
+                user_query_msg("s1", "sub-1", REQ, QUERY),
+                create_message("s2", "sub-1"),
+            ],
+        );
+        (root, subtask)
+    }
+
+    fn count_user_queries(msgs: &[&api::Message]) -> usize {
+        msgs.iter()
+            .filter(|m| matches!(&m.message, Some(api::message::Message::UserQuery(_))))
+            .count()
+    }
+
+    fn message_ids(msgs: &[&api::Message]) -> Vec<String> {
+        msgs.iter().map(|m| m.id.clone()).collect()
+    }
+
+    /// 复现:旧实现 `params.tasks.iter().flat_map(|t| t.messages.iter())` 朴素拼接 ——
+    /// (1) UserQuery 重复出现两次;(2) 结果随 task 输入顺序变化(`compute_active_tasks`
+    /// 用 HashMap::into_values 收集,顺序不确定)。
+    #[test]
+    fn naive_flat_map_reproduces_issue_94() {
+        let (root, subtask) = issue_94_tasks();
+
+        let naive = |tasks: &[api::Task]| -> Vec<String> {
+            tasks
+                .iter()
+                .flat_map(|t| t.messages.iter())
+                .map(|m| m.id.clone())
+                .collect()
+        };
+
+        let root_first = naive(&[root.clone(), subtask.clone()]);
+        let subtask_first = naive(&[subtask.clone(), root.clone()]);
+
+        // (1) UserQuery 被拼了两次。
+        let root_first_refs: Vec<&api::Message> = [&root, &subtask]
+            .iter()
+            .flat_map(|t| t.messages.iter())
+            .collect();
+        assert_eq!(
+            count_user_queries(&root_first_refs),
+            2,
+            "朴素拼接会让同一条 user query 出现两次 —— 这正是 Issue #94 的 bug"
+        );
+
+        // (2) 顺序随输入 task 顺序漂移 —— subtask 在前时历史 user(m1)被甩到末尾。
+        assert_ne!(
+            root_first, subtask_first,
+            "朴素拼接结果依赖 task 顺序,非确定性"
+        );
+        assert_eq!(
+            subtask_first.last().map(String::as_str),
+            Some("m3"),
+            "subtask 排前时 root 的消息整体后移"
+        );
+        assert!(
+            subtask_first.iter().position(|id| id == "s1").unwrap()
+                < subtask_first.iter().position(|id| id == "m1").unwrap(),
+            "subtask 的 UserQuery 副本(s1)排到了 root 原件(m1)之前"
+        );
+    }
+
+    /// 修复验证:`collect_linearized_task_messages` 输出与 task 输入顺序无关,
+    /// UserQuery 去重后只剩一条,且整体为 root→subtask 的 DFS 线性序。
+    #[test]
+    fn linearized_collection_is_deterministic_and_deduped() {
+        let (root, subtask) = issue_94_tasks();
+
+        let root_first = vec![root.clone(), subtask.clone()];
+        let subtask_first = vec![subtask.clone(), root.clone()];
+
+        let a = collect_linearized_task_messages(&root_first);
+        let b = collect_linearized_task_messages(&subtask_first);
+
+        // 与输入顺序无关。
+        assert_eq!(
+            message_ids(&a),
+            message_ids(&b),
+            "结果必须与 params.tasks 的输入顺序无关"
+        );
+
+        // UserQuery 去重:LRC 复制出的 subtask 副本(s1)被丢弃。
+        assert_eq!(
+            count_user_queries(&a),
+            1,
+            "重复的 UserQuery 必须被去重为一条"
+        );
+
+        // DFS 线性序:root 的消息在前,遇到 Subagent ToolCall 下钻 subtask。
+        // s1 被去重,故期望 [m1, m2, m3, s2]。
+        assert_eq!(message_ids(&a), vec!["m1", "m2", "m3", "s2"]);
+
+        // 保留下来的那条 user query 是 root 原件,排在序列开头。
+        assert_eq!(a.first().map(|m| m.id.as_str()), Some("m1"));
+    }
+
+    /// 普通单 task 对话(无 subagent)不受影响:消息原样、原序返回。
+    #[test]
+    fn single_task_conversation_unchanged() {
+        let root = create_api_task(
+            "root",
+            vec![
+                user_query_msg("m1", "root", "req-1", "你好"),
+                create_message("m2", "root"),
+            ],
+        );
+        let out = collect_linearized_task_messages(std::slice::from_ref(&root));
+        assert_eq!(message_ids(&out), vec!["m1", "m2"]);
+    }
+
+    /// 不同用户轮次即使 query 文本相同,只要 `request_id` 不同就不会被误删。
+    #[test]
+    fn distinct_turns_with_same_text_are_kept() {
+        let root = create_api_task(
+            "root",
+            vec![
+                user_query_msg("m1", "root", "req-1", "继续"),
+                create_message("m2", "root"),
+                user_query_msg("m3", "root", "req-2", "继续"),
+            ],
+        );
+        let out = collect_linearized_task_messages(std::slice::from_ref(&root));
+        assert_eq!(
+            count_user_queries(&out),
+            2,
+            "request_id 不同的两轮 user 消息都要保留"
+        );
+        assert_eq!(message_ids(&out), vec!["m1", "m2", "m3"]);
+    }
 }

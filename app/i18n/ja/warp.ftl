@@ -511,17 +511,17 @@ language-restart-required-body = Warp の UI 言語が更新されました。�
 
 # Sidebar / SettingsSection labels (Display impl)
 settings-section-about = 概要
-settings-section-account = アカウント
+# OpenWarp: settings-section-account は Account 設定ページとともに削除。
 settings-section-mcp-servers = MCP サーバー
 settings-section-billing-and-usage = 請求と使用状況
 settings-section-appearance = 外観
 settings-section-features = 機能
 settings-section-keybindings = キーボードショートカット
-settings-section-privacy = プライバシー
 settings-section-referrals = 紹介
 settings-section-shared-blocks = 共有ブロック
 settings-section-warp-drive = Warp Drive
 settings-section-warpify = Warpify
+settings-section-network = ネットワーク
 settings-section-ai = AI
 settings-section-warp-agent = Warp エージェント
 settings-section-agent-profiles = プロファイル
@@ -557,34 +557,8 @@ settings-about-copyright = Copyright 2026 Warp
 settings-about-automatic-updates-label = 自動更新
 settings-about-automatic-updates-description = 有効にすると、OpenWarp はバックグラウンドで新バージョンを確認しダウンロードします。無効でも手動で更新を確認できます。
 
-# main_page.rs — referral / account
-settings-main-referral-cta = 友人や同僚に Warp を紹介して特典を獲得
-settings-main-refer-a-friend = 友人を紹介
-settings-main-sign-up = ローカルプロファイル
-settings-main-local-profile = ローカルプロファイル
-settings-main-plan-free = Free
-settings-main-compare-plans = プランを比較
-settings-main-contact-support = サポートに問い合わせ
-settings-main-manage-billing = 請求を管理
-settings-main-upgrade-to-turbo = Turbo プランにアップグレード
-settings-main-upgrade-to-lightspeed = Lightspeed プランにアップグレード
+# OpenWarp: main_page.rs 関連の文字列は Account 設定ページとともに削除された。
 
-# main_page.rs — settings sync
-settings-main-settings-sync-label = 設定の同期
-
-# main_page.rs — version / autoupdate
-settings-main-version-label = バージョン
-settings-main-status-up-to-date = 最新です
-settings-main-cta-check-for-updates = 更新を確認
-settings-main-status-checking = 更新を確認中...
-settings-main-status-downloading = 更新をダウンロード中...
-settings-main-status-update-available = 更新があります
-settings-main-cta-relaunch-warp = Warp を再起動
-settings-main-status-updating = 更新中...
-settings-main-status-installed-update = 更新をインストール済み
-settings-main-status-cant-install = Warp の新バージョンがありますがインストールできません
-settings-main-status-cant-launch = Warp の新バージョンはインストール済みですが起動できません。
-settings-main-cta-update-manually = Warp を手動で更新
 
 # --- ANCHOR-SUB-MCP (agent-settings-mcp) ---
 # 此锚点下放 settings_view/mcp_servers_page.rs 字符串
@@ -784,6 +758,39 @@ settings-warpify-use-tmux = Tmux Warpification を使用
 settings-warpify-tmux-description = tmux ssh ラッパーは既定のラッパーが動作しない多くの状況で機能しますが、warpify するためにボタン押下が必要な場合があります。新しいタブから有効になります。
 settings-warpify-ssh-tmux-toggle-binding-label = Warpification 用 SSH セッション検出
 
+# --- ANCHOR-SUB-NETWORK (network-settings) ---
+# グローバル HTTP プロキシ設定ページ (Issue #72)。
+settings-network-page-title = ネットワーク
+settings-network-header = HTTP プロキシ
+settings-network-description = すべての送信 HTTP / WebSocket リクエストにグローバルプロキシを設定します。フィールドを編集後に Enter を押して保存。\n新規リクエスト(BYOP モデル一覧 / 接続テスト / 会話ロード など)は即時に反映されます;autoupdate / changelog など起動時に構築される長期 Client はアプリの再起動が必要です。
+settings-network-mode-label = プロキシモード
+settings-network-mode-description = System は OS / 環境変数に従う(既定);Custom は下の URL を使用;Off はプロキシを完全に無効化します。
+settings-network-mode-system = システム
+settings-network-mode-custom = カスタム
+settings-network-mode-off = オフ
+settings-network-url-label = プロキシ URL
+settings-network-url-placeholder = http://proxy.example.com:8080
+settings-network-url-description = 例: http://proxy.corp:8080
+settings-network-username-label = ユーザー名
+settings-network-username-placeholder = ユーザー名 (オプション)
+settings-network-username-description = プロキシが Basic Auth を要求する場合にユーザー名を入力します。
+settings-network-password-label = パスワード
+settings-network-password-placeholder = パスワード (送信後に OS キーチェーンに保存)
+settings-network-password-description = 送信されたパスワードは OS キーチェーンに保存されます (settings.toml には書き込まれません)。
+settings-network-no-proxy-label = 例外リスト (no_proxy)
+settings-network-no-proxy-placeholder = localhost,127.0.0.1,.internal
+settings-network-no-proxy-description = カンマ区切りのホストリスト。
+settings-network-save = 保存
+settings-network-clear = クリア
+settings-network-test-button = 接続テスト
+settings-network-test-idle-tcp = プロキシの host:port に TCP で接続して到達性を確認します。プロキシ自体の可用性のみテストし、インターネット出口はテストしません — 社内ネットワーク専用プロキシに適しています。
+settings-network-test-idle-http = 現在の設定で {$url} に GET を送信します。インターネット出口の接続性をテストします。
+settings-network-test-running = テスト中…
+settings-network-test-success-tcp = ✅ プロキシ到達可能 ({$latency} ms)
+settings-network-test-success-http = ✅ インターネット到達可能 ({$latency} ms)
+settings-network-test-failed-tcp = ❌ プロキシに到達できません: {$error}
+settings-network-test-failed-http = ❌ 接続失敗: {$error}
+
 # --- ANCHOR-SUB-AI-PAGE (agent-settings-ai-page) ---
 # Section / sub-headers
 settings-ai-warp-agent-header = Warp エージェント
@@ -850,7 +857,6 @@ settings-ai-profiles-description = プロファイルでは、エージェント
 # Anonymous / org gates
 settings-ai-sign-up = ローカル AI を有効化
 settings-ai-anonymous-create-account = ローカル AI 機能にアカウントは必要ありません。
-settings-ai-org-disallows-remote-session = 組織の設定により、アクティブなペインにリモートセッションのコンテンツが含まれる場合は AI を利用できません
 settings-ai-org-enforced-tooltip = この項目は組織の設定で強制されており、変更できません。
 settings-ai-restricted-billing = 請求の問題により制限中
 settings-ai-unlimited = 無制限
@@ -858,6 +864,7 @@ settings-ai-unlimited = 無制限
 # AI Input section
 settings-ai-show-input-hint-text = 入力ヒントを表示
 settings-ai-show-agent-tips = エージェントのヒントを表示
+settings-ai-show-agent-zero-state-hints = エージェントのショートカットヒントを表示
 settings-ai-include-agent-commands-in-history = エージェントが実行したコマンドを履歴に含める
 settings-ai-autodetect-agent-prompts = ターミナル入力中のエージェントプロンプトを自動検出
 settings-ai-autodetect-terminal-commands = エージェント入力中のターミナルコマンドを自動検出
@@ -911,8 +918,6 @@ settings-ai-coding-agent-select-header = コーディングエージェントを
 # Experimental / Agent
 settings-ai-cloud-agent-computer-use = エージェントでのコンピュータ操作
 settings-ai-cloud-agent-computer-use-description = Warp アプリから開始したエージェント会話でコンピュータ操作を有効化します。
-settings-ai-orchestration-label = オーケストレーション
-settings-ai-orchestration-description = マルチエージェントオーケストレーションを有効化し、エージェントが並列のサブエージェントを起動・調整できるようにします。
 
 # AWS Bedrock
 settings-ai-aws-bedrock-toggle = AWS Bedrock の認証情報を使用
@@ -1083,45 +1088,6 @@ settings-code-project-explorer = プロジェクトエクスプローラー
 settings-code-project-explorer-desc = 左側ツールパネルに IDE スタイルのプロジェクトエクスプローラー / ファイルツリーを追加します。
 settings-code-global-search = グローバルファイル検索
 settings-code-global-search-desc = 左側ツールパネルにグローバルファイル検索を追加します。
-
-# --- ANCHOR-SUB-PRIVACY (agent-settings-privacy) ---
-settings-privacy-page-title = プライバシー
-settings-privacy-modal-add-regex-title = 正規表現パターンを追加
-settings-privacy-safe-mode-title = シークレットの伏字化
-settings-privacy-safe-mode-description = この設定が有効な場合、Warp はブロック、Warp Drive オブジェクトの内容、Oz プロンプトに含まれる機密情報の可能性をスキャンし、サーバーへの保存・送信を防止します。正規表現でリストをカスタマイズできます。
-settings-privacy-user-secret-regex-title = カスタムシークレット伏字化
-settings-privacy-user-secret-regex-description = 正規表現で追加で伏字化したいシークレットやデータを定義します。次のコマンド実行時から反映されます。正規表現の先頭に (?i) フラグを付けると大文字小文字を無視できます。
-settings-privacy-telemetry-title = Warp の改善に協力する
-settings-privacy-telemetry-description = OpenWarp は既定で外部分析を使いません。ローカル Agent 機能に分析は必要ありません。
-settings-privacy-telemetry-description-old = OpenWarp は既定で外部分析を使いません。外部プロバイダーを設定しない限り、コンソールの入出力はローカルに残ります。
-settings-privacy-telemetry-free-tier-note = ローカル Agent 機能に分析は必要ありません。
-settings-privacy-telemetry-docs-link = Warp のデータ利用について詳しく見る
-settings-privacy-data-management-title = データの管理
-settings-privacy-data-management-description = いつでも Warp アカウントを完全に削除できます。削除後は Warp を使用できなくなります。
-settings-privacy-data-management-link = データ管理ページを開く
-settings-privacy-policy-title = プライバシーポリシー
-settings-privacy-policy-link = Warp のプライバシーポリシーを読む
-settings-privacy-tab-personal = 個人
-settings-privacy-tab-enterprise = エンタープライズ
-settings-privacy-enterprise-readonly = エンタープライズのシークレット伏字化は変更できません。
-settings-privacy-enterprise-empty = 組織で設定されたエンタープライズ正規表現はありません。
-settings-privacy-recommended = 推奨
-settings-privacy-add-all = すべて追加
-settings-privacy-add-regex-button = 正規表現を追加
-settings-privacy-enterprise-enabled-by-org = 組織により有効化されています。
-settings-privacy-zdr-badge = ZDR
-settings-privacy-zdr-tooltip = 管理者がチームに対しゼロデータ保持を有効にしています。ユーザー生成コンテンツは収集されません。
-settings-privacy-secret-display-mode-title = シークレットの視覚的伏字化モード
-settings-privacy-secret-display-mode-description = 検索可能性を保ちつつ、ブロック一覧でシークレットがどのように表示されるかを選択します。この設定はブロック一覧の表示のみに影響します。
-settings-privacy-crash-reports-title = クラッシュレポートを送信
-settings-privacy-crash-reports-description = クラッシュレポートはデバッグと安定性向上に役立ちます。
-settings-privacy-cloud-conv-title = AI 会話をローカルに保存
-settings-privacy-cloud-conv-description-on = エージェント会話はこのマシン上に保存され、ローカルの製品機能に使用されます。
-settings-privacy-cloud-conv-description-off = エージェント会話はこのマシン上にローカル保存され、外部サービスへ同期されません。
-settings-privacy-org-managed-tooltip = この設定は組織により管理されています。
-settings-privacy-network-log-title = ネットワークログコンソール
-settings-privacy-network-log-description = Warp から外部サーバーへのすべての通信を確認できるネイティブコンソールを構築しました。作業内容が常に安全に保たれていることを確認できます。
-settings-privacy-network-log-link = ネットワークログを表示
 
 # --- ANCHOR-SUB-EXEC-MODAL-BLOCKS (agent-settings-misc) ---
 # ---- execution_profile_view ----
@@ -1697,12 +1663,11 @@ keybinding-desc-workspace-open-ai-fact-collection = AI ルールを開く
 keybinding-desc-workspace-open-mcp-servers = MCP サーバーを開く
 keybinding-desc-workspace-jump-to-latest-toast = 最新のエージェントタスクへジャンプ
 keybinding-desc-workspace-toggle-notification-mailbox = 通知メールボックスを切り替え
-keybinding-desc-workspace-toggle-agent-management-view = エージェント管理ビューを切り替え
 
 # Settings pages
 keybinding-desc-workspace-show-settings = 設定を開く
 keybinding-desc-workspace-show-settings-menu = 設定
-keybinding-desc-workspace-show-settings-account = 設定を開く: アカウント
+# OpenWarp: keybinding-desc-workspace-show-settings-account は Account 設定ページとともに削除。
 keybinding-desc-workspace-show-settings-appearance = 設定を開く: 外観
 keybinding-desc-workspace-show-settings-appearance-menu = 外観...
 keybinding-desc-workspace-show-settings-features = 設定を開く: 機能
@@ -1712,7 +1677,6 @@ keybinding-desc-workspace-show-settings-keyboard-shortcuts = 設定を開く: �
 keybinding-desc-workspace-show-settings-keyboard-shortcuts-menu = キーボードショートカットを設定...
 keybinding-desc-workspace-show-settings-about = 設定を開く: バージョン情報
 keybinding-desc-workspace-show-settings-about-menu = Warp について
-keybinding-desc-workspace-show-settings-privacy = 設定を開く: プライバシー
 keybinding-desc-workspace-show-settings-warpify = 設定を開く: Warpify
 keybinding-desc-workspace-show-settings-warpify-menu = Warpify を設定...
 keybinding-desc-workspace-show-settings-ai = 設定を開く: AI
@@ -2059,6 +2023,7 @@ agent-zero-state-title = 新規 Oz エージェント会話
 agent-zero-state-title-cloud = 新規 Oz ローカルエージェント会話
 agent-zero-state-description = 下にプロンプトを送信して新規会話を開始
 agent-zero-state-description-with-location = `{ $location }` で新規会話を開始するには下にプロンプトを送信
+agent-zero-state-hide-hints-tooltip = ショートカットヒントを非表示（設定から再有効化可能）
 agent-zero-state-switch-model = モデルを切り替え
 agent-zero-state-go-back-to-terminal = ターミナルに戻る
 agent-message-bar-for-help = ヘルプ
@@ -2097,7 +2062,6 @@ agent-error-attempting-resume-conversation = 会話の再開を試みていま�
 toggle-setting-enable = { $suffix }を有効化
 toggle-setting-disable = { $suffix }を無効化
 
-toggle-suffix-ai = AI
 toggle-suffix-active-ai = アクティブ AI
 toggle-suffix-ai-input-autodetect-agent = エージェント入力でのターミナルコマンド自動検出
 toggle-suffix-ai-input-autodetect-nld = 自然言語検出
@@ -2324,8 +2288,6 @@ slash-cmd-model-desc = ベースエージェントモデルを切り替え
 slash-cmd-profile-desc = アクティブな実行プロファイルを切り替え
 slash-cmd-plan-desc = エージェントに調査させてタスクの計画を作成
 slash-cmd-plan-hint = <タスクを記述>
-slash-cmd-orchestrate-desc = タスクをサブタスクに分解し複数エージェントで並列実行
-slash-cmd-orchestrate-hint = <タスクを記述>
 slash-cmd-compact-desc = 会話履歴を要約してコンテキストを解放
 slash-cmd-compact-hint = <任意のカスタム要約指示>
 slash-cmd-compact-and-desc = 会話を圧縮した後に追加プロンプトを送信
@@ -2583,14 +2545,6 @@ workflow-ai-assist-error-rate-limited = AI クレジットが不足している�
 workflow-enum-new = 新規
 workflow-alias-name-placeholder = エイリアス名
 workflow-add-argument-tooltip = ワークフロー引数を追加
-
-# --- ANCHOR-SUB-SETTINGS-PRIVACY-ADD-REGEX ---
-# Privacy settings add regex modal (app/src/settings_view/privacy/add_regex_modal.rs)
-settings-privacy-add-regex-name-placeholder = 例: "Google API Key"
-settings-privacy-add-regex-name-label = 名前 (任意)
-settings-privacy-add-regex-pattern-label = 正規表現パターン
-settings-privacy-add-regex-invalid = 無効な正規表現
-settings-privacy-add-regex-cancel = キャンセル
 
 # Workspace panels (app/src/workspace/view/*)
 workspace-conversation-list-search = 検索
@@ -3354,7 +3308,6 @@ notifications-banner-allow-permissions-title = 通知のセットアップを完
 notifications-banner-configure-notifications = 通知を構成
 notifications-banner-set-permissions = 権限を設定
 ai-edit-api-keys = API キーを編集
-ai-manage-privacy-settings = プライバシー設定を管理
 ai-block-manage-agent-permissions = エージェント権限を管理
 agent-zero-state-cloud-agents-description = ローカルエージェントを使い、エージェントを並列実行し、自律的に動作するエージェントを構築し、このマシン上で状況を確認できます。{" "}
 agent-zero-state-visit-docs = ドキュメントを見る

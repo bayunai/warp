@@ -742,10 +742,6 @@ pub enum AgentModeEntrypoint {
     /// User manually switched between terminal and AI input modes in UDI interface
     #[serde(rename = "udi_terminal_input_switcher")]
     UDITerminalInputSwitcher,
-
-    /// The agent management view, where you can see both local interactive and ambient agent tasks
-    #[serde(rename = "agent_management_view")]
-    AgentManagementView,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1937,11 +1933,6 @@ pub enum TelemetryEvent {
         is_intelligent_autosuggestions_enabled: bool,
     },
 
-    /// Emitted when the user toggles global AI.
-    ToggleGlobalAI {
-        is_ai_enabled: bool,
-    },
-
     /// Emitted when the user toggles active AI.
     ToggleActiveAI {
         is_active_ai_enabled: bool,
@@ -2375,14 +2366,6 @@ pub enum TelemetryEvent {
         block_id: BlockId,
         user_took_over: bool,
     },
-    /// Emitted when the user toggles the Agent Management View.
-    AgentManagementViewToggled {
-        is_open: bool,
-    },
-    /// Emitted when the user opens a session from the Agent Management View.
-    AgentManagementViewOpenedSession,
-    /// Emitted when the user copies a session link from the Agent Management View.
-    AgentManagementViewCopiedSessionLink,
     /// Detected that Warp is running in an isolated sandbox.
     DetectedIsolationPlatform {
         platform: warp_isolation_platform::IsolationPlatformType,
@@ -3412,9 +3395,6 @@ impl TelemetryEvent {
             } => Some(
                 json!({ "citation": citation, "block_id": block_id, "conversation_id": conversation_id, "server_output_id": server_output_id }),
             ),
-            TelemetryEvent::ToggleGlobalAI { is_ai_enabled } => {
-                Some(json!({"is_ai_enabled": is_ai_enabled}))
-            }
             TelemetryEvent::ToggleActiveAI {
                 is_active_ai_enabled,
             } => Some(json!({"is_active_ai_enabled": is_active_ai_enabled})),
@@ -3977,11 +3957,6 @@ impl TelemetryEvent {
                 "block_id": block_id,
                 "user_took_over": user_took_over,
             })),
-            TelemetryEvent::AgentManagementViewToggled { is_open } => Some(json!({
-                "is_open": is_open,
-            })),
-            TelemetryEvent::AgentManagementViewOpenedSession => None,
-            TelemetryEvent::AgentManagementViewCopiedSessionLink => None,
             TelemetryEvent::DetectedIsolationPlatform { platform } => Some(json!({
                 "platform": platform,
             })),
@@ -4384,7 +4359,6 @@ impl TelemetryEvent {
             | TelemetryEvent::AgentModeCodeFilesNavigated { .. }
             | TelemetryEvent::AgentModeCodeDiffHunksNavigated { .. }
             | TelemetryEvent::ToggleIntelligentAutosuggestionsSetting { .. }
-            | TelemetryEvent::ToggleGlobalAI { .. }
             | TelemetryEvent::ToggleActiveAI { .. }
             | TelemetryEvent::TogglePromptSuggestionsSetting { .. }
             | TelemetryEvent::ToggleCodeSuggestionsSetting { .. }
@@ -4488,9 +4462,6 @@ impl TelemetryEvent {
             | TelemetryEvent::CLISubagentInputDismissed { .. }
             | TelemetryEvent::CLISubagentActionExecuted { .. }
             | TelemetryEvent::CLISubagentActionRejected { .. }
-            | TelemetryEvent::AgentManagementViewToggled { .. }
-            | TelemetryEvent::AgentManagementViewOpenedSession
-            | TelemetryEvent::AgentManagementViewCopiedSessionLink
             | TelemetryEvent::DetectedIsolationPlatform { .. }
             | TelemetryEvent::AgentTipShown { .. }
             | TelemetryEvent::AgentTipClicked { .. }

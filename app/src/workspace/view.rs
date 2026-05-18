@@ -4329,11 +4329,6 @@ impl Workspace {
                 self.close_palette(false, None, ctx);
             }
 
-            // If the agent management view is open, we want to close it when we activate a new tab.
-            if FeatureFlag::AgentManagementView.is_enabled() {
-                self.set_is_agent_management_view_open(false, ctx);
-            }
-
             self.set_active_tab_index(index, ctx);
             self.focus_active_tab(ctx);
             self.update_window_title(ctx);
@@ -4454,12 +4449,6 @@ impl Workspace {
         // Focusing on the clicked tab
         if index >= self.tab_count() {
             return;
-        }
-
-        // If the agent management view is open, we want to close it when we change focus to rename a tab.
-        // This function doesn't call `activate_tab_internal`, which is why we need the extra check here.
-        if FeatureFlag::AgentManagementView.is_enabled() {
-            self.set_is_agent_management_view_open(false, ctx);
         }
 
         self.set_active_tab_index(index, ctx);
@@ -5335,6 +5324,12 @@ impl Workspace {
             log::warn!("open_ssh_terminal: no terminal in newly added tab");
             return;
         };
+
+        if AISettings::as_ref(ctx).default_session_mode(ctx) == DefaultSessionMode::Agent {
+            terminal_view.update(ctx, |view, _| {
+                view.set_enter_agent_view_after_ssh_bootstrap();
+            });
+        }
 
         // 1. 同步读 keychain(主线程 OK)。auth_type 决定查 password 还是 passphrase。
         let secret_kind = match server.auth_type {
@@ -11722,18 +11717,10 @@ impl Workspace {
         ctx: &mut ViewContext<Self>,
     ) {
         match event {
-            SettingsViewEvent::CheckForUpdate => {
-                self.manual_check_for_update(ctx);
-            }
-            SettingsViewEvent::OpenWarpDrive => {
-                self.close_all_overlays(ctx);
-                self.open_or_toggle_warp_drive(
-                    false, /* toggle */
-                    false, /* explicit_user_action */
-                    ctx,
-                );
-                ctx.notify();
-            }
+            // OpenWarp 去中心化分支:`CheckForUpdate` / `OpenWarpDrive` 事件 arm 随
+            // `SettingsViewEvent` 中同名 variant 一同物理删。手动检查更新仍可
+            // 由 `WorkspaceAction::CheckForUpdate`(`workspace:check_for_updates` binding)
+            // 触发;Warp Drive 仍可由 `WorkspaceAction::OpenWarpDrive` 触发。
             SettingsViewEvent::Pane(_) | SettingsViewEvent::StartResize => {}
             SettingsViewEvent::ShowToast { message, flavor } => {
                 self.toast_stack.update(ctx, |toast_stack, ctx| {
@@ -15789,13 +15776,7 @@ impl Workspace {
             .finish();
         } else {
             // Copy from our saved tab_bar_state to ensure all tabs get rendered with the same state
-            let active_tab_index = if FeatureFlag::AgentManagementView.is_enabled()
-                && self.current_workspace_state.is_agent_management_view_open
-            {
-                None
-            } else {
-                Some(self.active_tab_index)
-            };
+            let active_tab_index = Some(self.active_tab_index);
 
             let drag_model = CrossWindowTabDrag::as_ref(ctx);
             let tab_bar_state = TabBarState {
@@ -18787,8 +18768,6 @@ impl TypedActionView for Workspace {
                 );
                 ctx.notify();
             }
-            ToggleAgentManagementView => {}
-            ViewAgentRunsForEnvironment { environment_id: _ } => {}
             ClosePanel => {
                 if self.left_panel_view.is_self_or_child_focused(ctx) {
                     self.close_left_panel(ctx);
@@ -19457,6 +19436,7 @@ impl TypedActionView for Workspace {
             FileDeleted { path } => {
                 self.close_tabs_with_file_path(path, ctx);
             }
+            #[cfg(debug_assertions)]
             DebugResetAwsBedrockLoginBannerDismissed => {
                 // Reset the AWS Bedrock login banner dismissed state for debugging
                 AISettings::handle(ctx).update(ctx, |ai_settings, ctx| {

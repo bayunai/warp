@@ -552,17 +552,17 @@ language-restart-required-body = Warp 的界面语言已更新。部分文字会
 
 # 侧边栏 / SettingsSection 标签（Display impl）
 settings-section-about = 关于
-settings-section-account = 账户
+# OpenWarp: settings-section-account 随 Account 设置页一同删除。
 settings-section-mcp-servers = MCP 服务器
 settings-section-billing-and-usage = 账单与用量
 settings-section-appearance = 外观
 settings-section-features = 功能
 settings-section-keybindings = 快捷键
-settings-section-privacy = 隐私
 settings-section-referrals = 推荐
 settings-section-shared-blocks = 共享命令块
 settings-section-warp-drive = Warp Drive
 settings-section-warpify = Warpify
+settings-section-network = 网络
 settings-section-ai = AI
 settings-section-warp-agent = Warp 智能体
 settings-section-agent-profiles = 配置
@@ -601,34 +601,8 @@ settings-about-update-available = 发现新版本 { $version }。
 settings-about-update-check-now = 检查更新
 settings-about-update-open-release = 前往 GitHub 下载
 
-# main_page.rs — referral / account
-settings-main-referral-cta = 与朋友和同事分享 Warp，获得奖励
-settings-main-refer-a-friend = 推荐朋友
-settings-main-sign-up = 本地配置
-settings-main-local-profile = 本地配置
-settings-main-plan-free = 免费版
-settings-main-compare-plans = 对比方案
-settings-main-contact-support = 联系支持
-settings-main-manage-billing = 管理账单
-settings-main-upgrade-to-turbo = 升级到 Turbo 方案
-settings-main-upgrade-to-lightspeed = 升级到 Lightspeed 方案
+# OpenWarp：main_page.rs 相关文案随 Account 设置页一同删除。
 
-# main_page.rs — settings sync
-settings-main-settings-sync-label = 设置同步
-
-# main_page.rs — version / autoupdate
-settings-main-version-label = 版本
-settings-main-status-up-to-date = 已是最新
-settings-main-cta-check-for-updates = 检查更新
-settings-main-status-checking = 正在检查更新...
-settings-main-status-downloading = 正在下载更新...
-settings-main-status-update-available = 有可用更新
-settings-main-cta-relaunch-warp = 重启 Warp
-settings-main-status-updating = 正在更新...
-settings-main-status-installed-update = 更新已安装
-settings-main-status-cant-install = 有新版本的 Warp 可用，但无法安装
-settings-main-status-cant-launch = 新版本的 Warp 已安装，但无法启动。
-settings-main-cta-update-manually = 手动更新 Warp
 
 # --- ANCHOR-SUB-MCP (agent-settings-mcp) ---
 settings-mcp-page-title = MCP 服务器
@@ -824,6 +798,39 @@ settings-warpify-use-tmux = 使用 Tmux Warpify
 settings-warpify-tmux-description = tmux ssh 包装器在许多默认方式无效的场景下能正常工作，但可能需要你手动点击按钮才能 Warpify。在新标签页中生效。
 settings-warpify-ssh-tmux-toggle-binding-label = 用于 Warpify 的 SSH 会话检测
 
+# --- ANCHOR-SUB-NETWORK (network-settings) ---
+# 全局 HTTP 代理设置页(见 Issue #72)。
+settings-network-page-title = 网络
+settings-network-header = HTTP 代理
+settings-network-description = 为所有出站 HTTP / WebSocket 请求配置全局代理。改完字段后按回车保存。\n新发起的请求(BYOP 拉模型列表 / 测试连接 / 对话加载 等)立即生效;autoupdate / changelog 等启动时构造的长周期 Client 需重启应用后生效。
+settings-network-mode-label = 代理模式
+settings-network-mode-description = System 跟随系统 / 环境变量(默认);Custom 使用下方 URL;Off 完全禁用代理。
+settings-network-mode-system = 系统代理
+settings-network-mode-custom = 自定义
+settings-network-mode-off = 关闭
+settings-network-url-label = 代理 URL
+settings-network-url-placeholder = http://proxy.example.com:8080
+settings-network-url-description = 例:http://proxy.corp:8080
+settings-network-username-label = 用户名
+settings-network-username-placeholder = 用户名(可选)
+settings-network-username-description = 若代理需要 Basic Auth,在此填用户名。
+settings-network-password-label = 密码
+settings-network-password-placeholder = 密码(提交后保存到系统密钥库)
+settings-network-password-description = 提交后保存到 OS 密钥库(不写入 settings.toml)。
+settings-network-no-proxy-label = 例外列表 (no_proxy)
+settings-network-no-proxy-placeholder = localhost,127.0.0.1,.internal
+settings-network-no-proxy-description = 逗号分隔的 host 列表。
+settings-network-save = 保存
+settings-network-clear = 清除
+settings-network-test-button = 测试连接
+settings-network-test-idle-tcp = 对代理 host:port 做 TCP 探测,只验证代理本身可达不验证出网 — 适合只能走内网的代理。
+settings-network-test-idle-http = 用当前配置对 {$url} 发一次 GET。验证出网连通性。
+settings-network-test-running = 测试中…
+settings-network-test-success-tcp = ✅ 代理可达(耗时 {$latency} 毫秒)
+settings-network-test-success-http = ✅ 出网正常(耗时 {$latency} 毫秒)
+settings-network-test-failed-tcp = ❌ 代理不可达:{$error}
+settings-network-test-failed-http = ❌ 连接失败:{$error}
+
 # --- ANCHOR-SUB-AI-PAGE (agent-settings-ai-page) ---
 # 章节 / 副标题
 settings-ai-warp-agent-header = Warp 智能体
@@ -890,7 +897,6 @@ settings-ai-profiles-description = 配置让你定义智能体的运行方式 �
 # 匿名 / 组织限制
 settings-ai-sign-up = 启用本地 AI
 settings-ai-anonymous-create-account = 本地 AI 功能不需要账户。
-settings-ai-org-disallows-remote-session = 当活动窗格包含来自远程会话的内容时，你的组织禁止使用 AI
 settings-ai-org-enforced-tooltip = 此选项由你所在组织的设置强制启用，无法自定义。
 settings-ai-restricted-billing = 因账单问题受限
 settings-ai-unlimited = 不限量
@@ -898,6 +904,7 @@ settings-ai-unlimited = 不限量
 # AI 输入区段
 settings-ai-show-input-hint-text = 显示输入提示文本
 settings-ai-show-agent-tips = 显示智能体提示
+settings-ai-show-agent-zero-state-hints = 显示 Agent 快捷键提示
 settings-ai-include-agent-commands-in-history = 将智能体执行的命令纳入历史
 settings-ai-autodetect-agent-prompts = 在终端输入中自动检测智能体提示
 settings-ai-autodetect-terminal-commands = 在智能体输入中自动检测终端命令
@@ -951,8 +958,6 @@ settings-ai-coding-agent-select-header = 选择编码智能体
 # 实验性 / 智能体
 settings-ai-cloud-agent-computer-use = 在智能体中启用计算机使用
 settings-ai-cloud-agent-computer-use-description = 在 Warp 应用中启动的智能体会话中启用计算机使用。
-settings-ai-orchestration-label = 编排
-settings-ai-orchestration-description = 启用多智能体编排，允许智能体派生并协调并行的子智能体。
 
 # AWS Bedrock
 settings-ai-aws-bedrock-toggle = 使用 AWS Bedrock 凭证
@@ -1119,45 +1124,6 @@ settings-code-project-explorer = 项目浏览器
 settings-code-project-explorer-desc = 在左侧工具面板添加 IDE 风格的项目浏览器 / 文件树。
 settings-code-global-search = 全局文件搜索
 settings-code-global-search-desc = 在左侧工具面板添加全局文件搜索。
-
-# --- ANCHOR-SUB-PRIVACY (agent-settings-privacy) ---
-settings-privacy-page-title = 隐私
-settings-privacy-modal-add-regex-title = 添加正则表达式
-settings-privacy-safe-mode-title = 敏感信息混淆
-settings-privacy-safe-mode-description = 启用此设置后，Warp 会扫描 Block、Warp Drive 对象内容以及 Oz 提示词中可能包含的敏感信息，并阻止将这些数据保存或发送到任何服务器。你可以通过正则表达式自定义匹配规则。
-settings-privacy-user-secret-regex-title = 自定义敏感信息混淆
-settings-privacy-user-secret-regex-description = 使用正则表达式定义你希望额外混淆的敏感信息或数据。规则将在下一条命令执行时生效。可在正则表达式前加 (?i) 标志使其忽略大小写。
-settings-privacy-telemetry-title = 帮助改进 Warp
-settings-privacy-telemetry-description = OpenWarp 默认不启用外发分析。本地 Agent 功能不需要分析数据。
-settings-privacy-telemetry-description-old = OpenWarp 默认不启用外发分析。除非你配置外部服务商，控制台输入和输出会保留在本机。
-settings-privacy-telemetry-free-tier-note = 本地 Agent 功能不需要分析数据。
-settings-privacy-telemetry-docs-link = 详细了解 Warp 如何使用数据
-settings-privacy-data-management-title = 管理你的数据
-settings-privacy-data-management-description = 你可以随时选择永久删除 Warp 账户。删除后将无法继续使用 Warp。
-settings-privacy-data-management-link = 访问数据管理页面
-settings-privacy-policy-title = 隐私政策
-settings-privacy-policy-link = 阅读 Warp 的隐私政策
-settings-privacy-tab-personal = 个人
-settings-privacy-tab-enterprise = 企业
-settings-privacy-enterprise-readonly = 企业版敏感信息混淆规则不可修改。
-settings-privacy-enterprise-empty = 你所在组织尚未配置任何企业版正则规则。
-settings-privacy-recommended = 推荐
-settings-privacy-add-all = 全部添加
-settings-privacy-add-regex-button = 添加正则
-settings-privacy-enterprise-enabled-by-org = 已由你所在组织启用。
-settings-privacy-zdr-badge = ZDR
-settings-privacy-zdr-tooltip = 你的管理员已为团队启用零数据保留。用户生成的内容将永远不会被采集。
-settings-privacy-secret-display-mode-title = 敏感信息可视化混淆模式
-settings-privacy-secret-display-mode-description = 选择敏感信息在 Block 列表中的视觉呈现方式，同时保持可搜索。此设置仅影响 Block 列表中的显示。
-settings-privacy-crash-reports-title = 发送崩溃报告
-settings-privacy-crash-reports-description = 崩溃报告有助于排查问题并提升稳定性。
-settings-privacy-cloud-conv-title = 将 AI 对话存储到本地
-settings-privacy-cloud-conv-description-on = 智能体对话会存储在这台机器上，用于本地产品功能。
-settings-privacy-cloud-conv-description-off = 智能体对话仅存储在这台机器上，清除本地数据时会被移除。
-settings-privacy-org-managed-tooltip = 此设置由你所在组织管理。
-settings-privacy-network-log-title = 网络日志控制台
-settings-privacy-network-log-description = 我们构建了原生控制台，允许你查看 Warp 与外部服务器的全部通信，让你确信工作始终安全。
-settings-privacy-network-log-link = 查看网络日志
 
 # --- ANCHOR-SUB-EXEC-MODAL-BLOCKS (agent-settings-misc) ---
 # ---- execution_profile_view ----
@@ -1695,12 +1661,11 @@ keybinding-desc-workspace-open-ai-fact-collection = 打开 AI Rules
 keybinding-desc-workspace-open-mcp-servers = 打开 MCP 服务器
 keybinding-desc-workspace-jump-to-latest-toast = 跳转到最新 agent 任务
 keybinding-desc-workspace-toggle-notification-mailbox = 切换通知邮箱
-keybinding-desc-workspace-toggle-agent-management-view = 切换 agent 管理视图
 
 # 设置页面
 keybinding-desc-workspace-show-settings = 打开设置
 keybinding-desc-workspace-show-settings-menu = 设置
-keybinding-desc-workspace-show-settings-account = 打开设置：账户
+# OpenWarp：keybinding-desc-workspace-show-settings-account 随 Account 设置页一同删除。
 keybinding-desc-workspace-show-settings-appearance = 打开设置：外观
 keybinding-desc-workspace-show-settings-appearance-menu = 外观...
 keybinding-desc-workspace-show-settings-features = 打开设置：功能
@@ -1710,7 +1675,6 @@ keybinding-desc-workspace-show-settings-keyboard-shortcuts = 打开设置：键�
 keybinding-desc-workspace-show-settings-keyboard-shortcuts-menu = 配置键盘快捷键...
 keybinding-desc-workspace-show-settings-about = 打开设置：关于
 keybinding-desc-workspace-show-settings-about-menu = 关于 Warp
-keybinding-desc-workspace-show-settings-privacy = 打开设置：隐私
 keybinding-desc-workspace-show-settings-warpify = 打开设置：Warpify
 keybinding-desc-workspace-show-settings-warpify-menu = 配置 Warpify...
 keybinding-desc-workspace-show-settings-ai = 打开设置：AI
@@ -2061,6 +2025,7 @@ agent-zero-state-title-cloud = 新建 Agent 对话
 agent-zero-state-description = 在下方输入提示开始新的对话
 agent-zero-state-description-with-location = 在下方输入提示，于 `{ $location }` 开始新的对话
 agent-zero-state-recent-activity = 最近活动
+agent-zero-state-hide-hints-tooltip = 隐藏快捷键提示（可在设置中重新开启）
 inline-agent-header-prompt-to-interact-command = 提示智能体与 `{ $command }` 交互
 inline-agent-header-prompt-to-interact-running-command = 提示智能体与正在运行的命令交互
 inline-agent-header-waiting-on-instructions = 智能体正在等待指令
@@ -2074,8 +2039,6 @@ agent-toolbar-available-chips = 可用控件
 agent-message-bar-get-figma-mcp = 获取 Figma MCP
 agent-message-bar-enable-figma-mcp = 启用 Figma MCP
 agent-message-bar-enabling = 正在启用...
-orchestration-parent-conversation = 父对话
-orchestration-back-to-parent-conversation = 返回父对话
 child-agent-default-name = 智能体
 agent-zero-state-switch-model = 切换模型
 agent-zero-state-go-back-to-terminal = 返回终端
@@ -2115,7 +2078,6 @@ agent-error-attempting-resume-conversation = 正在尝试继续对话...
 toggle-setting-enable = 启用{ $suffix }
 toggle-setting-disable = 禁用{ $suffix }
 
-toggle-suffix-ai = AI
 toggle-suffix-active-ai = 主动式 AI
 toggle-suffix-ai-input-autodetect-agent = Agent 输入中的终端命令检测
 toggle-suffix-ai-input-autodetect-nld = 自然语言检测
@@ -2341,8 +2303,6 @@ slash-cmd-model-desc = 切换基础智能体模型
 slash-cmd-profile-desc = 切换当前激活的执行配置
 slash-cmd-plan-desc = 让智能体调研并为任务创建计划
 slash-cmd-plan-hint = <描述你的任务>
-slash-cmd-orchestrate-desc = 将任务拆分为子任务并由多个智能体并行执行
-slash-cmd-orchestrate-hint = <描述你的任务>
 slash-cmd-compact-desc = 通过摘要对话历史来释放上下文
 slash-cmd-compact-hint = <可选：自定义摘要指令>
 slash-cmd-compact-and-desc = 压缩对话并随后发送一条后续提示词
@@ -2591,14 +2551,6 @@ workflow-ai-assist-error-rate-limited = 看起来你的 AI 额度已用完。请
 workflow-enum-new = 新建
 workflow-alias-name-placeholder = 别名
 workflow-add-argument-tooltip = 添加工作流参数
-
-# --- ANCHOR-SUB-SETTINGS-PRIVACY-ADD-REGEX ---
-# 隐私设置添加正则表达式弹窗（app/src/settings_view/privacy/add_regex_modal.rs）
-settings-privacy-add-regex-name-placeholder = 例如「Google API Key」
-settings-privacy-add-regex-name-label = 名称（可选）
-settings-privacy-add-regex-pattern-label = 正则表达式模式
-settings-privacy-add-regex-invalid = 无效的正则表达式
-settings-privacy-add-regex-cancel = 取消
 
 # 工作区面板（app/src/workspace/view/*）
 workspace-conversation-list-search = 搜索
@@ -3357,7 +3309,6 @@ notifications-banner-allow-permissions-title = 别忘了在权限请求中点击
 notifications-banner-configure-notifications = 配置通知
 notifications-banner-set-permissions = 设置权限
 ai-edit-api-keys = 编辑 API Key
-ai-manage-privacy-settings = 管理隐私设置
 ai-block-manage-agent-permissions = 管理智能体权限
 agent-zero-state-cloud-agents-description = 使用本地智能体并行运行多个智能体，构建可自主运行的智能体，并在本机查看智能体状态。
 agent-zero-state-visit-docs = 查看文档

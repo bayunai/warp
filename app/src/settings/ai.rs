@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use indexmap::IndexMap;
 
 use crate::ai::request_usage_model::RequestLimitInfo;
-use crate::auth::AuthStateProvider;
 use crate::report_if_error;
 use crate::terminal::CLIAgent;
 use crate::workspaces::user_workspaces::UserWorkspaces;
@@ -628,7 +627,6 @@ cfg_if! {
     }
 }
 
-/// Maps custom toolbar command regex patterns to CLI agent names.
 // ---------------------------------------------------------------------------
 // 自定义 Agent 提供商配置(进程内 Provider)
 // ---------------------------------------------------------------------------
@@ -640,15 +638,11 @@ cfg_if! {
 /// 任何 OpenAI 兼容的本地服务等)。后续可在此扩展 Anthropic、Google、Bedrock。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AgentProviderKind {
     /// OpenAI 兼容的 Chat Completions / `/v1/models` 协议。
+    #[default]
     OpenAiCompatible,
-}
-
-impl Default for AgentProviderKind {
-    fn default() -> Self {
-        Self::OpenAiCompatible
-    }
 }
 
 /// BYOP provider 实际使用的 API 协议类型 — 显式指定,
@@ -662,10 +656,12 @@ impl Default for AgentProviderKind {
     Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AgentProviderApiType {
     /// OpenAI Chat Completions(`POST /v1/chat/completions`)。
     /// 适用于:OpenAI 官方、DeepSeek、SiliconFlow、OpenRouter、智谱 GLM、
     /// Moonshot、DashScope-OpenAI 兼容、本地 vLLM/llama.cpp 等。
+    #[default]
     OpenAi,
     /// OpenAI Responses API(`POST /v1/responses`)。
     /// 适用于:GPT-5 / Codex / Pro 等较新模型。
@@ -682,12 +678,6 @@ pub enum AgentProviderApiType {
     /// thinking-mode 模型必须选这个类型,普通 chat 模型(`deepseek-chat`)
     /// 选 OpenAI 也可以工作。
     DeepSeek,
-}
-
-impl Default for AgentProviderApiType {
-    fn default() -> Self {
-        Self::OpenAi
-    }
 }
 
 /// Provider 级别的 reasoning effort(思考深度)偏好。
@@ -1139,7 +1129,7 @@ impl settings_value::SettingsValue for BYOPLastUsedReasoningMap {
 }
 
 define_settings_group!(AISettings, settings: [
-    // If `false`, all AI features are disabled.
+    // 历史遗留设置。OpenWarp 的 Warp 智能体现在固定开启,不要用这个字段判断启用状态。
     is_any_ai_enabled: IsAnyAIEnabled {
         type: bool,
         default: true,
@@ -1711,21 +1701,6 @@ define_settings_group!(AISettings, settings: [
         toml_path: "general.default_tab_config_path",
     }
 
-    // Whether multi-agent orchestration is enabled. When enabled, the agent can
-    // spawn and coordinate parallel sub-agents via StartAgent / SendMessageToAgent
-    // tools. This setting is only effective when FeatureFlag::Orchestration is also
-    // enabled.
-    orchestration_enabled: OrchestrationEnabled {
-        type: bool,
-        default: true,
-        supported_platforms: SupportedPlatforms::DESKTOP,
-        sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
-        private: false,
-        toml_path: "agents.warp_agent.other.orchestration_enabled",
-        description: "Whether multi-agent orchestration is enabled.",
-        feature_flag: FeatureFlag::Orchestration,
-    }
-
     // Whether file-based MCP servers from third-party AI tools (e.g. Claude, Codex) should
     // be automatically detected and spawned. Warp-native config files (.warp/.mcp.json) are
     // always detected and spawned, regardless of this setting.
@@ -1955,31 +1930,10 @@ impl AISettings {
         });
     }
 
-    pub fn is_ai_disabled_due_to_remote_session_org_policy(&self, app: &AppContext) -> bool {
-        let contains_remote_blocks = FocusedTerminalInfo::as_ref(app).contains_any_remote_blocks();
-
-        let contains_restored_remote_blocks =
-            FocusedTerminalInfo::as_ref(app).contains_any_restored_remote_blocks();
-
-        let is_ai_allowed_in_remote_sessions =
-            UserWorkspaces::as_ref(app).is_ai_allowed_in_remote_sessions();
-
-        if is_ai_allowed_in_remote_sessions {
-            return false;
-        }
-
-        contains_remote_blocks || contains_restored_remote_blocks
-    }
-
-    pub fn is_any_ai_enabled(&self, app: &AppContext) -> bool {
-        // Disable AI for anonymous and logged-out users.
-        let is_anonymous_or_logged_out = AuthStateProvider::as_ref(app)
-            .get()
-            .is_anonymous_or_logged_out();
-
-        *self.is_any_ai_enabled
-            && !is_anonymous_or_logged_out
-            && !self.is_ai_disabled_due_to_remote_session_org_policy(app)
+    pub fn is_any_ai_enabled(&self, _app: &AppContext) -> bool {
+        // OpenWarp 不再允许通过设置关闭 Warp 智能体。旧配置文件里持久化的
+        // `agents.warp_agent.is_any_ai_enabled = false` 会被忽略。
+        true
     }
 
     pub fn default_session_mode(&self, app: &AppContext) -> DefaultSessionMode {
@@ -2105,12 +2059,6 @@ impl AISettings {
         // solution (e.g. per-environment allowlisting, signed configs) should be
         // explored in the future.
         *self.file_based_mcp_enabled
-    }
-
-    pub fn is_orchestration_enabled(&self, app: &warpui::AppContext) -> bool {
-        FeatureFlag::Orchestration.is_enabled()
-            && self.is_any_ai_enabled(app)
-            && *self.orchestration_enabled
     }
 
     /// Determines whether a quota reset banner should be displayed to the user.
