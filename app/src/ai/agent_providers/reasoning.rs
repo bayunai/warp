@@ -668,7 +668,10 @@ mod tests {
         assert!(model_requires_reasoning_echo(t, "mimo-v2.5-pro"));
         assert!(model_requires_reasoning_echo(t, "mimo-vl-7b"));
         // 阿里 Qwen3 thinking / QwQ
-        assert!(model_requires_reasoning_echo(t, "qwen3-235b-a22b-thinking-2507"));
+        assert!(model_requires_reasoning_echo(
+            t,
+            "qwen3-235b-a22b-thinking-2507"
+        ));
         assert!(model_requires_reasoning_echo(t, "qwq-32b-preview"));
         // 智谱 GLM thinking
         assert!(model_requires_reasoning_echo(t, "zai-glm-4.7"));
@@ -761,10 +764,16 @@ mod tests {
             Some(ReasoningInterleavedField::ReasoningContent)
         );
         // 大小写不敏感
-        assert!(model_requires_reasoning_echo(t, "Totally-New-Thinking-Model-2099"));
+        assert!(model_requires_reasoning_echo(
+            t,
+            "Totally-New-Thinking-Model-2099"
+        ));
         // OpenAiResp 与 OpenAi 是独立 key —— 但同 endpoint 类别都应 latch 各自
         let r = AgentProviderApiType::OpenAiResp;
-        assert!(!model_requires_reasoning_echo(r, exotic), "另一 api_type 不串");
+        assert!(
+            !model_requires_reasoning_echo(r, exotic),
+            "另一 api_type 不串"
+        );
         note_reasoning_seen(r, exotic);
         assert!(model_requires_reasoning_echo(r, exotic));
         reset_reasoning_latch();

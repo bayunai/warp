@@ -3,6 +3,7 @@ use crate::ai::agent::linearization::compute_task_depths;
 use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::{RequestInput, ResponseStreamId, SerializedBlockListItem};
+use crate::ai::byop_readiness::RepairStateStatus;
 use crate::code_review::CodeReviewTelemetryEvent;
 use crate::notebooks::NotebookId;
 use crate::persistence::model::{ConversationUsageMetadata, ModelTokenUsage, ToolUsageMetadata};
@@ -223,6 +224,9 @@ pub struct AIConversation {
     /// 默认空表 = 未压缩状态,完全无侵入。
     /// 详见 [`crate::ai::byop_compaction`]。
     pub(crate) compaction_state: crate::ai::byop_compaction::state::CompactionState,
+    /// OpenWarp BYOP repair sidecar。invalid sidecar 必须原样保留,避免保存时
+    /// 静默授权 repair 或抹掉损坏元数据。
+    pub(crate) byop_repair_state: RepairStateStatus,
 }
 
 pub(crate) fn artifact_from_fork_proto(
@@ -273,6 +277,7 @@ impl AIConversation {
             is_remote_child: false,
             last_event_sequence: None,
             compaction_state: Default::default(),
+            byop_repair_state: RepairStateStatus::default(),
         }
     }
 
@@ -354,6 +359,7 @@ impl AIConversation {
             autoexecute_override,
             last_event_sequence,
             compaction_state,
+            byop_repair_state,
         ) = if let Some(data) = conversation_data {
             let server_conversation_token = data
                 .server_conversation_token
@@ -393,6 +399,13 @@ impl AIConversation {
                         .ok()
                 })
                 .unwrap_or_default();
+            let byop_repair_state =
+                RepairStateStatus::from_sidecar_json(data.byop_repair_state_json);
+            if let Some(error_category) = byop_repair_state.error_category() {
+                log::error!(
+                    "[byop-repair] failed to load repair sidecar category={error_category:?}"
+                );
+            }
 
             (
                 server_conversation_token,
@@ -407,6 +420,7 @@ impl AIConversation {
                 autoexecute_override,
                 last_event_sequence,
                 compaction_state,
+                byop_repair_state,
             )
         } else {
             (
@@ -422,6 +436,7 @@ impl AIConversation {
                 AIConversationAutoexecuteMode::default(),
                 None,
                 crate::ai::byop_compaction::state::CompactionState::default(),
+                RepairStateStatus::default(),
             )
         };
 
@@ -465,6 +480,7 @@ impl AIConversation {
             is_remote_child: false,
             last_event_sequence,
             compaction_state,
+            byop_repair_state,
         })
     }
 
@@ -1344,6 +1360,45 @@ impl AIConversation {
         // turn 启动即落盘:user query 提交时先写一次,stream 中途强退也能保留提问记录。
         self.write_updated_conversation_state(ctx);
         Ok(())
+    }
+
+    pub fn append_byop_preflight_messages_to_task(
+        &mut self,
+        task_id: TaskId,
+        messages: Vec<api::Message>,
+        ctx: &mut ModelContext<BlocklistAIHistoryModel>,
+    ) -> Result<usize, UpdateConversationError> {
+        let message_count = messages.len();
+        if message_count == 0 {
+            return Ok(0);
+        }
+        self.ensure_can_persist_byop_preflight_state(ctx)?;
+
+        let message_ids = messages
+            .iter()
+            .map(|message| message.id.clone())
+            .collect::<HashSet<_>>();
+        self.task_store
+            .modify_task(&task_id, |task| task.append_source_messages(messages))
+            .ok_or(UpdateConversationError::TaskNotFound)??;
+        if let Err(e) = self.send_updated_conversation_state_for_byop_preflight(ctx) {
+            if let Some(rollback_result) = self.task_store.modify_task(&task_id, |task| {
+                task.remove_source_messages_by_ids(&message_ids)
+            }) {
+                if let Err(rollback_error) = rollback_result {
+                    log::error!(
+                        "[byop-readiness] failed to roll back preflight messages after \
+                         persistence error: {rollback_error:?}"
+                    );
+                }
+            } else {
+                log::error!(
+                    "[byop-readiness] failed to find task while rolling back preflight messages"
+                );
+            }
+            return Err(e);
+        }
+        Ok(message_count)
     }
 
     pub fn append_reassigned_exchange(
@@ -2781,29 +2836,7 @@ impl AIConversation {
         }
     }
 
-    pub(crate) fn write_updated_conversation_state(
-        &mut self,
-        ctx: &mut ModelContext<BlocklistAIHistoryModel>,
-    ) {
-        // We should not persist non-local conversations (e.g. shared sessions).
-        if self.is_viewing_shared_session {
-            return;
-        }
-
-        if !*GeneralSettings::as_ref(ctx).persist_conversations
-            || !AppExecutionMode::as_ref(ctx).can_save_session()
-        {
-            return;
-        }
-
-        let Some(sqlite_sender) = GlobalResourceHandlesProvider::as_ref(ctx)
-            .get()
-            .model_event_sender
-            .clone()
-        else {
-            return;
-        };
-
+    fn updated_conversation_state_event(&self) -> ModelEvent {
         let reverted_action_ids = if self.reverted_action_ids.is_empty() {
             None
         } else {
@@ -2830,7 +2863,7 @@ impl AIConversation {
             }
         };
 
-        let event = ModelEvent::UpdateMultiAgentConversation {
+        ModelEvent::UpdateMultiAgentConversation {
             conversation_id: self.id.to_string(),
             updated_tasks: self
                 .all_tasks()
@@ -2867,8 +2900,95 @@ impl AIConversation {
                         }
                     }
                 },
+                byop_repair_state_json: self.byop_repair_state.to_sidecar_json(),
             },
+        }
+    }
+
+    fn ensure_can_persist_byop_preflight_state(
+        &self,
+        ctx: &mut ModelContext<BlocklistAIHistoryModel>,
+    ) -> Result<(), UpdateConversationError> {
+        if self.is_viewing_shared_session {
+            return Err(
+                UpdateConversationError::ByopPreflightPersistenceUnavailable(
+                    "shared session conversations are not persisted".to_owned(),
+                ),
+            );
+        }
+        if !*GeneralSettings::as_ref(ctx).persist_conversations {
+            return Err(
+                UpdateConversationError::ByopPreflightPersistenceUnavailable(
+                    "conversation persistence is disabled".to_owned(),
+                ),
+            );
+        }
+        if !AppExecutionMode::as_ref(ctx).can_save_session() {
+            return Err(
+                UpdateConversationError::ByopPreflightPersistenceUnavailable(
+                    "current execution mode cannot save sessions".to_owned(),
+                ),
+            );
+        }
+        if GlobalResourceHandlesProvider::as_ref(ctx)
+            .get()
+            .model_event_sender
+            .is_none()
+        {
+            return Err(
+                UpdateConversationError::ByopPreflightPersistenceUnavailable(
+                    "sqlite sender is unavailable".to_owned(),
+                ),
+            );
+        }
+        Ok(())
+    }
+
+    fn send_updated_conversation_state_for_byop_preflight(
+        &self,
+        ctx: &mut ModelContext<BlocklistAIHistoryModel>,
+    ) -> Result<(), UpdateConversationError> {
+        // 调用方(`append_byop_preflight_messages_to_task`)在写入前已经调用过
+        // `ensure_can_persist_byop_preflight_state`,此处不再重复校验 sender 是否存在;
+        // 只关心 try_send 自身的 Full/Closed 错误,沿用现有的 ByopPreflightPersistenceSend。
+        let sqlite_sender = GlobalResourceHandlesProvider::as_ref(ctx)
+            .get()
+            .model_event_sender
+            .clone()
+            .ok_or_else(|| {
+                UpdateConversationError::ByopPreflightPersistenceUnavailable(
+                    "sqlite sender is unavailable".to_owned(),
+                )
+            })?;
+        sqlite_sender
+            .try_send(self.updated_conversation_state_event())
+            .map_err(|e| UpdateConversationError::ByopPreflightPersistenceSend(format!("{e:?}")))
+    }
+
+    pub(crate) fn write_updated_conversation_state(
+        &mut self,
+        ctx: &mut ModelContext<BlocklistAIHistoryModel>,
+    ) {
+        // We should not persist non-local conversations (e.g. shared sessions).
+        if self.is_viewing_shared_session {
+            return;
+        }
+
+        if !*GeneralSettings::as_ref(ctx).persist_conversations
+            || !AppExecutionMode::as_ref(ctx).can_save_session()
+        {
+            return;
+        }
+
+        let Some(sqlite_sender) = GlobalResourceHandlesProvider::as_ref(ctx)
+            .get()
+            .model_event_sender
+            .clone()
+        else {
+            return;
         };
+
+        let event = self.updated_conversation_state_event();
         ctx.spawn(
             async move {
                 if let Err(e) = sqlite_sender.send(event) {
@@ -3532,6 +3652,10 @@ pub enum UpdateConversationError {
     NoActiveTask,
     #[error("No pending request.")]
     NoPendingRequest,
+    #[error("BYOP preflight conversation persistence is unavailable: {0}")]
+    ByopPreflightPersistenceUnavailable(String),
+    #[error("Failed to persist BYOP preflight conversation state: {0}")]
+    ByopPreflightPersistenceSend(String),
 }
 
 /// A globally unique ID for a conversation with an AI agent.

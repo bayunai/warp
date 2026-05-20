@@ -663,6 +663,9 @@ pub enum FeatureFlag {
     /// for command execution.
     SshRemoteServer,
 
+    /// 本地 PTY 输出密码提示时展示已保存的 SSH 凭据候选。
+    OneKeyPrompt,
+
     /// Enables summary mode in vertical tabs, showing condensed tab summaries
     /// instead of individual pane rows.
     VerticalTabsSummaryMode,

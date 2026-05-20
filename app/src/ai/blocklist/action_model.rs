@@ -579,6 +579,39 @@ impl BlocklistAIActionModel {
         has_pending || has_running
     }
 
+    pub(super) fn has_unfinished_action_for_tool_call(
+        &self,
+        conversation_id: AIConversationId,
+        task_id: &str,
+        tool_call_id: &str,
+        app: &AppContext,
+    ) -> bool {
+        // 在 action model 里 `AIAgentActionId` 即 tool_call_id,这里只是把入参显式重命名,
+        // 让调用点(controller 的 byop preflight)读起来更直观。
+        let action_id = crate::ai::agent::AIAgentActionId::from(tool_call_id.to_owned());
+        let has_pending = self
+            .pending_actions
+            .get(&conversation_id)
+            .is_some_and(|queue| {
+                queue
+                    .iter()
+                    .any(|action| action.id == action_id && action.task_id.to_string() == task_id)
+            });
+        let has_running = self
+            .running_actions
+            .get(&conversation_id)
+            .is_some_and(|running| running.contains(&action_id))
+            && self
+                .executor
+                .as_ref(app)
+                .async_executing_action(&action_id)
+                .is_some_and(|action| {
+                    action.id == action_id && action.task_id.to_string() == task_id
+                });
+
+        has_pending || has_running
+    }
+
     /// Returns finished action results received from the most recent AI output for the active conversation.
     pub fn get_finished_action_results(
         &self,
@@ -1112,6 +1145,51 @@ impl BlocklistAIActionModel {
             .into_iter()
             .map(|result| (*result).clone())
             .collect_vec()
+    }
+
+    pub(super) fn finished_action_results_matching(
+        &self,
+        conversation_id: AIConversationId,
+        keys: &HashSet<(String, String)>,
+    ) -> Vec<AIAgentActionResult> {
+        self.finished_action_results
+            .get(&conversation_id)
+            .into_iter()
+            .flat_map(|results| results.iter())
+            .filter(|result| keys.contains(&(result.task_id.to_string(), result.id.to_string())))
+            .map(|result| (**result).clone())
+            .collect_vec()
+    }
+
+    pub(super) fn remove_finished_action_results_matching(
+        &mut self,
+        conversation_id: AIConversationId,
+        keys: &HashSet<(String, String)>,
+    ) -> usize {
+        let mut should_remove_bucket = false;
+        let mut removed = 0;
+        if let Some(results) = self.finished_action_results.get_mut(&conversation_id) {
+            let mut index = 0;
+            while index < results.len() {
+                let key = (
+                    results[index].task_id.to_string(),
+                    results[index].id.to_string(),
+                );
+                if keys.contains(&key) {
+                    let result = results.remove(index);
+                    self.past_action_results.insert(result.id.clone(), result);
+                    removed += 1;
+                } else {
+                    index += 1;
+                }
+            }
+            should_remove_bucket = results.is_empty();
+        }
+        if should_remove_bucket {
+            self.action_order.remove(&conversation_id);
+            self.finished_action_results.remove(&conversation_id);
+        }
+        removed
     }
 
     /// Clears finished action results for a conversation. Used when reverting.

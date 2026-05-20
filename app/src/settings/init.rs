@@ -214,15 +214,12 @@ pub fn init(
     // 全局 HTTP 代理(见 Issue #72):这里只读 NetworkSettings 中的非敏感字段,
     // 密码从 OS 密钥库读取的 ProxyCredentials 由 `initialize_app` 后期注册后再推。
     apply_network_settings_to_global_slots(ctx, "");
-    ctx.subscribe_to_model(
-        &NetworkSettings::handle(ctx),
-        |_model, _event, ctx| {
-            // 变更时密码可能已由 ProxyCredentials 提供。lib.rs 会额外订阅那个
-            // singleton 并推送带 password 的 apply。这里仅推非密码字段,
-            // 保持密码不变即可。
-            crate::settings::reapply_network_settings_preserving_password(ctx);
-        },
-    );
+    ctx.subscribe_to_model(&NetworkSettings::handle(ctx), |_model, _event, ctx| {
+        // 变更时密码可能已由 ProxyCredentials 提供。lib.rs 会额外订阅那个
+        // singleton 并推送带 password 的 apply。这里仅推非密码字段,
+        // 保持密码不变即可。
+        crate::settings::reapply_network_settings_preserving_password(ctx);
+    });
 
     // Set up hot-reload for the settings file. When the WarpConfig watcher
     // detects a change to settings.toml, reload preferences from disk and

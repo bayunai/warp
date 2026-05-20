@@ -24,6 +24,7 @@ use warpui::r#async::FutureExt;
 use warpui::{ViewContext, WeakViewHandle};
 use zeroize::Zeroizing;
 
+use crate::ssh_manager::password_prompt::bytes_look_like_password_prompt;
 use crate::terminal::TerminalView;
 
 /// 注入超时上限。
@@ -55,6 +56,15 @@ pub fn spawn_password_injector<O>(
         return;
     }
 
+    // 起飞即把 in-flight 置 true,通知 OneKey listener 在本次 injection 完结前
+    // 不要弹菜单。这样无论是先 injector 注入完才轮到 onekey 看到同一段字节,
+    // 还是 onekey 先看到,语义都是统一的:**injector 优先**。
+    if let Some(view) = terminal_view.upgrade(ctx) {
+        view.update(ctx, |view, _| {
+            view.set_ssh_secret_auto_injection_in_flight(true);
+        });
+    }
+
     let owned_secret = secret.clone();
     let future = async move {
         match watch_for_prompt(rx).with_timeout(INJECT_TIMEOUT).await {
@@ -63,12 +73,15 @@ pub fn spawn_password_injector<O>(
         }
     };
     ctx.spawn(future, move |_owner, secret_opt, ctx| {
-        let Some(secret) = secret_opt else {
-            log::debug!("ssh secret injector: no prompt seen within timeout");
-            return;
-        };
         let Some(view) = terminal_view.upgrade(ctx) else {
             log::debug!("ssh secret injector: terminal view dropped before injection");
+            return;
+        };
+        let Some(secret) = secret_opt else {
+            log::debug!("ssh secret injector: no prompt seen within timeout");
+            view.update(ctx, |view, _| {
+                view.set_ssh_secret_auto_injection_in_flight(false);
+            });
             return;
         };
         view.update(ctx, |view, ctx| {
@@ -77,6 +90,8 @@ pub fn spawn_password_injector<O>(
             let mut bytes = secret.as_bytes().to_vec();
             bytes.push(b'\n');
             view.write_to_pty(bytes, ctx);
+            view.note_ssh_secret_auto_injected(ctx);
+            view.set_ssh_secret_auto_injection_in_flight(false);
         });
     });
 }
@@ -84,16 +99,6 @@ pub fn spawn_password_injector<O>(
 /// 异步循环:消费 PTY 广播,滑窗追加,**正则一旦命中行尾 prompt 就返回 true**;
 /// EOF 返回 false。timeout 由调用方 `with_timeout` 包装。
 async fn watch_for_prompt(rx: InactiveReceiver<Arc<Vec<u8>>>) -> bool {
-    // 字节正则 — PTY 输出可能含半截 UTF-8。`(?im)` = 大小写不敏感 + 多行模式
-    // 让 `$` 匹配每一行末尾;`[^\n]*:` 不跨行;`\s*$` 容许尾部空白。
-    let re = match regex::bytes::Regex::new(r"(?im)(password|passphrase)[^\n]*:\s*$") {
-        Ok(re) => re,
-        Err(e) => {
-            log::error!("ssh injector: failed to compile prompt regex: {e}");
-            return false;
-        }
-    };
-
     let mut active = rx.activate_cloned();
     let mut buf: Vec<u8> = Vec::with_capacity(SLIDING_WINDOW_BYTES);
     while let Ok(chunk) = active.recv().await {
@@ -102,44 +107,9 @@ async fn watch_for_prompt(rx: InactiveReceiver<Arc<Vec<u8>>>) -> bool {
             let drop_n = buf.len() - SLIDING_WINDOW_BYTES;
             buf.drain(..drop_n);
         }
-        if re.is_match(&buf) {
+        if bytes_look_like_password_prompt(&buf) {
             return true;
         }
     }
     false
-}
-
-#[cfg(test)]
-mod tests {
-    fn matches(input: &str) -> bool {
-        let re = regex::bytes::Regex::new(r"(?im)(password|passphrase)[^\n]*:\s*$").unwrap();
-        re.is_match(input.as_bytes())
-    }
-
-    #[test]
-    fn matches_typical_password_prompt() {
-        assert!(matches("user@host's password: "));
-        assert!(matches("Password:"));
-        assert!(matches("password: \r\n"));
-    }
-
-    #[test]
-    fn matches_passphrase_prompt() {
-        assert!(matches("Enter passphrase for key '/home/u/.ssh/id_rsa': "));
-    }
-
-    #[test]
-    fn does_not_match_motd_with_password_word() {
-        // 登录后 banner 里出现 "password" 字样,不应触发(因为不在行尾的 `:`)
-        assert!(!matches("Welcome! Please change your password soon.\n# "));
-        assert!(!matches(
-            "Last login: Mon Jan 1 password rotated yesterday\n"
-        ));
-    }
-
-    #[test]
-    fn does_not_match_no_colon() {
-        assert!(!matches("password\n"));
-        assert!(!matches("Enter password please\n"));
-    }
 }

@@ -5283,17 +5283,15 @@ impl SettingsWidget for AIInputWidget {
         }
 
         // 「显示 Agent 快捷键提示」：控制零状态三件套与 message bar 底部 4 项 hint。
-        widget_children.push(
-            render_ai_setting_toggle::<ShowAgentZeroStateHints>(
-                crate::t!("settings-ai-show-agent-zero-state-hints"),
-                AISettingsPageAction::ToggleShowAgentZeroStateHints,
-                *InputSettings::as_ref(app).show_agent_zero_state_hints,
-                is_any_ai_enabled,
-                self.show_agent_zero_state_hints_toggle.clone(),
-                &view.local_only_icon_tooltip_states,
-                app,
-            ),
-        );
+        widget_children.push(render_ai_setting_toggle::<ShowAgentZeroStateHints>(
+            crate::t!("settings-ai-show-agent-zero-state-hints"),
+            AISettingsPageAction::ToggleShowAgentZeroStateHints,
+            *InputSettings::as_ref(app).show_agent_zero_state_hints,
+            is_any_ai_enabled,
+            self.show_agent_zero_state_hints_toggle.clone(),
+            &view.local_only_icon_tooltip_states,
+            app,
+        ));
 
         widget_children.push(render_ai_setting_toggle::<IncludeAgentCommandsInHistory>(
             crate::t!("settings-ai-include-agent-commands-in-history"),

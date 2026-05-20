@@ -1,10 +1,10 @@
 # OpenWarp 发布流水线 — 在 openWarp 分支上 push tag (v*) 即触发
 #
 # 与上游 create_release.yml 的差异:
-# - 仅 macOS arm64 + macOS Intel + Windows x64 + Linux x86_64(AppImage),
-#   Web/CLI/Universal/Win-arm64/Linux 的 rpm/arch 全砍
-#   (macOS 双架构分别产单架构 DMG 与 CLI tarball;Linux 只产 AppImage/deb,
-#    不发布上游 Warp 仓库源或签名 key)
+# - 仅 macOS arm64 + macOS Intel + Windows x64 + Linux x86_64,
+#   Web/CLI/Universal/Win-arm64 全砍
+#   (macOS 双架构分别产单架构 DMG 与 CLI tarball;Linux 产 AppImage/deb/rpm
+#    以及尽力而为的 Arch 包,不发布上游 Warp 仓库源或签名 key)
 # - 单 channel: preview(由 release_configurations.json 提供配置)
 # - 不签名:不传 --read-passwords-from-env(macOS) / 不设 SIGN_TOOL_CMD(Windows)
 # - 不上传 GCS / 第三方 crash 平台 / Slack / changelog,不调 channel-versions repository_dispatch
@@ -236,10 +236,11 @@ jobs:
           is_self_hosted: false
           install_release_deps: true
 
-      - name: Install extra dependencies for deb and build
+      - name: Install extra dependencies for deb/rpm and build
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev fakeroot
+          # `rpm` 包提供 /usr/bin/rpmbuild,给后面的 RPM 打包步骤用。
+          sudo apt-get install -y libdbus-1-dev fakeroot rpm
         shell: bash
 
       - name: Ensure rust target is installed
@@ -270,22 +271,122 @@ jobs:
           # 让 linuxdeploy/appimagetool 不依赖 FUSE 内核模块,跨 runner 版本都稳。
           APPIMAGE_EXTRACT_AND_RUN: 1
 
+      # RPM 包:复用上一步 release-lto 已经 strip 过的 `target/release-lto/warp-oss`,
+      # 不重新 `cargo build`。`--skip-build` 让 `script/bundle` 跳过编译与 strip,
+      # 直接进入 staging(`bundle_install` → 复制二进制 + resources)+ rpmbuild。
+      # 与 deb 同一台 ubuntu-22.04 runner 上跑,共享 host glibc 链接的产物;
+      # 用 Fedora 26+ / RHEL 8+ 上的 RPM 4.13+ 安装(spec 用了 boolean dep 语法)。
+      # continue-on-error: 即便 rpmbuild 失败也不应阻塞 AppImage/deb 已经成功的发布。
+      - name: Build RPM package (reuse release-lto binary)
+        continue-on-error: true
+        run: script/bundle --skip-build --channel "$CHANNEL" --arch x86_64 --packages rpm
+        shell: bash
+        env:
+          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
+
+      # Arch 包:复用上一步 release-lto 已经 strip 过的 `target/release-lto/warp-oss`,
+      # 不重新 `cargo build` 主二进制 —— `--skip-build` 让 `script/bundle` 跳过编译与 strip,
+      # 直接进入 staging(`bundle_install` → 复制二进制 + resources)+ makepkg。
+      #
+      # 为什么放容器里:`makepkg` 是 Arch 独有,Ubuntu runner 没有。
+      # 容器里只装 Arch 自带的 `rust` 和 `cargo-about`:
+      #   - SKIP_SETTINGS_SCHEMA=1 后,不再跑 `cargo run --bin generate_settings_schema`,
+      #     所以容器里 rustc 版本跟项目锁定版(1.92.x) 不一致也无所谓。
+      #   - `cargo about generate` 只读 Cargo.lock 元数据生成第三方 license,
+      #     不触发任何 Rust 代码编译。
+      # makepkg 拒绝 root 运行(EUID==0),必须切到非 root 用户。
+      # continue-on-error: Arch 工具链炸了不影响 AppImage/deb 发布。
+      - name: Build Arch package (reuse release-lto binary)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # 用 host runner 用户的 uid/gid 在容器里建 builder,免去 chown 整棵
+          # /work 与 ~/.cargo 的开销(makepkg 拒绝 root,但 uid != 0 即可,
+          # 用什么名字、什么具体 uid 都行)。
+          HOST_UID=$(id -u)
+          HOST_GID=$(id -g)
+          docker run --rm \
+            -v "$PWD:/work" \
+            -v "$HOME/.cargo:/cargo-home" \
+            -w /work \
+            -e GIT_RELEASE_TAG="${{ needs.prepare_metadata.outputs.release_tag }}" \
+            -e GITHUB_ACTIONS=true \
+            -e SKIP_SETTINGS_SCHEMA=1 \
+            -e HOST_UID="$HOST_UID" \
+            -e HOST_GID="$HOST_GID" \
+            archlinux:latest bash -euxc '
+              pacman -Sy --noconfirm --needed \
+                base-devel git sudo rust cargo-about &&
+              # 用 host uid/gid 建用户,挂进来的 /work 与 /cargo-home owner 就是它,
+              # 不用 chown,直接 sudo -u 即可读写。
+              groupadd -g "$HOST_GID" builder 2>/dev/null || true
+              useradd -u "$HOST_UID" -g "$HOST_GID" -m builder
+              sudo -u builder -E env \
+                CARGO_HOME=/cargo-home \
+                PATH=/cargo-home/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
+                bash -c "
+                  git config --global --add safe.directory /work
+                  cd /work
+                  script/bundle --skip-build --channel oss --arch x86_64 --packages arch
+                "
+            '
+        shell: bash
+
       - name: Upload package artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: openwarp-linux-x86_64
+          # packages_dir 是 target/release-lto/bundle/linux,AppImage/deb/Arch 都落在这里
           path: ${{ steps.bundle_app.outputs.packages_dir }}
           if-no-files-found: error
           retention-days: 7
 
-      - name: Build CLI
+      # CLI/remote-server tarball 用静态 musl 链接,产物不依赖宿主 glibc,
+      # 可在任意 Linux x86_64 主机(含 CentOS 7 / Amazon Linux 2 等旧 glibc
+      # 以及 Alpine 等 musl 发行版)上运行。GUI AppImage/deb 仍走上面的
+      # glibc 链接构建,不受影响。
+      #
+      # 用 `cargo zigbuild` 做 musl 交叉编译:zig 自带完整的 C/C++ musl
+      # 工具链(`zig cc` / `zig c++`),不依赖宿主的 `musl-gcc` 或手写的
+      # `musl-g++` wrapper —— 历史上为 freetype-sys / harfbuzz-sys 等 *-sys
+      # 依赖准备的「宿主 g++ + musl specs」hack 因此整条移除。
+      # 本地 dev 自动构建路径(`ssh_transport.rs`)也优先用 zigbuild,两边
+      # 工具链统一。
+      - name: Install zig + cargo-zigbuild for static musl CLI build
+        run: |
+          set -euo pipefail
+          rustup target add x86_64-unknown-linux-musl
+          # zig:用官方预编译 tarball,固定版本以保证构建可复现。
+          # 0.13.0 与 cargo-zigbuild >= 0.19 兼容。
+          ZIG_VERSION="0.13.0"
+          ZIG_DIR="$HOME/.local/zig-${ZIG_VERSION}"
+          if [ ! -x "${ZIG_DIR}/zig" ]; then
+            mkdir -p "${ZIG_DIR}"
+            curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" \
+              | tar -xJ -C "${ZIG_DIR}" --strip-components=1
+          fi
+          echo "${ZIG_DIR}" >> "$GITHUB_PATH"
+          # cargo-zigbuild:走 cargo install,首次安装在缓存里之后会复用。
+          cargo install --locked cargo-zigbuild --version ^0.19
+        shell: bash
+
+      - name: Build CLI (static musl via zigbuild)
         id: bundle_cli
         run: |
-          script/bundle --channel "$CHANNEL" --arch x86_64 --artifact cli --packages none
+          script/bundle --channel "$CHANNEL" --arch x86_64 --artifact cli --packages none \
+            --target x86_64-unknown-linux-musl
         shell: bash
         env:
           GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
           APPIMAGE_EXTRACT_AND_RUN: 1
+          # 让 script/linux/bundle 把 `cargo build` 切到 `cargo zigbuild`。
+          USE_ZIGBUILD: "true"
+          # libc(musl)被 +crt-static 静态链接进二进制 —— 这是让产物摆脱
+          # 宿主 glibc 下限的关键。`libdbus-sys` 现在通过 keyring 的
+          # `vendored` feature 从源码内嵌编译(见 Cargo.toml),不再用 pkg-config
+          # 探测宿主 `dbus-1`;`PKG_CONFIG_ALLOW_CROSS=1` 保留作兜底,
+          # 万一某个新引入的 -sys crate 还在用 pkg-config 也不会卡。
+          PKG_CONFIG_ALLOW_CROSS: 1
 
       - name: Package CLI tarball
         run: |

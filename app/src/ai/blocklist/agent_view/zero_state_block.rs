@@ -1,8 +1,8 @@
 use itertools::Itertools as _;
 use markdown_parser::parse_markdown;
 use parking_lot::FairMutex;
-use std::{borrow::Cow, cmp::Reverse, path::Path, sync::Arc};
 use settings::Setting as _;
+use std::{borrow::Cow, cmp::Reverse, path::Path, sync::Arc};
 use warp_core::ui::Icon;
 use warpui::{
     elements::{
@@ -151,7 +151,10 @@ impl AgentViewZeroStateBlock {
 
         // 监听「显示 Agent 快捷键提示」设置变化，点击 × 后立即重渲染以隐藏提示。
         ctx.subscribe_to_model(&InputSettings::handle(ctx), |_, _, event, ctx| {
-            if matches!(event, InputSettingsChangedEvent::ShowAgentZeroStateHints { .. }) {
+            if matches!(
+                event,
+                InputSettingsChangedEvent::ShowAgentZeroStateHints { .. }
+            ) {
                 ctx.notify();
             }
         });
@@ -415,7 +418,9 @@ impl Entity for AgentViewZeroStateBlock {
 #[derive(Debug, Clone)]
 pub enum AgentViewZeroStateAction {
     ClickedInitCallout,
-    OpenConversation { conversation_id: AIConversationId },
+    OpenConversation {
+        conversation_id: AIConversationId,
+    },
     /// 点击标题右侧「×」按钮：永久隐藏零状态快捷键提示（包含 message bar 那一排）。
     /// 用户可在「设置 → Warp 智能体 → AI 输入」中重新开启。
     HideZeroStateHints,
@@ -436,9 +441,7 @@ impl TypedActionView for AgentViewZeroStateBlock {
             }
             AgentViewZeroStateAction::HideZeroStateHints => {
                 InputSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .show_agent_zero_state_hints
-                        .set_value(false, ctx));
+                    report_if_error!(settings.show_agent_zero_state_hints.set_value(false, ctx));
                 });
                 // 设置订阅会触发 ctx.notify，这里不重复发。
             }

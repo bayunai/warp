@@ -27,8 +27,12 @@ use crate::{
 use super::{AIAgentInput, MCPContext, MCPServer, RequestMetadata, RunningCommand, Suggestions};
 use crate::ai::blocklist::{BlocklistAIPermissions, RequestInput};
 use crate::ai::execution_profiles::profiles::AIExecutionProfilesModel;
+use crate::ai::facts::{AIFact, AIFactObjectModel};
 use crate::ai::mcp::templatable_manager::TemplatableMCPServerInfo;
 use crate::ai::mcp::TemplatableMCPServerManager;
+use crate::cloud_object::model::generic_string_model::GenericStringObjectId;
+use crate::cloud_object::model::persistence::ObjectStoreModel;
+use crate::cloud_object::StoredObject;
 use crate::settings::AISettings;
 use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
 use crate::workspaces::user_workspaces::UserWorkspaces;
@@ -80,6 +84,13 @@ pub struct RequestParams {
     pub cli_agent_model: LLMId,
     pub computer_use_model: LLMId,
     pub is_memory_enabled: bool,
+    /// OpenWarp BYOP 专用:用户在 设置 → Agents → Rules 创建的全局 Rules
+    /// (`AIFact::Memory`)的快照,在 `new()` 中从 `ObjectStoreModel` 一次性拉取
+    /// 后随请求 plumb 到 `chat_stream::build_chat_request` → `prompt_renderer`,
+    /// 由 `partials/user_rules.j2` 渲染进 system prompt。
+    /// 仅在 `is_memory_enabled` 为 true 且未被 trash 时收集;为了 prompt cache
+    /// 稳定性,按 `(name, content)` 字典序排序。
+    pub user_rules: Vec<(Option<String>, String)>,
     pub warp_drive_context_enabled: bool,
     pub context_window_limit: Option<u32>,
     pub mcp_context: Option<MCPContext>,
@@ -96,6 +107,10 @@ pub struct RequestParams {
     pub ask_user_question_enabled: bool,
     pub research_agent_enabled: bool,
     pub supported_tools_override: Option<Vec<warp_multi_agent_api::ToolType>>,
+    /// OpenWarp BYOP 专用:本地会话 id,只用于 request-readiness 诊断日志。
+    pub byop_conversation_id: Option<AIConversationId>,
+    /// OpenWarp BYOP 专用:单次请求内的非持久诊断关联 id。
+    pub byop_readiness_attempt_id: Option<String>,
     /// The conversation ID of the parent agent that spawned this child agent, if any.
     pub parent_agent_id: Option<String>,
     /// The display name for this agent (e.g. "Agent 1"), assigned by the orchestrator.
@@ -116,12 +131,37 @@ pub struct RequestParams {
     ///
     /// 默认 `None` = 兼容路径(无压缩)。
     pub compaction_state: Option<crate::ai::byop_compaction::state::CompactionState>,
+    /// OpenWarp BYOP repair sidecar 快照。serializer 只读使用,不在请求构造中反序列化持久化 JSON。
+    pub byop_repair_state: crate::ai::byop_readiness::RepairStateStatus,
     /// OpenWarp BYOP 专用:本轮是否需要模拟上游 CreateTask 流程来升级 optimistic CLI subtask。
     /// 只有用户刚 tag-in 的首轮需要;已存在 CLI subagent 的后续轮只复用 task,不能重复 spawn。
     pub lrc_should_spawn_subagent: bool,
     /// OpenWarp BYOP 专用:本轮响应应该写入的 task。普通对话是 root task;
     /// CLI subagent 后续轮则是对应 subtask。
     pub byop_target_task_id: Option<String>,
+}
+
+/// 收集用户在 设置 → Agents → Rules 创建的全局 Rules(`AIFact::Memory`)快照,
+/// 用于注入 BYOP system prompt(Issue #116)。
+///
+/// - 过滤 trashed 条目
+/// - 按 `(name, content)` 字典序排序,避免 HashMap 迭代导致的请求间顺序漂移
+///   (否则会击穿上游 Anthropic / OpenAI 的 prompt cache)
+///
+/// 不在内部判断 `is_memory_enabled`,gate 由调用方控制;这样函数可作为纯
+/// 集合逻辑独立测试,不依赖 `AISettings` 等 singleton。
+pub(crate) fn collect_user_rules(
+    object_store_model: &ObjectStoreModel,
+) -> Vec<(Option<String>, String)> {
+    let mut rules: Vec<(Option<String>, String)> = object_store_model
+        .get_all_objects_of_type::<GenericStringObjectId, AIFactObjectModel>()
+        .filter(|ai_fact| !ai_fact.is_trashed(object_store_model))
+        .map(|ai_fact| match &ai_fact.model().string_model {
+            AIFact::Memory(memory) => (memory.name.clone(), memory.content.clone()),
+        })
+        .collect();
+    rules.sort();
+    rules
 }
 
 pub type Event = Result<warp_multi_agent_api::ResponseEvent, Arc<AIApiError>>;
@@ -146,6 +186,53 @@ pub struct ConversationData {
 }
 
 impl RequestParams {
+    #[cfg(test)]
+    pub(crate) fn new_for_test(
+        input: Vec<AIAgentInput>,
+        tasks: Vec<warp_multi_agent_api::Task>,
+    ) -> Self {
+        Self {
+            input,
+            conversation_token: None,
+            forked_from_conversation_token: None,
+            ambient_agent_task_id: None,
+            byop_target_task_id: tasks.first().map(|task| task.id.clone()),
+            tasks,
+            existing_suggestions: None,
+            metadata: None,
+            session_context: SessionContext::new_for_test(),
+            model: LLMId::from("byop:test"),
+            coding_model: LLMId::from("byop:test"),
+            cli_agent_model: LLMId::from("byop:test"),
+            computer_use_model: LLMId::from("byop:test"),
+            is_memory_enabled: false,
+            user_rules: Vec::new(),
+            warp_drive_context_enabled: false,
+            context_window_limit: None,
+            mcp_context: None,
+            planning_enabled: true,
+            should_redact_secrets: false,
+            api_keys: None,
+            allow_use_of_warp_credits_with_byok: false,
+            autonomy_level: warp_multi_agent_api::AutonomyLevel::Supervised,
+            isolation_level: warp_multi_agent_api::IsolationLevel::None,
+            web_search_enabled: false,
+            computer_use_enabled: false,
+            ask_user_question_enabled: false,
+            research_agent_enabled: false,
+            supported_tools_override: None,
+            byop_conversation_id: Some(AIConversationId::new()),
+            byop_readiness_attempt_id: None,
+            parent_agent_id: None,
+            agent_name: None,
+            lrc_command_id: None,
+            lrc_running_command: None,
+            compaction_state: None,
+            byop_repair_state: Default::default(),
+            lrc_should_spawn_subagent: false,
+        }
+    }
+
     pub fn new(
         terminal_view_id: Option<EntityId>,
         session_context: SessionContext,
@@ -157,6 +244,15 @@ impl RequestParams {
         let ai_settings = AISettings::as_ref(app);
         let is_memory_enabled = ai_settings.is_memory_enabled(app);
         let warp_drive_context_enabled = ai_settings.is_warp_drive_context_enabled(app);
+
+        // OpenWarp BYOP 修复 Issue #116:gate 在 `is_memory_enabled`,具体收集逻辑
+        // 抽到 `collect_user_rules` 纯函数,只接 `&ObjectStoreModel` 入参以便测试,
+        // 不依赖完整 AppContext singleton 集合。
+        let user_rules = if is_memory_enabled {
+            collect_user_rules(ObjectStoreModel::as_ref(app))
+        } else {
+            Vec::new()
+        };
 
         // Build MCP context - either grouped by server or flat lists based on feature flag
         let mcp_context = if FeatureFlag::MCPGroupedServerContext.is_enabled() {
@@ -311,6 +407,7 @@ impl RequestParams {
             cli_agent_model: request_input.cli_agent_model_id.clone(),
             computer_use_model: request_input.computer_use_model_id.clone(),
             is_memory_enabled,
+            user_rules,
             warp_drive_context_enabled,
             mcp_context,
             planning_enabled: true,
@@ -324,6 +421,8 @@ impl RequestParams {
             ask_user_question_enabled,
             research_agent_enabled,
             supported_tools_override: request_input.supported_tools_override.clone(),
+            byop_conversation_id: Some(conversation.id),
+            byop_readiness_attempt_id: None,
             parent_agent_id: None,
             agent_name: None,
             lrc_command_id: None,
@@ -333,6 +432,11 @@ impl RequestParams {
             // BYOP-only:由 controller 在 dispatch 到 BYOP exec 前回填(setter 风格,
             // 避免穿过 ConversationRequestData / 非 BYOP 路径)。
             compaction_state: None,
+            byop_repair_state: Default::default(),
         }
     }
 }
+
+#[cfg(test)]
+#[path = "api_tests.rs"]
+mod tests;

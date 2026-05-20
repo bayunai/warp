@@ -56,6 +56,8 @@ use crate::ai::predict::prompt_suggestions::{
     is_accept_prompt_suggestion_bound_to_ctrl_enter,
 };
 use crate::search::slash_command_menu::static_commands::commands;
+use crate::ssh_manager::onekey::load_saved_ssh_credentials;
+use crate::ssh_manager::password_prompt::bytes_look_like_password_prompt;
 use crate::terminal::input::inline_menu::InlineMenuPositioner;
 use crate::terminal::view::passive_suggestions::PromptSuggestionResolution;
 pub use crate::terminal::view::rich_content::{
@@ -315,6 +317,7 @@ use crate::terminal::shared_session::protocol::{
     ParticipantId, Role, WindowSize as SessionSharingWindowSize,
 };
 use async_channel::{Receiver, Sender};
+use async_stream::stream;
 use chrono::{DateTime, Local, NaiveDateTime};
 use command_corrections::rules::{Rule, RuleId as CommandCorrectionsRuleId};
 use command_corrections::{correct_command, Command, Correction, HistoryItem, SessionMetadata};
@@ -357,7 +360,7 @@ use warpui::elements::new_scrollable::{
     ScrollableAppearance, SingleAxisConfig,
 };
 use warpui::elements::{
-    get_rich_content_position_id, ChildAnchor, ClippedScrollStateHandle, Container,
+    get_rich_content_position_id, Border, ChildAnchor, ClippedScrollStateHandle, Container,
     CrossAxisAlignment, DispatchEventResult, DropTarget, DropTargetData, Empty, EventHandler, Flex,
     NewScrollable, OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds,
     PositionedElementAnchor, PositionedElementOffsetBounds, Radius, ScrollableElement,
@@ -401,7 +404,11 @@ use crate::banner::{
     DismissalType,
 };
 use crate::debounce::debounce;
-use crate::editor::{AutosuggestionType, CrdtOperation, EditorAction};
+use crate::editor::{
+    AutosuggestionType, CrdtOperation, EditorAction, EditorView, Event as EditorEvent,
+    PropagateAndNoOpEscapeKey, PropagateAndNoOpNavigationKeys, SingleLineEditorOptions,
+    TextOptions,
+};
 use crate::features::FeatureFlag;
 use crate::pane_group::SplitPaneState;
 use crate::pane_group::{
@@ -472,11 +479,13 @@ use crate::terminal::{
     TerminalModel,
 };
 use crate::view_components::find::{Event as FindEvent, Find, FindDirection, FindWithinBlockState};
+use fuzzy_match::match_indices_case_insensitive;
 use settings::{Setting, ToggleableSetting};
 use warp_core::semantic_selection::SemanticSelection;
+use warp_editor::editor::NavigationKey;
 use warpui::text::SelectionType;
 
-use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields};
+use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields, MenuVariant};
 use crate::server::telemetry::{BlockLatencyInfo, BootstrappingInfo};
 use crate::terminal::{block_list_element::BlockListMenuSource, prompt};
 use crate::terminal::{color, History, SizeInfo};
@@ -648,6 +657,17 @@ const P10K_UPDATE_INSTRUCTIONS_URL: &str =
     "https://github.com/romkatv/powerlevel10k#how-do-i-update-powerlevel10k";
 
 const CONTEXT_MENU_WIDTH: f32 = 280.;
+const ONEKEY_CONTEXT_MENU_WIDTH: f32 = 380.;
+const ONEKEY_PROMPT_THROTTLE: Duration = Duration::from_secs(2);
+const ONEKEY_PROMPT_SLIDING_WINDOW_BYTES: usize = 8 * 1024;
+const ONEKEY_PROMPT_BUFFER_HARD_LIMIT: usize = 16 * 1024;
+/// 每条 OneKey 候选行的估算高度(stacked label + padding),用于按候选数量
+/// 推导 Scrollable 菜单的目标高度。仅作启发,不需要像素精确。
+const ONEKEY_MENU_ROW_HEIGHT: f32 = 44.;
+/// OneKey 菜单顶部搜索 header 的估算高度(icon + EditorView + padding + border)。
+const ONEKEY_SEARCH_HEADER_HEIGHT: f32 = 32.;
+/// OneKey 菜单 Scrollable 区域的最大高度,避免几十/几百条凭据时盖住终端。
+const ONEKEY_MENU_MAX_HEIGHT: f32 = 360.;
 
 /// The minimum amount of mouse-drag to consider a selection to
 /// be a text-selection as opposed to mouse-drag noise.
@@ -1784,6 +1804,13 @@ pub enum Event {
         target: FileTarget,
         line_col: Option<LineAndColumnArg>,
     },
+    /// OpenWarp:终端里 Ctrl/Cmd+点击远端 SSH 会话输出中的文件路径时发出。
+    /// 走 buffer-sync 协议在编辑器里打开远端文件,而不是本地 `OpenFileWithTarget`。
+    #[cfg(all(feature = "local_tty", feature = "local_fs"))]
+    OpenRemoteFileFromTerminal {
+        remote_path: crate::code::buffer_location::RemotePath,
+        line_col: Option<LineAndColumnArg>,
+    },
     /// Emitted when a file in the file tree is renamed.
     #[cfg(feature = "local_fs")]
     FileRenamed {
@@ -1885,6 +1912,8 @@ pub enum ContextMenuType {
     Prompt { position: Vector2F },
     /// Opened via right-clicking on the input box.
     Input { position: Vector2F },
+    /// 检测到 PTY 输出密码提示后自动打开。
+    OneKeyPrompt,
 
     /// Lists the block(s) or text attached as context to the query represented in the AI block
     /// whose view id is the given [`EntityId`]. The menu is opened by clicking on the attached
@@ -1922,6 +1951,7 @@ impl ContextMenuType {
             ContextMenuType::AltScreen { position } => Some(*position),
             ContextMenuType::Prompt { position } => Some(*position),
             ContextMenuType::Input { position } => Some(*position),
+            ContextMenuType::OneKeyPrompt => None,
             ContextMenuType::AIBlockAttachedContext { .. } => None,
             ContextMenuType::AIBlockOverflowMenu { .. } => None,
         }
@@ -1940,6 +1970,7 @@ impl ContextMenuInfo {
             ContextMenuType::BlockList { .. } => "Block",
             ContextMenuType::Prompt { .. } => "Prompt",
             ContextMenuType::Input { .. } => "Input",
+            ContextMenuType::OneKeyPrompt => "OneKeyPrompt",
             ContextMenuType::AltScreen { .. } => "AltScreen",
             ContextMenuType::AIBlockAttachedContext { .. } => "AIBlockContextList",
             ContextMenuType::AIBlockOverflowMenu { .. } => "AIBlockOverflowMenu",
@@ -1960,6 +1991,7 @@ impl ContextMenuInfo {
             },
             ContextMenuType::Prompt { .. } => "RightClick",
             ContextMenuType::Input { .. } => "RightClick",
+            ContextMenuType::OneKeyPrompt => "PasswordPrompt",
             ContextMenuType::AltScreen { .. } => "AltScreen",
             ContextMenuType::AIBlockAttachedContext { .. } => "AIBlockAttachedBlockChipLeftClick",
             ContextMenuType::AIBlockOverflowMenu { .. } => "AIBlockOverflowMenuClick",
@@ -2236,6 +2268,12 @@ impl DropTargetData for TerminalDropTargetData {
     }
 }
 
+struct OneKeyPromptCandidate {
+    label: String,
+    subtitle: String,
+    secret: zeroize::Zeroizing<String>,
+}
+
 pub struct TerminalView {
     pub model: Arc<FairMutex<TerminalModel>>,
     view_handle: WeakViewHandle<Self>,
@@ -2279,6 +2317,18 @@ pub struct TerminalView {
 
     /// None iff there is no context menu open currently.
     context_menu_state: Option<ContextMenuState>,
+    onekey_prompt_candidates: Vec<OneKeyPromptCandidate>,
+    onekey_last_prompt_at: Option<Instant>,
+    /// OneKey 菜单顶部的搜索输入框。常驻字段,与 TerminalView 同生命周期;
+    /// 菜单关闭时通过 `clear_buffer` 重置内容,而不是销毁 ViewHandle——
+    /// 因为框架未提供 view 释放 API,丢弃 handle 不会注销订阅,
+    /// 反复创建会泄漏并让旧订阅干扰新菜单。
+    onekey_search_editor: ViewHandle<EditorView>,
+    /// 当前 OneKey 搜索框中的查询字符串,影响菜单 items 列表的过滤与排序。
+    onekey_query: String,
+    /// `secret_injector` 起飞后到完成/超时之间为 true。OneKey listener 看到
+    /// true 直接跳过,避免与自动注入同时弹菜单。
+    ssh_secret_auto_injection_in_flight: bool,
 
     /// The search bar at the top of the terminal view.
     find_bar: ViewHandle<Find<TerminalFindModel>>,
@@ -2383,6 +2433,23 @@ pub struct TerminalView {
 
     #[cfg_attr(not(feature = "local_fs"), allow(dead_code))]
     file_link_scanning_join_handle: Option<JoinHandle<()>>,
+
+    /// OpenWarp:远端 SSH 会话的 cwd 目录列表缓存,用于精确校验终端文件链接。
+    ///
+    /// 键是 `(session_id, cwd 绝对路径)`,值为该目录的真实子项列表;`None`
+    /// 表示该 cwd 的列表正在异步拉取中(daemon `ListDirectory` RPC)。
+    /// 用 `IndexMap` 保持插入顺序,容量上限定义在
+    /// `link_detection::remote_dir_listing_context` 中的 `MAX_ENTRIES`,
+    /// 拉取新 cwd 触发 FIFO 淘汰。本地会话永不写入此缓存。
+    #[cfg(all(
+        feature = "local_tty",
+        feature = "local_fs",
+        not(target_family = "wasm")
+    ))]
+    remote_dir_listing_cache: indexmap::IndexMap<
+        (warp_core::SessionId, PathBuf),
+        Option<std::sync::Arc<crate::util::file::RemoteDirListing>>,
+    >,
 
     last_focus_ts: Option<NaiveDateTime>,
     tips_completed: ModelHandle<TipsCompleted>,
@@ -3443,6 +3510,8 @@ impl TerminalView {
             me.handle_menu_event(event, ctx);
         });
 
+        let onekey_search_editor = Self::build_onekey_search_editor(ctx);
+
         let slow_bootstrap_banner = ctx.add_typed_action_view(|_| {
             Banner::<TerminalAction>::new_with_buttons(
                 BannerTextContent::formatted_text(vec![
@@ -3664,6 +3733,11 @@ impl TerminalView {
             });
         }
 
+        let onekey_pty_reads_rx = inactive_pty_reads_rx.clone();
+        if FeatureFlag::OneKeyPrompt.is_enabled() {
+            Self::spawn_onekey_prompt_listener(onekey_pty_reads_rx, ctx);
+        }
+
         // Here we initialize the block list mouse states for block zero.
         // Afterwards, we initialize all block list mouse states for a block when the
         // previous block sends a `BlockCompleted` event.
@@ -3753,6 +3827,11 @@ impl TerminalView {
             horizontal_clipped_scroll_state: Default::default(),
             is_selecting: false,
             context_menu_state: None,
+            onekey_prompt_candidates: Vec::new(),
+            onekey_last_prompt_at: None,
+            onekey_search_editor,
+            onekey_query: String::new(),
+            ssh_secret_auto_injection_in_flight: false,
             context_menu,
             hovered_secret: None,
             open_secret_tool_tip: None,
@@ -3793,6 +3872,12 @@ impl TerminalView {
             inline_banners_state: Default::default(),
             bookmarked_blocks: Default::default(),
             file_link_scanning_join_handle: None,
+            #[cfg(all(
+                feature = "local_tty",
+                feature = "local_fs",
+                not(target_family = "wasm")
+            ))]
+            remote_dir_listing_cache: indexmap::IndexMap::new(),
             last_focus_ts: None,
             tips_completed: resources.tips_completed.clone(),
             was_ever_visible: false,
@@ -4117,6 +4202,7 @@ impl TerminalView {
                     | RemoteServerManagerEvent::HostDisconnected { .. }
                     | RemoteServerManagerEvent::RepoMetadataSnapshot { .. }
                     | RemoteServerManagerEvent::RepoMetadataUpdated { .. }
+                    | RemoteServerManagerEvent::BufferUpdated { .. }
                     | RemoteServerManagerEvent::RepoMetadataDirectoryLoaded { .. } => {}
                 }
             });
@@ -7177,6 +7263,39 @@ impl TerminalView {
     ) -> Option<async_broadcast::InactiveReceiver<std::sync::Arc<Vec<u8>>>> {
         self.pty_recorder
             .read(ctx, |recorder, _| recorder.inactive_pty_reads_rx())
+    }
+
+    fn spawn_onekey_prompt_listener(
+        pty_reads_rx: Option<async_broadcast::InactiveReceiver<Arc<Vec<u8>>>>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let Some(rx) = pty_reads_rx else {
+            return;
+        };
+
+        let prompt_stream = stream! {
+            let mut active = rx.activate_cloned();
+            let mut buf: Vec<u8> = Vec::with_capacity(ONEKEY_PROMPT_SLIDING_WINDOW_BYTES);
+            while let Ok(chunk) = active.recv().await {
+                buf.extend_from_slice(&chunk);
+                if buf.len() > ONEKEY_PROMPT_BUFFER_HARD_LIMIT {
+                    let drop_n = buf.len() - ONEKEY_PROMPT_SLIDING_WINDOW_BYTES;
+                    buf.drain(..drop_n);
+                }
+                if bytes_look_like_password_prompt(&buf) {
+                    buf.clear();
+                    yield ();
+                }
+            }
+        };
+
+        let _ = ctx.spawn_stream_local(
+            prompt_stream,
+            |view, (), ctx| {
+                view.show_onekey_prompt_menu(ctx);
+            },
+            |_, _| {},
+        );
     }
 
     fn write_agent_bytes_to_pty<B: Into<Cow<'static, [u8]>>>(
@@ -15209,7 +15328,16 @@ impl TerminalView {
     ) {
         ctx.update_view(&self.context_menu, |context_menu, view_ctx| {
             context_menu.set_origin(menu_state.menu_type.origin());
-            context_menu.set_width(CONTEXT_MENU_WIDTH);
+            let width = match menu_state.menu_type {
+                ContextMenuType::OneKeyPrompt => ONEKEY_CONTEXT_MENU_WIDTH,
+                ContextMenuType::BlockList { .. }
+                | ContextMenuType::AltScreen { .. }
+                | ContextMenuType::Prompt { .. }
+                | ContextMenuType::Input { .. }
+                | ContextMenuType::AIBlockAttachedContext { .. }
+                | ContextMenuType::AIBlockOverflowMenu { .. } => CONTEXT_MENU_WIDTH,
+            };
+            context_menu.set_width(width);
             // This will also reset the selection.
             context_menu.set_items(items, view_ctx);
         });
@@ -15234,6 +15362,261 @@ impl TerminalView {
             );
             ctx.notify();
         });
+    }
+
+    fn show_onekey_prompt_menu(&mut self, ctx: &mut ViewContext<Self>) {
+        if self.context_menu_state.is_some()
+            || self.ssh_secret_auto_injection_in_flight
+            || self
+                .onekey_last_prompt_at
+                .is_some_and(|instant| instant.elapsed() < ONEKEY_PROMPT_THROTTLE)
+        {
+            return;
+        }
+
+        // 抢占 throttle 窗口,防止 stream 紧接着第二次 yield 时又起一个 spawn。
+        self.onekey_last_prompt_at = Some(Instant::now());
+
+        // Keychain + SQLite 都是同步阻塞 API,不能在 UI 线程跑。
+        // 走 spawn_blocking,完成后回到主线程展示菜单。
+        let future = async move {
+            tokio::task::spawn_blocking(load_saved_ssh_credentials)
+                .await
+                .unwrap_or_else(|e| Err(anyhow::anyhow!("onekey: join error: {e}")))
+        };
+        ctx.spawn(future, move |view, result, ctx| {
+            let credentials = match result {
+                Ok(credentials) => credentials,
+                Err(e) => {
+                    log::warn!("onekey: failed to load saved ssh credentials: {e:?}");
+                    return;
+                }
+            };
+            if credentials.is_empty() {
+                return;
+            }
+            // 二次确认:加载途中可能用户已经手动打开菜单或 injector 起飞了。
+            if view.context_menu_state.is_some() || view.ssh_secret_auto_injection_in_flight {
+                return;
+            }
+
+            view.onekey_prompt_candidates = credentials
+                .into_iter()
+                .map(|credential| OneKeyPromptCandidate {
+                    label: credential.label,
+                    subtitle: credential.subtitle,
+                    secret: credential.secret,
+                })
+                .collect();
+            view.onekey_query.clear();
+            // 复用常驻 editor:清空内容、把焦点稍后转过来。
+            view.onekey_search_editor
+                .clone()
+                .update(ctx, |editor, ctx| {
+                    editor.clear_buffer(ctx);
+                });
+
+            let items = view.build_onekey_menu_items();
+            // 候选可能很多(用户保存了几十/几百台 SSH 服务器),按数量推导
+            // 一个有限高度,并切到 Scrollable,这样方向键导航会自动 scroll-into-view,
+            // 也不会把终端主体盖住。搜索框(pinned header)单独算 ~32px。
+            let candidate_count = view.onekey_prompt_candidates.len() as f32;
+            let target_height = (ONEKEY_SEARCH_HEADER_HEIGHT
+                + candidate_count * ONEKEY_MENU_ROW_HEIGHT)
+                .min(ONEKEY_MENU_MAX_HEIGHT);
+            let search_editor = view.onekey_search_editor.clone();
+            ctx.update_view(&view.context_menu, |context_menu, _| {
+                context_menu.set_menu_variant(MenuVariant::scrollable());
+                context_menu.set_height(target_height);
+                // 搜索框走 pinned header,不占用 selection 索引,也不会被滚动。
+                // 闭包是 Fn,只捕获 ViewHandle clone,不依赖 query —— query 变化
+                // 走 set_items 重建候选行,不重建 header。
+                context_menu.set_pinned_header_builder(move |app| {
+                    render_onekey_search_header(&search_editor, app)
+                });
+            });
+
+            view.show_context_menu(
+                ContextMenuState {
+                    menu_type: ContextMenuType::OneKeyPrompt,
+                },
+                items,
+                ctx,
+            );
+            // 把焦点放到搜索框,这样用户能直接打字过滤候选;
+            // Up/Down/Enter/Escape/Ctrl+N/Ctrl+P 通过 editor 的导航键
+            // propagate 机制转成 EditorEvent 触发对应的菜单操作。
+            ctx.focus(&view.onekey_search_editor);
+            // 默认选中第一条候选(items[0]),保持原 select_next 语义健壮性:
+            // 如果将来在候选前插入 separator 等非 selectable 项,仍能正确跳过。
+            ctx.update_view(&view.context_menu, |context_menu, ctx| {
+                context_menu.select_next(ctx);
+            });
+        });
+    }
+
+    /// 创建 OneKey 菜单顶部的搜索输入框,与 TerminalView 同生命周期。
+    /// 订阅 Edited 触发实时过滤,Up/Down/Enter/Escape 通过 editor 的
+    /// 导航键 propagate 机制转给菜单。Ctrl+N/Ctrl+P 在 EditorView 全局
+    /// 被映射为 EditorAction::Down/Up(见 app/src/editor/view/mod.rs:633,640),
+    /// 因此 single-line + Always 自动 emit Navigate(NavigationKey::Up/Down),
+    /// 无需额外 keymap。
+    fn build_onekey_search_editor(ctx: &mut ViewContext<Self>) -> ViewHandle<EditorView> {
+        let editor = ctx.add_typed_action_view(|ctx| {
+            let appearance = Appearance::as_ref(ctx);
+            let mut editor = EditorView::single_line(
+                SingleLineEditorOptions {
+                    text: TextOptions::ui_text(Some(appearance.ui_font_size()), appearance),
+                    select_all_on_focus: false,
+                    clear_selections_on_blur: true,
+                    propagate_and_no_op_vertical_navigation_keys:
+                        PropagateAndNoOpNavigationKeys::Always,
+                    // 让 escape 先 propagate 到 TerminalView 关闭菜单,
+                    // 与 ModelSelector(model_selector.rs:96)对齐——这样
+                    // 即便 vim 模式有 pending 操作,也优先关闭菜单。
+                    propagate_and_no_op_escape_key: PropagateAndNoOpEscapeKey::PropagateFirst,
+                    ..Default::default()
+                },
+                ctx,
+            );
+            editor.set_placeholder_text(crate::t!("terminal-onekey-search-placeholder"), ctx);
+            editor
+        });
+        ctx.subscribe_to_view(&editor, move |me, editor_view, event, ctx| {
+            me.on_onekey_search_editor_event(editor_view, event, ctx);
+        });
+        editor
+    }
+
+    fn on_onekey_search_editor_event(
+        &mut self,
+        editor_view: ViewHandle<EditorView>,
+        event: &EditorEvent,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        // 只有当 OneKey 菜单仍然处于打开状态时,这些事件才有意义;
+        // 否则可能是 editor 已被替换/销毁过程中迟到的事件。
+        if !matches!(
+            self.context_menu_state.map(|state| state.menu_type),
+            Some(ContextMenuType::OneKeyPrompt)
+        ) {
+            return;
+        }
+        match event {
+            EditorEvent::Edited(_) => {
+                self.onekey_query = editor_view.as_ref(ctx).buffer_text(ctx);
+                self.refresh_onekey_menu_items(ctx);
+            }
+            EditorEvent::Navigate(NavigationKey::Up) => {
+                ctx.update_view(&self.context_menu, |context_menu, ctx| {
+                    context_menu.select_previous(ctx);
+                });
+            }
+            EditorEvent::Navigate(NavigationKey::Down) => {
+                ctx.update_view(&self.context_menu, |context_menu, ctx| {
+                    context_menu.select_next(ctx);
+                });
+            }
+            EditorEvent::Enter => {
+                let selected_action = ctx.update_view(&self.context_menu, |context_menu, _| {
+                    context_menu.selected_item().and_then(|item| match item {
+                        MenuItem::Item(fields) => fields.on_select_action().cloned(),
+                        _ => None,
+                    })
+                });
+                if let Some(TerminalAction::OneKeyFillSecret { index }) = selected_action {
+                    self.fill_onekey_secret(index, ctx);
+                }
+            }
+            EditorEvent::Escape => {
+                // Menu 框架本身也注册了 escape→Close 的 keybinding。如果
+                // EditorView 没有 stop_propagation,close_context_menu 可能
+                // 被调用两次,但 self.context_menu_state.take() 是幂等的,
+                // 第二次进来 state 已经 None,不会重复清理。
+                self.close_context_menu(ctx, true);
+            }
+            _ => {}
+        }
+    }
+
+    /// 按当前 query 用 fuzzy_match 过滤 & 排序候选,重建菜单 items 列表。
+    /// 搜索框走 pinned header,不在 items 列表里;items 第 0 项就是
+    /// 命中的第一条候选(或空态 disabled 行)。
+    fn refresh_onekey_menu_items(&mut self, ctx: &mut ViewContext<Self>) {
+        let items = self.build_onekey_menu_items();
+        ctx.update_view(&self.context_menu, |context_menu, ctx| {
+            context_menu.set_items(items, ctx);
+            // set_items 会 reset_selection;query 变化后默认选中第一条
+            // selectable 候选,方便用户直接回车填充。
+            context_menu.select_next(ctx);
+        });
+        ctx.notify();
+    }
+
+    /// 构建 OneKey 菜单的 items:按当前 query 过滤排序后的候选行,
+    /// 每行的 on_select_action 携带其在全集 `onekey_prompt_candidates`
+    /// 中的索引。搜索框走 `set_pinned_header_builder`,不在 items 列表中。
+    fn build_onekey_menu_items(&self) -> Vec<MenuItem<TerminalAction>> {
+        let order = filter_and_sort_onekey_candidates(
+            self.onekey_prompt_candidates
+                .iter()
+                .map(|c| (c.label.as_str(), c.subtitle.as_str())),
+            &self.onekey_query,
+        );
+        match order {
+            // 命中为空:加一条 disabled 提示行,避免菜单只剩搜索框
+            // 显得很怪;disabled 会被 select_next/previous 自动跳过。
+            OnekeyMenuRows::NoMatches => {
+                vec![
+                    MenuItemFields::new(crate::t!("terminal-onekey-search-no-results"))
+                        .with_disabled(true)
+                        .into_item(),
+                ]
+            }
+            OnekeyMenuRows::Ordered(indices) => indices
+                .into_iter()
+                .map(|index| {
+                    let candidate = &self.onekey_prompt_candidates[index];
+                    MenuItemFields::new_with_stacked_label(
+                        candidate.label.clone(),
+                        candidate.subtitle.clone(),
+                    )
+                    .with_icon(icons::Icon::Key)
+                    .with_on_select_action(TerminalAction::OneKeyFillSecret { index })
+                    .into_item()
+                })
+                .collect(),
+        }
+    }
+
+    fn fill_onekey_secret(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        let Some(candidate) = self.onekey_prompt_candidates.get(index) else {
+            self.close_context_menu(ctx, true);
+            return;
+        };
+        // 用 Zeroizing<Vec<u8>> 持有本函数内的明文副本,函数返回时自动清零;
+        // write_to_pty 收到的是另一份 Cow,那一份在事件系统/PTY 路径上无法
+        // zeroize(属于既有架构限制),但至少把本帧栈上的明文窗口缩到最小。
+        let mut bytes: zeroize::Zeroizing<Vec<u8>> =
+            zeroize::Zeroizing::new(candidate.secret.as_bytes().to_vec());
+        bytes.push(b'\n');
+        self.write_to_pty(bytes.to_vec(), ctx);
+        self.close_context_menu(ctx, true);
+    }
+
+    pub(crate) fn note_ssh_secret_auto_injected(&mut self, ctx: &mut ViewContext<Self>) {
+        self.onekey_last_prompt_at = Some(Instant::now());
+        if matches!(
+            self.context_menu_state.map(|state| state.menu_type),
+            Some(ContextMenuType::OneKeyPrompt)
+        ) {
+            self.close_context_menu(ctx, true);
+        }
+    }
+
+    /// 仅由 `secret_injector` 在起飞/结束时调用。详见字段文档。
+    pub(crate) fn set_ssh_secret_auto_injection_in_flight(&mut self, in_flight: bool) {
+        self.ssh_secret_auto_injection_in_flight = in_flight;
     }
 
     fn alt_mouse_action(&mut self, mouse_state: &MouseState, ctx: &mut ViewContext<Self>) {
@@ -15720,6 +16103,82 @@ impl TerminalView {
         }
     }
 
+    /// OpenWarp:若当前活动 block 所属会话是 remote-server 会话,返回其 `HostId`。
+    ///
+    /// 用于在终端里 Ctrl/Cmd+点击文件路径时,判断应当走本地还是远端 buffer-sync
+    /// 打开流程。非 remote-server 会话返回 `None`(保持本地行为不变)。
+    #[cfg(all(feature = "local_tty", feature = "local_fs"))]
+    fn active_session_remote_host_id(&self, ctx: &AppContext) -> Option<warp_core::HostId> {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            if !FeatureFlag::SshRemoteServer.is_enabled() {
+                return None;
+            }
+            let session_id = self.active_block_session_id()?;
+            let mgr = RemoteServerManager::handle(ctx);
+            mgr.as_ref(ctx).host_id_for_session(session_id).cloned()
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = ctx;
+            None
+        }
+    }
+
+    /// OpenWarp:把终端文件链接里已解析出的绝对路径当作远端路径,构造 `RemotePath`。
+    /// 远端 SSH 主机均为 Unix,路径字符串由 shell-integration 上报的远端 cwd 拼接而来。
+    #[cfg(all(feature = "local_tty", feature = "local_fs"))]
+    fn remote_path_from_terminal_path(
+        host_id: warp_core::HostId,
+        path: &std::path::Path,
+    ) -> Option<crate::code::buffer_location::RemotePath> {
+        let path_str = path.to_str()?;
+        let standardized = warp_util::standardized_path::StandardizedPath::try_new(path_str)
+            .map_err(|e| {
+                log::warn!("无法将终端文件路径转换为远端路径 {path_str:?}: {e}");
+            })
+            .ok()?;
+        Some(crate::code::buffer_location::RemotePath::new(
+            host_id,
+            standardized,
+        ))
+    }
+
+    /// OpenWarp:判断终端文件链接里的远端路径是否指向目录。
+    ///
+    /// 依据是缓存下来的远端 cwd 目录列表(由 `link_detection.rs` 拉取并写入)。
+    /// 未缓存或非目录返回 `false`(按文件处理)。
+    #[cfg(all(
+        feature = "local_tty",
+        feature = "local_fs",
+        not(target_family = "wasm")
+    ))]
+    fn remote_clicked_path_is_dir(
+        &self,
+        session_id: warp_core::SessionId,
+        path: &std::path::Path,
+    ) -> bool {
+        path.parent().is_some_and(|parent| {
+            self.remote_dir_listing_cache
+                .get(&(session_id, parent.to_path_buf()))
+                .and_then(|entry| entry.as_ref())
+                .is_some_and(|listing| crate::util::file::remote_path_is_dir(path, listing))
+        })
+    }
+
+    /// OpenWarp:在当前(远端)终端会话里 `cd` 进指定目录。
+    ///
+    /// 与本地点击目录链接的行为对齐 —— 远端目录无法在编辑器里打开,改为
+    /// 在该远端 shell 会话中执行 `cd <dir>`。
+    #[cfg(all(feature = "local_tty", feature = "local_fs"))]
+    fn cd_into_remote_directory(&mut self, path: &std::path::Path, ctx: &mut ViewContext<Self>) {
+        // 对路径做 shell 转义,防止包含 `"`、`$(...)`、反引号等字符时被远端 shell 执行注入命令。
+        let quoted_dir = shell_words::quote(&path.to_string_lossy()).into_owned();
+        self.input.update(ctx, |input, ctx| {
+            input.try_execute_command(format!("cd -- {quoted_dir}").as_str(), ctx);
+        });
+    }
+
     #[cfg(feature = "local_fs")]
     fn open_file_path(
         &mut self,
@@ -15728,6 +16187,26 @@ impl TerminalView {
         ctx: &mut ViewContext<Self>,
     ) {
         ctx.notify();
+
+        // OpenWarp:远端 SSH 会话走 buffer-sync 协议打开远端文件。
+        #[cfg(all(feature = "local_tty", feature = "local_fs"))]
+        if let Some(host_id) = self.active_session_remote_host_id(ctx) {
+            // 远端目录点击:不在编辑器里打开,改为在该远端会话里 `cd` 进去。
+            #[cfg(not(target_family = "wasm"))]
+            if let Some(session_id) = self.active_block_session_id() {
+                if self.remote_clicked_path_is_dir(session_id, &path) {
+                    self.cd_into_remote_directory(&path, ctx);
+                    return;
+                }
+            }
+            if let Some(remote_path) = Self::remote_path_from_terminal_path(host_id, &path) {
+                ctx.emit(Event::OpenRemoteFileFromTerminal {
+                    remote_path,
+                    line_col: line_and_column_num,
+                });
+            }
+            return;
+        }
 
         let settings = EditorSettings::as_ref(ctx);
         let target = resolve_file_target(&path, settings, None);
@@ -15748,6 +16227,28 @@ impl TerminalView {
         ctx: &mut ViewContext<Self>,
     ) {
         ctx.notify();
+
+        // OpenWarp:远端 SSH 会话走 buffer-sync 协议打开远端文件。
+        // 远端文件统一在内嵌代码编辑器打开,忽略 `target`(外部编辑器无法访问远端文件)。
+        #[cfg(all(feature = "local_tty", feature = "local_fs"))]
+        if let Some(host_id) = self.active_session_remote_host_id(ctx) {
+            // 远端目录点击:不在编辑器里打开,改为在该远端会话里 `cd` 进去。
+            #[cfg(not(target_family = "wasm"))]
+            if let Some(session_id) = self.active_block_session_id() {
+                if self.remote_clicked_path_is_dir(session_id, &path) {
+                    self.cd_into_remote_directory(&path, ctx);
+                    return;
+                }
+            }
+            if let Some(remote_path) = Self::remote_path_from_terminal_path(host_id, &path) {
+                ctx.emit(Event::OpenRemoteFileFromTerminal {
+                    remote_path,
+                    line_col: line_and_column_num,
+                });
+            }
+            return;
+        }
+
         ctx.emit(Event::OpenFileWithTarget {
             path,
             target,
@@ -18004,8 +18505,25 @@ impl TerminalView {
     }
 
     fn close_context_menu(&mut self, ctx: &mut ViewContext<Self>, should_redetermine_focus: bool) {
-        if self.context_menu_state.is_some() {
-            self.context_menu_state = None;
+        if let Some(state) = self.context_menu_state.take() {
+            if matches!(state.menu_type, ContextMenuType::OneKeyPrompt) {
+                self.onekey_prompt_candidates.clear();
+                self.onekey_query.clear();
+                // 搜索 editor 是常驻字段(框架未提供 view 释放 API),
+                // 这里清空其内容以便下次打开时是干净状态。
+                self.onekey_search_editor
+                    .clone()
+                    .update(ctx, |editor, ctx| {
+                        editor.clear_buffer(ctx);
+                    });
+                // 该 `Menu` 实例被各类 ContextMenu 共用,关闭 OneKey 菜单时
+                // 把 variant 切回 Fixed 并清掉 pinned header,避免影响后续
+                // 右键 / Alt-screen 菜单。
+                ctx.update_view(&self.context_menu, |context_menu, _| {
+                    context_menu.set_menu_variant(MenuVariant::Fixed);
+                    context_menu.clear_pinned_header_builder();
+                });
+            }
             ctx.notify();
             if should_redetermine_focus {
                 self.redetermine_global_focus(ctx);
@@ -22719,6 +23237,7 @@ impl TypedActionView for TerminalView {
             InsertCommandCorrection { .. }
             | BlockListContextMenu(_)
             | CloseContextMenu
+            | OneKeyFillSecret { .. }
             | Paste
             | MiddleClickOnGrid { .. }
             | MiddleClickOnInput
@@ -23009,6 +23528,7 @@ impl TypedActionView for TerminalView {
                 }
             }
             CloseContextMenu => self.close_context_menu(ctx, true),
+            OneKeyFillSecret { index } => self.fill_onekey_secret(*index, ctx),
             Paste => self.paste(false, ctx),
             Copy => self.copy(ctx),
             CopyOutputs => self.copy_outputs(ctx),
@@ -24048,6 +24568,27 @@ impl View for TerminalView {
                     }
                 },
             ),
+            Some(ContextMenuType::OneKeyPrompt) => stack.add_positioned_overlay_child(
+                ChildView::new(&self.context_menu).finish(),
+                match input_mode {
+                    InputMode::PinnedToBottom | InputMode::Waterfall => {
+                        OffsetPositioning::offset_from_save_position_element(
+                            self.input.as_ref(app).save_position_id(),
+                            vec2f(0., -8.),
+                            PositionedElementOffsetBounds::WindowByPosition,
+                            PositionedElementAnchor::TopLeft,
+                            ChildAnchor::BottomLeft,
+                        )
+                    }
+                    InputMode::PinnedToTop => OffsetPositioning::offset_from_save_position_element(
+                        self.input.as_ref(app).save_position_id(),
+                        vec2f(0., 8.),
+                        PositionedElementOffsetBounds::WindowByPosition,
+                        PositionedElementAnchor::BottomLeft,
+                        ChildAnchor::TopLeft,
+                    ),
+                },
+            ),
             Some(ContextMenuType::AIBlockAttachedContext { ai_block_view_id }) => stack
                 .add_positioned_overlay_child(
                     ChildView::new(&self.context_menu).finish(),
@@ -24777,6 +25318,78 @@ fn command_first_word_and_suffix(command: &str) -> Option<(&str, &str)> {
     let word_start = command.find(first_word)?;
     let rest = &command[word_start + first_word.len()..];
     Some((first_word, rest))
+}
+
+/// `filter_and_sort_onekey_candidates` 的返回值。命中为空时与"全部命中"
+/// 区分开,方便调用方决定显示空态行还是候选行。
+#[derive(Debug, PartialEq, Eq)]
+enum OnekeyMenuRows {
+    /// 候选在 onekey_prompt_candidates 全集中的索引,按显示顺序排列。
+    Ordered(Vec<usize>),
+    /// query 非空但没有任何候选命中。
+    NoMatches,
+}
+
+/// 按 query 用 fuzzy_match 过滤+排序 OneKey 候选,返回展示顺序中的全集索引。
+/// query 为空时保持原顺序;非空时对 label / subtitle 各打分,取最高分降序。
+/// 提取为 pure 函数以便单元测试(skim 算法对 Unicode char 序列匹配,
+/// 中/英/日/韩字符均可直接搜索)。
+fn filter_and_sort_onekey_candidates<'a, I>(candidates: I, query: &str) -> OnekeyMenuRows
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    let query = query.trim();
+    let candidates: Vec<(&str, &str)> = candidates.into_iter().collect();
+    if query.is_empty() {
+        return OnekeyMenuRows::Ordered((0..candidates.len()).collect());
+    }
+    let mut scored: Vec<(i64, usize)> = candidates
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (label, subtitle))| {
+            let label_score = match_indices_case_insensitive(label, query).map(|m| m.score);
+            let subtitle_score = match_indices_case_insensitive(subtitle, query).map(|m| m.score);
+            let score = label_score.into_iter().chain(subtitle_score).max()?;
+            Some((score, index))
+        })
+        .collect();
+    // score 大者靠前;同分按原始顺序(stable sort)。
+    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    if scored.is_empty() {
+        OnekeyMenuRows::NoMatches
+    } else {
+        OnekeyMenuRows::Ordered(scored.into_iter().map(|(_, index)| index).collect())
+    }
+}
+
+/// 渲染 OneKey 菜单顶部的搜索 header(pinned header builder 调用)。
+/// 提取为模块级函数以避免在 query 变化时反复构造 Arc 闭包。
+fn render_onekey_search_header(
+    editor: &ViewHandle<EditorView>,
+    app: &AppContext,
+) -> Box<dyn Element> {
+    let appearance = Appearance::as_ref(app);
+    let theme = appearance.theme();
+    let search_icon = ConstrainedBox::new(
+        icons::Icon::SearchSmall
+            .to_warpui_icon(theme.sub_text_color(theme.surface_2()))
+            .finish(),
+    )
+    .with_width(16.)
+    .with_height(16.)
+    .finish();
+    let search_row = Flex::row()
+        .with_child(Container::new(search_icon).with_margin_right(8.).finish())
+        .with_child(Shrinkable::new(1., ChildView::new(editor).finish()).finish())
+        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+        .finish();
+    Container::new(search_row)
+        .with_padding_left(8.)
+        .with_padding_right(8.)
+        .with_padding_top(6.)
+        .with_padding_bottom(6.)
+        .with_border(Border::bottom(1.).with_border_fill(theme.surface_3()))
+        .finish()
 }
 
 /// Conditionally wrap a terminal element (altscreen / blocklist element) in a scrollable element.

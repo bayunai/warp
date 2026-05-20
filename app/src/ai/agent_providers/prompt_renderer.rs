@@ -49,6 +49,11 @@ fn build_env() -> Environment<'static> {
     )
     .expect("project_rules partial parses");
     env.add_template(
+        "partials/user_rules.j2",
+        include_str!("prompts/partials/user_rules.j2"),
+    )
+    .expect("user_rules partial parses");
+    env.add_template(
         "partials/tool_aliases.j2",
         include_str!("prompts/partials/tool_aliases.j2"),
     )
@@ -194,6 +199,14 @@ struct ProjectRuleCtx {
     content: String,
 }
 
+/// OpenWarp BYOP 修复 Issue #116:全局 Rules(用户在 设置 → Agents → Rules 创建)
+/// 的扁平视图,喂给 `partials/user_rules.j2` 渲染进 system prompt。
+#[derive(Debug, Serialize)]
+struct UserRuleCtx {
+    name: Option<String>,
+    content: String,
+}
+
 #[derive(Debug, Default, Serialize)]
 struct InitProjectCommandContext {
     arguments: String,
@@ -207,6 +220,9 @@ struct PromptContext {
     git: Option<GitCtx>,
     skills: Vec<SkillCtx>,
     project_rules: Vec<ProjectRuleCtx>,
+    /// OpenWarp BYOP 修复 Issue #116:由 caller(`render_system`)从
+    /// `RequestParams.user_rules` 注入,经 `partials/user_rules.j2` 渲染。
+    user_rules: Vec<UserRuleCtx>,
     current_time: String,
     model_id: String,
     /// 本轮真正喂给上游模型的 tool name 列表(由 `chat_stream::available_tool_names`
@@ -365,12 +381,20 @@ pub fn render_system(
     ctx: &[AIAgentContext],
     available_tools: &[String],
     plan_mode: bool,
+    user_rules: &[(Option<String>, String)],
 ) -> String {
     let model_id = model_id_from_llm_id(model);
     let template_name = pick_template(&model_id);
     let mut prompt_ctx = collect_prompt_context(&model_id, ctx);
     prompt_ctx.available_tools = available_tools.to_vec();
     prompt_ctx.plan_mode = plan_mode;
+    prompt_ctx.user_rules = user_rules
+        .iter()
+        .map(|(name, content)| UserRuleCtx {
+            name: name.clone(),
+            content: content.clone(),
+        })
+        .collect();
 
     let env = env();
     let tmpl = match env.get_template(template_name) {
@@ -494,7 +518,7 @@ mod tests {
                 shell_version: Some("5.1".into()),
             }),
         ];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[], false);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &ctx, &[], false, &[]);
         assert!(
             out.contains("Working directory: /home/user/project"),
             "{out}"
@@ -523,6 +547,7 @@ mod tests {
                 &[],
                 &[],
                 false,
+                &[],
             );
             assert!(
                 out.contains("OpenWarp"),
@@ -533,7 +558,7 @@ mod tests {
 
     #[test]
     fn render_omits_skills_block_when_empty() {
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false, &[]);
         // 没 skills 时 skills 区块不应出现
         assert!(
             !out.contains("Skills provide specialized instructions"),
@@ -544,7 +569,7 @@ mod tests {
     #[test]
     fn fallback_does_not_panic() {
         // render_system 永远不会 panic,失败也走 fallback_system
-        let out = render_system(&LLMId::from("byop:p:any"), &[], &[], false);
+        let out = render_system(&LLMId::from("byop:p:any"), &[], &[], false, &[]);
         assert!(!out.is_empty());
     }
 
@@ -557,7 +582,7 @@ mod tests {
             "websearch".into(),
             "mcp__github__create_issue".into(),
         ];
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &tools, false);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &tools, false, &[]);
         for name in &tools {
             assert!(
                 out.contains(name),
@@ -574,13 +599,13 @@ mod tests {
     #[test]
     fn render_omits_tool_list_when_empty() {
         // tool_names 为空(理论上不会发生,兜底:不渲染白名单段)
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false, &[]);
         assert!(!out.contains("Available Tools"), "{out}");
     }
 
     #[test]
     fn plan_mode_off_omits_plan_block() {
-        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false);
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false, &[]);
         assert!(
             !out.contains("Plan Mode (Read-Only)"),
             "plan_mode=false 不应包含 Plan Mode 段: {out}"
@@ -604,6 +629,7 @@ mod tests {
                 &[],
                 &[],
                 true,
+                &[],
             );
             assert!(
                 out.contains("Plan Mode (Read-Only)"),
@@ -614,5 +640,123 @@ mod tests {
                 "id={id} plan_mode=true 应包含 Stop and wait 引导: {out}"
             );
         }
+    }
+
+    // Issue #116:全局 Rules(用户在 设置 → Agents → Rules 创建)必须注入 system prompt。
+    // 下面三个用例覆盖 `partials/user_rules.j2` 的关键分支。
+
+    #[test]
+    fn render_omits_user_rules_block_when_empty() {
+        let out = render_system(&LLMId::from("byop:p:deepseek-chat"), &[], &[], false, &[]);
+        assert!(
+            !out.contains("# User rules"),
+            "user_rules 为空时不应渲染 user rules 区块: {out}"
+        );
+    }
+
+    #[test]
+    fn render_includes_user_rules_when_present() {
+        let rules = vec![(
+            Some("My rule".to_string()),
+            "Always use snake_case in Rust.".to_string(),
+        )];
+        let out = render_system(
+            &LLMId::from("byop:p:deepseek-chat"),
+            &[],
+            &[],
+            false,
+            &rules,
+        );
+        assert!(out.contains("# User rules"), "应渲染 user rules 区块: {out}");
+        assert!(out.contains("## My rule"), "应包含规则名: {out}");
+        assert!(
+            out.contains("Always use snake_case in Rust."),
+            "应包含规则内容: {out}"
+        );
+    }
+
+    #[test]
+    fn render_includes_user_rules_across_all_template_families() {
+        // user_rules.j2 经 footer.j2 注入,所有 system 模板族都引用了 footer。
+        // 这个回归用例确保 anthropic / beast / codex / gemini / kimi / trinity /
+        // default 任一模板族都会渲染 user rules,不会因为某条家族没拉 footer 而漏注入。
+        let rules = vec![(Some("家族覆盖".to_string()), "snake_case only.".to_string())];
+        for id in [
+            "claude-sonnet-4-5",
+            "gpt-4o",
+            "gpt-5-codex",
+            "gemini-2.5-pro",
+            "kimi-k2",
+            "trinity-v1",
+            "deepseek-chat",
+            "weird-model",
+        ] {
+            let out = render_system(
+                &LLMId::from(format!("byop:p:{id}").as_str()),
+                &[],
+                &[],
+                false,
+                &rules,
+            );
+            assert!(
+                out.contains("snake_case only."),
+                "id={id} 应包含 user rule 内容: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn render_user_rules_separates_multiple_rules_with_blank_line() {
+        // 多条规则之间应有空行分隔(`{% if not loop.last %}`),最后一条之后不留空行。
+        let rules = vec![
+            (Some("R1".to_string()), "first content".to_string()),
+            (Some("R2".to_string()), "second content".to_string()),
+            (Some("R3".to_string()), "third content".to_string()),
+        ];
+        let out = render_system(
+            &LLMId::from("byop:p:deepseek-chat"),
+            &[],
+            &[],
+            false,
+            &rules,
+        );
+
+        // 两条规则之间应至少包含一个 "blank line"(两个相邻换行)。
+        // 不写死具体换行数,因为 minijinja 的 trim_blocks/lstrip_blocks 默认行为
+        // 决定的具体换行数容易随模板微调而变(reviewer 实测出过 3 个换行的形态)。
+        // 我们要的契约是"有视觉空行 + 顺序正确"。
+        let pos_r1 = out.find("first content").expect("找不到 R1 content");
+        let pos_r2 = out.find("## R2").expect("找不到 R2 标题");
+        let pos_r3 = out.find("## R3").expect("找不到 R3 标题");
+        assert!(pos_r1 < pos_r2 && pos_r2 < pos_r3, "顺序应保持: {out}");
+        let between_r1_r2 = &out[pos_r1 + "first content".len()..pos_r2];
+        let between_r2_r3 = &out[pos_r2..pos_r3];
+        assert!(
+            between_r1_r2.contains("\n\n"),
+            "R1 与 R2 之间应有空行,实际:{between_r1_r2:?}"
+        );
+        assert!(
+            between_r2_r3.contains("\n\n"),
+            "R2 与 R3 之间应有空行,实际:{between_r2_r3:?}"
+        );
+    }
+
+    #[test]
+    fn render_user_rules_handles_no_name() {
+        let rules = vec![(None, "Be terse.".to_string())];
+        let out = render_system(
+            &LLMId::from("byop:p:deepseek-chat"),
+            &[],
+            &[],
+            false,
+            &rules,
+        );
+        assert!(out.contains("# User rules"), "{out}");
+        assert!(out.contains("Be terse."), "{out}");
+        // 无 name 时不应渲染空的 `## ` 标题行
+        assert!(
+            !out.contains("## \n"),
+            "无 name 时不应渲染空的 '## ' 标题: {out}"
+        );
     }
 }

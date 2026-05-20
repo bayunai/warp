@@ -161,10 +161,16 @@ impl NetworkPageView {
 
         let url_editor =
             build_text_editor(ctx, false, crate::t!("settings-network-url-placeholder"));
-        let username_editor =
-            build_text_editor(ctx, false, crate::t!("settings-network-username-placeholder"));
-        let password_editor =
-            build_text_editor(ctx, true, crate::t!("settings-network-password-placeholder"));
+        let username_editor = build_text_editor(
+            ctx,
+            false,
+            crate::t!("settings-network-username-placeholder"),
+        );
+        let password_editor = build_text_editor(
+            ctx,
+            true,
+            crate::t!("settings-network-password-placeholder"),
+        );
         let no_proxy_editor = build_text_editor(
             ctx,
             false,
@@ -414,10 +420,7 @@ fn spawn_test_connection(
                         }
                     },
                     |me, outcome, ctx| {
-                        me.handle_action(
-                            &NetworkPageAction::TestConnectionResult(outcome),
-                            ctx,
-                        );
+                        me.handle_action(&NetworkPageAction::TestConnectionResult(outcome), ctx);
                     },
                 );
                 return;
@@ -458,8 +461,7 @@ fn spawn_tcp_probe(
         async move {
             let start = Instant::now();
             let addr = format!("{host}:{port}");
-            let result =
-                tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&addr)).await;
+            let result = tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&addr)).await;
             let outcome_result = match result {
                 Ok(Ok(_stream)) => Ok(start.elapsed().as_millis()),
                 Ok(Err(e)) => Err(format!("{e}")),
@@ -781,14 +783,12 @@ impl SettingsWidget for NetworkPageWidget {
                 ),
             },
             TestState::Failed { kind, message } => match kind {
-                TestKind::Tcp => crate::t!(
-                    "settings-network-test-failed-tcp",
-                    error = message.clone()
-                ),
-                TestKind::Http => crate::t!(
-                    "settings-network-test-failed-http",
-                    error = message.clone()
-                ),
+                TestKind::Tcp => {
+                    crate::t!("settings-network-test-failed-tcp", error = message.clone())
+                }
+                TestKind::Http => {
+                    crate::t!("settings-network-test-failed-http", error = message.clone())
+                }
             },
         };
         let result_element = Text::new(

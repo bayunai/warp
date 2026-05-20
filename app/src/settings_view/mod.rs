@@ -1025,8 +1025,7 @@ impl SettingsView {
         });
 
         // Network (HTTP 代理) 设置页。受 FeatureFlag::HttpProxySettings 门控。
-        let network_page_handle =
-            ctx.add_typed_action_view(network_page::NetworkPageView::new);
+        let network_page_handle = ctx.add_typed_action_view(network_page::NetworkPageView::new);
 
         let font_family = Appearance::as_ref(ctx).ui_font_family();
         let search_editor = ctx.add_typed_action_view(|ctx| {

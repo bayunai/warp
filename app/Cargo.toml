@@ -591,6 +591,7 @@ default = [
     "open_warp_new_settings_modes",
     "settings_file",
     "ssh_tmux_wrapper",
+    "onekey_prompt",
 ]
 # Enable this feature to automatically perform heap profiling.  NOTE: This will
 # substantially slow down program execution.
@@ -617,6 +618,7 @@ grep_tool = []
 # for things that pull in external dependencies.
 gui = ["voice_input"]
 msys2_shells = []
+onekey_prompt = []
 file_retrieval_tools = []
 welcome_tab = []
 get_started_tab = []

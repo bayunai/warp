@@ -162,6 +162,9 @@ pub enum TerminalAction {
     },
     BlockListContextMenu(BlockListMenuSource),
     CloseContextMenu,
+    OneKeyFillSecret {
+        index: usize,
+    },
     Paste,
     Copy,
     CopyOutputs,
@@ -452,6 +455,7 @@ impl fmt::Debug for TerminalAction {
             }
             BlockListContextMenu(menu) => write!(f, "BlockListContextMenu({menu:?})"),
             CloseContextMenu => f.write_str("CloseContextMenu"),
+            OneKeyFillSecret { index } => write!(f, "OneKeyFillSecret {{ index: {index} }}"),
             Paste => f.write_str("Paste"),
             Copy => f.write_str("Copy"),
             CopyOutputs => f.write_str("CopyOutputs"),

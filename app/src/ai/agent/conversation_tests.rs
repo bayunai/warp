@@ -4,7 +4,12 @@ use super::{
     artifact_from_fork_proto, AIConversation, AIConversationAutoexecuteMode, AIConversationId,
 };
 use crate::ai::artifacts::Artifact;
+use crate::ai::byop_readiness::{
+    InvalidRepairState, RepairRecord, RepairSource, RepairState, RepairStateLoadError,
+    RepairStateStatus, ToolCallKey,
+};
 use crate::persistence::model::AgentConversationData;
+use crate::persistence::ModelEvent;
 use warp_core::features::FeatureFlag;
 use warp_multi_agent_api as api;
 
@@ -54,6 +59,21 @@ fn agent_output_message(id: &str, request_id: &str) -> api::Message {
             },
         )),
         request_id: request_id.to_string(),
+        timestamp: None,
+    }
+}
+
+fn tool_call_message(id: &str, call_id: &str) -> api::Message {
+    api::Message {
+        id: id.to_string(),
+        task_id: "root-task".to_string(),
+        server_message_data: String::new(),
+        citations: vec![],
+        message: Some(api::message::Message::ToolCall(api::message::ToolCall {
+            tool_call_id: call_id.to_string(),
+            tool: None,
+        })),
+        request_id: "request-1".to_string(),
         timestamp: None,
     }
 }
@@ -166,6 +186,103 @@ fn restored_conversation_ignores_persisted_autoexecute_override_when_disabled() 
     assert_eq!(
         conversation.autoexecute_override(),
         AIConversationAutoexecuteMode::RespectUserSettings
+    );
+}
+
+#[test]
+fn restored_conversation_loads_valid_byop_repair_sidecar() {
+    let record = RepairRecord::new(
+        RepairSource::ForkedHistory,
+        ToolCallKey::new("root-task", "assistant-1", "call-1"),
+    );
+    let sidecar_json = serde_json::to_string(&RepairState::new(vec![record.clone()])).unwrap();
+    let conversation_data: AgentConversationData = serde_json::from_value(serde_json::json!({
+        "server_conversation_token": null,
+        "byop_repair_state_json": sidecar_json,
+    }))
+    .unwrap();
+
+    let conversation = restored_conversation(Some(conversation_data));
+
+    assert_eq!(
+        conversation.byop_repair_state,
+        RepairStateStatus::Valid(RepairState::new(vec![record]))
+    );
+}
+
+#[test]
+fn restored_conversation_preserves_invalid_byop_repair_sidecar() {
+    let sidecar_json = "{not valid json".to_string();
+    let conversation_data: AgentConversationData = serde_json::from_value(serde_json::json!({
+        "server_conversation_token": null,
+        "byop_repair_state_json": sidecar_json,
+    }))
+    .unwrap();
+
+    let conversation = restored_conversation(Some(conversation_data));
+
+    assert!(matches!(
+        conversation.byop_repair_state,
+        RepairStateStatus::Invalid(InvalidRepairState {
+            error_category: RepairStateLoadError::InvalidJson,
+            ..
+        })
+    ));
+    assert_eq!(
+        conversation.byop_repair_state.to_sidecar_json().as_deref(),
+        Some("{not valid json")
+    );
+}
+
+#[test]
+fn restored_conversation_does_not_infer_legacy_repair_for_unexplained_gap() {
+    let conversation = AIConversation::new_restored(
+        AIConversationId::new(),
+        vec![api::Task {
+            id: "root-task".to_string(),
+            messages: vec![tool_call_message("assistant-1", "call-1")],
+            dependencies: None,
+            description: String::new(),
+            summary: String::new(),
+            server_data: String::new(),
+        }],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(conversation.byop_repair_state, RepairStateStatus::default());
+}
+
+#[test]
+fn byop_repair_sidecar_survives_serialization_after_fork_token_cleared() {
+    let record = RepairRecord::new(
+        RepairSource::ForkedHistory,
+        ToolCallKey::new("root-task", "assistant-1", "call-1"),
+    );
+    let sidecar_json = serde_json::to_string(&RepairState::new(vec![record.clone()])).unwrap();
+    let conversation_data: AgentConversationData = serde_json::from_value(serde_json::json!({
+        "server_conversation_token": null,
+        "forked_from_server_conversation_token": "source-token",
+        "byop_repair_state_json": sidecar_json,
+    }))
+    .unwrap();
+    let mut conversation = restored_conversation(Some(conversation_data));
+
+    conversation.clear_forked_from_server_conversation_token();
+
+    let ModelEvent::UpdateMultiAgentConversation {
+        conversation_data, ..
+    } = conversation.updated_conversation_state_event()
+    else {
+        panic!("expected conversation update event");
+    };
+    assert_eq!(
+        conversation_data.forked_from_server_conversation_token,
+        None
+    );
+    assert_eq!(
+        RepairStateStatus::from_sidecar_json(conversation_data.byop_repair_state_json),
+        RepairStateStatus::Valid(RepairState::new(vec![record]))
     );
 }
 

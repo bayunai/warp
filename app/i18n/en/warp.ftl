@@ -163,6 +163,8 @@ workspace-toast-disabled-synchronized-inputs = Disabled all synchronized inputs.
 workspace-toast-conversation-deleted = Conversation deleted
 workspace-search-repos-placeholder = Search repos
 workspace-search-tabs-placeholder = Search tabs...
+terminal-onekey-search-placeholder = Search saved SSH credentials...
+terminal-onekey-search-no-results = No matching SSH credentials
 workspace-rearrange-toolbar-items = Re-arrange toolbar items
 workspace-new-session-agent = Agent
 workspace-new-session-terminal = Terminal
@@ -612,6 +614,10 @@ settings-about-update-up-to-date = OpenWarp is up to date.
 settings-about-update-available = New version { $version } is available.
 settings-about-update-check-now = Check for updates
 settings-about-update-open-release = Download from GitHub
+settings-about-export-logs = Export logs…
+settings-about-export-logs-description = Bundles recent app logs (and MCP / update logs when present) plus a diagnostic summary into a zip you choose where to save, so you can share it for troubleshooting.
+settings-about-export-logs-success = Logs exported to { $path }
+settings-about-export-logs-failure = Failed to export logs: { $error }
 
 # OpenWarp: main_page.rs (Account / version / autoupdate) strings removed alongside
 # the Account settings page. The About page now owns version / update CTAs.

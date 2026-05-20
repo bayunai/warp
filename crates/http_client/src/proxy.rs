@@ -81,9 +81,7 @@ impl ProxyConfig {
             ProxyMode::Custom => {
                 let trimmed = self.url.trim();
                 if trimmed.is_empty() {
-                    log::warn!(
-                        "HTTP 代理设置为 Custom 但 URL 为空,退回 reqwest 默认(读系统代理)"
-                    );
+                    log::warn!("HTTP 代理设置为 Custom 但 URL 为空,退回 reqwest 默认(读系统代理)");
                     return builder;
                 }
 
@@ -91,9 +89,7 @@ impl ProxyConfig {
                 let mut proxy = match proxy_result {
                     Ok(p) => p,
                     Err(err) => {
-                        log::warn!(
-                            "HTTP 代理 URL '{trimmed}' 无效({err}),退回 reqwest 默认"
-                        );
+                        log::warn!("HTTP 代理 URL '{trimmed}' 无效({err}),退回 reqwest 默认");
                         return builder;
                     }
                 };

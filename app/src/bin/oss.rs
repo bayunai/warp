@@ -30,6 +30,7 @@ fn main() -> Result<()> {
     // 可见 —— 在 Windows 上对日文 / 中文 / 韩文输入都属于实质性损坏。
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
+        use warp_core::features::FeatureFlag;
         state = state.with_additional_features(&[FeatureFlag::ImeMarkedText]);
     }
     ChannelState::set(state);

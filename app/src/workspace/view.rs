@@ -5214,6 +5214,12 @@ impl Workspace {
                     ctx,
                 );
             }
+            #[cfg(feature = "local_tty")]
+            LeftPanelEvent::OpenRemoteFile { remote_path } => {
+                self.open_remote_file(remote_path.clone(), ctx);
+            }
+            #[cfg(not(feature = "local_tty"))]
+            LeftPanelEvent::OpenRemoteFile { .. } => {}
             LeftPanelEvent::OpenSkillFile { source } => {
                 #[cfg(feature = "local_fs")]
                 {
@@ -5277,6 +5283,51 @@ impl Workspace {
                 ctx,
             );
         });
+    }
+
+    /// 在远端文件树里点击一个文件后,以 buffer-sync 协议打开它。
+    ///
+    /// 远端文件与本地文件统一走 [`Self::open_code`] / `CodePane` / `CodeView`:
+    /// 这样它就和本地文件一样遵守 `open_file_layout`(新 tab / 分屏)以及多文件
+    /// 分组开关(多个远端文件并入同一个代码编辑器 pane 的内部 tab)。
+    ///
+    /// buffer 内容仍由 `GlobalBufferModel` 的 `BufferLocation::Remote` 路径打开
+    /// (向 daemon 发 `OpenBuffer`,后续 `BufferEdit` / `BufferUpdatedPush` 同步),
+    /// 这一段由 `LocalCodeEditorView::new_with_remote_buffer` 在 `CodeView` 内部
+    /// 完成。
+    #[cfg(feature = "local_tty")]
+    pub fn open_remote_file(
+        &mut self,
+        remote_path: crate::code::buffer_location::RemotePath,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.open_remote_file_with_target(remote_path, None, ctx);
+    }
+
+    /// 与 [`Self::open_remote_file`] 相同,但可携带 `line_col`(行:列跳转)。
+    /// 终端里 Ctrl/Cmd+点击远端文件路径时使用,把行号一路透传给 `open_code`。
+    #[cfg(feature = "local_tty")]
+    pub fn open_remote_file_with_target(
+        &mut self,
+        remote_path: crate::code::buffer_location::RemotePath,
+        line_col: Option<LineAndColumnArg>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        log::info!(
+            "Opening remote file: host={host} path={path}",
+            host = remote_path.host_id,
+            path = remote_path.path.as_str()
+        );
+
+        let layout = *EditorSettings::as_ref(ctx).open_file_layout.value();
+        self.open_code(
+            CodeSource::RemoteFileTree { remote_path },
+            layout,
+            line_col,
+            false, /* preview */
+            &[],   /* additional_paths */
+            ctx,
+        );
     }
 
     /// 在当前 tab 开新 terminal pane,自动跑 `ssh ...` 命令,并 spawn 一个
@@ -5468,8 +5519,14 @@ impl Workspace {
 
     #[cfg(not(target_family = "wasm"))]
     fn view_logs(&mut self, ctx: &mut ViewContext<Self>) {
+        // 在调用线程同步采集诊断信息(版本、平台、channel、执行模式、MCP/更新日志路径等),
+        // 真正的 zip 打包在阻塞线程上完成,避免读取 `AppContext` 全局状态时跨线程。
+        let extras = Self::collect_log_bundle_extras(ctx);
         ctx.spawn(
-            async { tokio::task::spawn_blocking(warp_logging::create_log_bundle_zip).await },
+            async move {
+                tokio::task::spawn_blocking(move || warp_logging::create_log_bundle_zip(extras))
+                    .await
+            },
             |me, result, ctx| match result {
                 Ok(Ok(path)) => {
                     ctx.open_file_path_in_explorer(&path);
@@ -5492,6 +5549,185 @@ impl Workspace {
                 }
             },
         );
+    }
+
+    /// 与 `view_logs` 不同:让用户通过系统原生 save-file 对话框选择保存位置,
+    /// 然后把日志包直接写到该位置。打包内容与 `view_logs` 完全一致。
+    ///
+    /// 失败 / 成功都通过 `toast_stack` 反馈,以便在设置页这种没有自己 toast
+    /// 区域的视图也能看到结果。
+    #[cfg(not(target_family = "wasm"))]
+    fn export_logs_to_path(&mut self, ctx: &mut ViewContext<Self>) {
+        use warpui::platform::SaveFilePickerConfiguration;
+
+        // 在调用线程同步采集 extras(读取 AppContext 全局状态),保存对话框
+        // 与实际写盘都在后续异步流程中。
+        let extras = Self::collect_log_bundle_extras(ctx);
+        let default_filename = warp_logging::default_log_bundle_filename();
+        let default_directory = dirs::download_dir().or_else(dirs::home_dir);
+
+        let mut config = SaveFilePickerConfiguration::new().with_default_filename(default_filename);
+        if let Some(directory) = default_directory {
+            config = config.with_default_directory(directory);
+        }
+
+        ctx.open_save_file_picker(
+            move |path_opt, _me, ctx| {
+                let Some(path_string) = path_opt else {
+                    // 用户取消,不打扰用户。
+                    return;
+                };
+                let output_path = std::path::PathBuf::from(path_string);
+                ctx.spawn(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            warp_logging::write_log_bundle_zip_to(&output_path, extras)
+                                .map(|()| output_path)
+                        })
+                        .await
+                    },
+                    |me, result, ctx| match result {
+                        Ok(Ok(path)) => {
+                            // i18n_embed_fl::fl! 要求位置参数活到 macro 展开结束,
+                            // 故先 `let` 绑定到本作用域的 String,再借用其 &str。
+                            let path_str = path.display().to_string();
+                            let message = crate::t!(
+                                "settings-about-export-logs-success",
+                                path = path_str.as_str()
+                            );
+                            me.toast_stack.update(ctx, |toast_stack, ctx| {
+                                let toast = DismissibleToast::success(message);
+                                toast_stack.add_persistent_toast(toast, ctx);
+                            });
+                        }
+                        Ok(Err(err)) => {
+                            log::error!("Failed to export log bundle: {err}");
+                            let error_str = format!("{err}");
+                            let message = crate::t!(
+                                "settings-about-export-logs-failure",
+                                error = error_str.as_str()
+                            );
+                            me.toast_stack.update(ctx, |toast_stack, ctx| {
+                                let toast = DismissibleToast::error(message);
+                                toast_stack.add_persistent_toast(toast, ctx);
+                            });
+                        }
+                        Err(err) => {
+                            log::error!("Failed to export log bundle: {err}");
+                            let error_str = format!("{err}");
+                            let message = crate::t!(
+                                "settings-about-export-logs-failure",
+                                error = error_str.as_str()
+                            );
+                            me.toast_stack.update(ctx, |toast_stack, ctx| {
+                                let toast = DismissibleToast::error(message);
+                                toast_stack.add_persistent_toast(toast, ctx);
+                            });
+                        }
+                    },
+                );
+            },
+            config,
+        );
+    }
+
+    /// 收集本次"导出日志"要附加进 zip 的诊断材料:
+    ///
+    /// - `manifest.txt`:版本 / channel / 平台 / arch / 执行模式 / 生成时间戳;
+    /// - 其它子系统日志(MCP server stderr、Windows 自动更新器、minidump 服务进程),
+    ///   仅当文件实际存在时才会进入 zip。
+    ///
+    /// 故意**不**打包的内容(权衡):
+    /// - `.dmp` minidump 二进制(可能极大,需要单独按需上传);
+    /// - `openwarp.prompt_chips.log`(含命令 stdout/stderr,仅在 debug channel 生成,默认隐私风险);
+    /// - profiling 产物(`dhat-heap.json` / `profile.pb`,仅特殊 cargo feature 启用)。
+    #[cfg(not(target_family = "wasm"))]
+    fn collect_log_bundle_extras(ctx: &AppContext) -> warp_logging::LogBundleExtras {
+        use std::path::{Path, PathBuf};
+        use warp_core::channel::ChannelState;
+        use warp_core::execution_mode::AppExecutionMode;
+        use warp_logging::{ExtraFile, InlineFile, LogBundleExtras};
+
+        let log_dir = warp_logging::log_directory().ok();
+
+        // 1) manifest.txt:可读的诊断摘要,排查问题时第一眼看的内容。
+        // 日志目录用 `home_relative_path` 脱敏(在 Unix 下把 `$HOME` 替换为 `~`),
+        // 避免分享 zip 给排查人员时泄露用户名 / 真实家目录路径。
+        let manifest = {
+            let version = ChannelState::app_version().unwrap_or("Dev");
+            let channel = ChannelState::channel();
+            let execution_mode = AppExecutionMode::as_ref(ctx);
+            let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %z");
+            let log_dir_str = log_dir
+                .as_ref()
+                .map(|p| warp_core::paths::home_relative_path(p))
+                .unwrap_or_else(|| "<unknown>".to_string());
+
+            format!(
+                "OpenWarp 日志导出\n\
+                 生成时间: {now}\n\
+                 版本: {version}\n\
+                 channel: {channel}\n\
+                 执行模式: {execution_mode:?}\n\
+                 OS: {os}\n\
+                 ARCH: {arch}\n\
+                 日志目录: {log_dir_str}\n",
+                os = std::env::consts::OS,
+                arch = std::env::consts::ARCH,
+            )
+        };
+
+        let mut extras = LogBundleExtras {
+            inline_files: vec![InlineFile {
+                entry_name: "manifest.txt".to_string(),
+                contents: manifest,
+            }],
+            ..Default::default()
+        };
+
+        // 2) 同目录下其它产物:同 channel 的 minidump 服务进程日志、Windows 更新器日志。
+        if let Some(dir) = log_dir.as_ref() {
+            let candidates: &[&str] = &[
+                "warp-minidump.log", // Linux/Windows minidump 服务进程
+                "warp_update.log",   // Windows 自动更新器(Inno Setup)
+            ];
+            for name in candidates {
+                let path = dir.join(name);
+                if path.is_file() {
+                    extras.extra_files.push(ExtraFile {
+                        source_path: path,
+                        entry_name: (*name).to_string(),
+                    });
+                }
+            }
+        }
+
+        // 3) MCP server 当前会话 stderr(`purge_on_startup: true`,只在运行期间存在)。
+        // 路径通过 `simple_logger::manager::resolve_log_path` 间接得到:取一个虚拟文件名
+        // 再 `parent()` 得到 namespace 目录,避免暴露 `log_directory_path` 私有 API。
+        let mcp_probe = simple_logger::manager::resolve_log_path("mcp", Path::new("_probe"));
+        if let Some(mcp_dir) = mcp_probe.parent() {
+            if let Ok(read_dir) = std::fs::read_dir(mcp_dir) {
+                for entry in read_dir.flatten() {
+                    let path: PathBuf = entry.path();
+                    let is_log = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .map(|ext| ext.eq_ignore_ascii_case("log"))
+                        .unwrap_or(false);
+                    if path.is_file() && is_log {
+                        if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                            extras.extra_files.push(ExtraFile {
+                                source_path: path.clone(),
+                                entry_name: format!("mcp/{file_name}"),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        extras
     }
 
     fn copy_version(&mut self, version: &str, ctx: &mut ViewContext<Self>) {
@@ -6676,15 +6912,21 @@ impl Workspace {
                         .is_pane_hidden_for_close(*pane_id)
                 });
             // If the tabbed editor view is enabled and there is an existing CodeView, we should group the newly opened file into this view.
-            if let (Some(path), Some((pane_id, code_view))) = (source.path(), code_view) {
+            if let (Some(location), Some((pane_id, code_view))) = (source.location(), code_view) {
                 code_view.update(ctx, |code_view, ctx| {
                     if preview {
-                        code_view.open_in_preview_or_promote_and_jump(path, line_col, ctx);
+                        code_view.open_in_preview_or_promote_and_jump(location, line_col, ctx);
                     } else {
-                        code_view.open_or_focus_existing(Some(path), line_col, ctx);
+                        code_view.open_or_focus_existing(Some(location), line_col, ctx);
                     }
                     for extra in additional_paths {
-                        code_view.open_or_focus_existing(Some(extra.clone()), None, ctx);
+                        code_view.open_or_focus_existing(
+                            Some(crate::code::buffer_location::BufferLocation::Local(
+                                extra.clone(),
+                            )),
+                            None,
+                            ctx,
+                        );
                     }
                 });
                 // Only focus the pane for non-preview opens
@@ -6698,10 +6940,10 @@ impl Workspace {
         } else {
             // When grouping is off, avoid opening duplicate code panes for the same file in the
             // current pane group. Instead, focus the existing pane and jump.
-            if let Some(path) = source.path() {
+            if let Some(location) = source.location() {
                 let pane_group_id = self.active_tab_pane_group().id();
                 let existing_locator = CodeManager::handle(ctx).read(ctx, |manager, _| {
-                    manager.get_locator_for_path_in_tab(pane_group_id, path.as_path())
+                    manager.get_locator_for_location_in_tab(pane_group_id, &location)
                 });
 
                 if let Some(locator) = existing_locator {
@@ -6714,13 +6956,13 @@ impl Workspace {
                             code_view.update(ctx, |code_view, ctx| {
                                 if preview {
                                     code_view.open_in_preview_or_promote_and_jump(
-                                        path.clone(),
+                                        location.clone(),
                                         line_col,
                                         ctx,
                                     );
                                 } else {
                                     code_view.open_or_focus_existing(
-                                        Some(path.clone()),
+                                        Some(location.clone()),
                                         line_col,
                                         ctx,
                                     );
@@ -6728,7 +6970,9 @@ impl Workspace {
 
                                 for extra in additional_paths {
                                     code_view.open_or_focus_existing(
-                                        Some(extra.clone()),
+                                        Some(crate::code::buffer_location::BufferLocation::Local(
+                                            extra.clone(),
+                                        )),
                                         None,
                                         ctx,
                                     );
@@ -6786,7 +7030,13 @@ impl Workspace {
             if let Some(code_view) = code_view_handle {
                 code_view.update(ctx, |code_view, ctx| {
                     for path in additional_paths {
-                        code_view.open_or_focus_existing(Some(path.clone()), None, ctx);
+                        code_view.open_or_focus_existing(
+                            Some(crate::code::buffer_location::BufferLocation::Local(
+                                path.clone(),
+                            )),
+                            None,
+                            ctx,
+                        );
                     }
                 });
             }
@@ -12429,23 +12679,25 @@ impl Workspace {
                                             return;
                                         }
 
-                                        let moved_file_path =
+                                        let moved_file_location =
                                             pane_group.update(ctx, |pane_group, ctx| {
                                                 pane_group.code_pane_by_id(*pane_id).and_then(
                                                     |pane| {
                                                         pane.file_view(ctx).update(
                                                             ctx,
                                                             |file_view, ctx| {
-                                                                let moved_file_path = file_view
+                                                                let moved_file_location = file_view
                                                                     .tab_at(*editor_tab_index)
-                                                                    .and_then(|t| t.path());
+                                                                    .and_then(|t| {
+                                                                        t.location().cloned()
+                                                                    });
 
                                                                 file_view.remove_tab_for_move(
                                                                     *editor_tab_index,
                                                                     ctx,
                                                                 );
 
-                                                                moved_file_path
+                                                                moved_file_location
                                                             },
                                                         )
                                                     },
@@ -12453,9 +12705,13 @@ impl Workspace {
                                             });
 
                                         // After removing the file from the origin's editor, we want to open it in the target's editor.
-                                        if let Some(path) = moved_file_path {
+                                        if let Some(location) = moved_file_location {
                                             target_code_view.update(ctx, |view, ctx| {
-                                                view.open_or_focus_existing(Some(path), None, ctx);
+                                                view.open_or_focus_existing(
+                                                    Some(location),
+                                                    None,
+                                                    ctx,
+                                                );
                                             });
                                         }
                                         return;
@@ -12828,6 +13084,14 @@ impl Workspace {
                     },
                     ctx,
                 );
+            }
+            // OpenWarp:终端里 Ctrl/Cmd+点击远端 SSH 文件路径,走 buffer-sync 协议打开。
+            #[cfg(all(feature = "local_tty", feature = "local_fs"))]
+            pane_group::Event::OpenRemoteFileFromTerminal {
+                remote_path,
+                line_col,
+            } => {
+                self.open_remote_file_with_target(remote_path.clone(), *line_col, ctx);
             }
             #[cfg(feature = "local_fs")]
             pane_group::Event::FileRenamed { old_path, new_path } => {
@@ -18405,6 +18669,8 @@ impl TypedActionView for Workspace {
             SendFeedback => self.send_feedback(ctx),
             #[cfg(not(target_family = "wasm"))]
             ViewLogs => self.view_logs(ctx),
+            #[cfg(not(target_family = "wasm"))]
+            ExportLogsToPath => self.export_logs_to_path(ctx),
             ChangeCursor(cursor) => self.change_cursor(*cursor, ctx),
             ToggleErrorUnderlining => self.toggle_error_underlining(ctx),
             ToggleSyntaxHighlighting => self.toggle_syntax_highlighting(ctx),

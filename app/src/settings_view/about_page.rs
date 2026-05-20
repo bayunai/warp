@@ -33,6 +33,12 @@ pub enum AboutPageAction {
     CheckForUpdate,
     /// 用户点击"前往 GitHub 下载"链接:用系统默认浏览器打开 release 页面。
     OpenReleasePage(String),
+    /// 用户点击"导出日志"链接:弹出原生 save-file 对话框,用户选择保存
+    /// 位置后将主日志、MCP 日志、自动更新器日志以及诊断摘要打包为 zip
+    /// 直接写入用户指定的路径,完成后通过 workspace toast 反馈成功 / 失败。
+    /// 由 `WorkspaceAction::ExportLogsToPath` 负责实现。
+    #[cfg(not(target_family = "wasm"))]
+    ExportLogs,
 }
 
 pub struct AboutPageView {
@@ -79,6 +85,12 @@ impl TypedActionView for AboutPageView {
             AboutPageAction::OpenReleasePage(url) => {
                 ctx.open_url(url);
             }
+            #[cfg(not(target_family = "wasm"))]
+            AboutPageAction::ExportLogs => {
+                // 触发 workspace 层弹出 save-file 对话框、由用户选择保存路径
+                // 后完成打包与 toast 反馈。
+                ctx.dispatch_typed_action(&WorkspaceAction::ExportLogsToPath);
+            }
         }
     }
 }
@@ -98,6 +110,9 @@ struct AboutPageWidget {
     copy_version_button_mouse_state: MouseStateHandle,
     automatic_updates_switch_state: SwitchStateHandle,
     update_action_link_mouse_state: MouseStateHandle,
+    /// "导出日志"链接的悬停 / 按下状态。
+    #[cfg(not(target_family = "wasm"))]
+    export_logs_link_mouse_state: MouseStateHandle,
 }
 
 impl SettingsWidget for AboutPageWidget {
@@ -187,6 +202,40 @@ impl SettingsWidget for AboutPageWidget {
                 .with_margin_top(16.)
                 .finish(),
         );
+
+        // "导出日志"链接:平台原生导出 zip 给排查人员分享。WASM 平台没有
+        // 文件系统日志,跳过。
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let export_link = ui_builder
+                .link(
+                    crate::t!("settings-about-export-logs"),
+                    None,
+                    Some(Box::new(|ctx| {
+                        ctx.dispatch_typed_action(AboutPageAction::ExportLogs);
+                    })),
+                    self.export_logs_link_mouse_state.clone(),
+                )
+                .soft_wrap(false)
+                .build()
+                .finish();
+
+            // 用一个垂直 Flex 列同时呈现链接和说明文字(说明为什么导出、包含什么)。
+            let export_section = Flex::column()
+                .with_cross_axis_alignment(CrossAxisAlignment::Center)
+                .with_child(export_link)
+                .with_child(
+                    ui_builder
+                        .span(crate::t!("settings-about-export-logs-description"))
+                        .with_soft_wrap()
+                        .build()
+                        .with_margin_top(4.)
+                        .finish(),
+                )
+                .finish();
+
+            content.add_child(Container::new(export_section).with_margin_top(16.).finish());
+        }
 
         if AppExecutionMode::as_ref(app).can_autoupdate() {
             content.add_child(

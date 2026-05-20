@@ -165,6 +165,8 @@ workspace-toast-disabled-synchronized-inputs = すべての同期入力を無効
 workspace-toast-conversation-deleted = 会話を削除しました
 workspace-search-repos-placeholder = リポジトリを検索
 workspace-search-tabs-placeholder = タブを検索...
+terminal-onekey-search-placeholder = 保存済み SSH 認証情報を検索…
+terminal-onekey-search-no-results = 一致する SSH 認証情報がありません
 workspace-rearrange-toolbar-items = ツールバー項目を並べ替え
 workspace-new-session-agent = エージェント
 workspace-new-session-terminal = ターミナル
@@ -556,6 +558,10 @@ settings-debug-hide-inband-blocks = インバンドコマンドブロックを�
 settings-about-copyright = Copyright 2026 Warp
 settings-about-automatic-updates-label = 自動更新
 settings-about-automatic-updates-description = 有効にすると、OpenWarp はバックグラウンドで新バージョンを確認しダウンロードします。無効でも手動で更新を確認できます。
+settings-about-export-logs = ログをエクスポート…
+settings-about-export-logs-description = 最近のアプリログ（および存在する場合は MCP / 自動更新ログ）と診断サマリーを zip にまとめ、保存場所を選択できます。トラブルシューティングのために共有してください。
+settings-about-export-logs-success = ログを { $path } にエクスポートしました
+settings-about-export-logs-failure = ログのエクスポートに失敗しました：{ $error }
 
 # OpenWarp: main_page.rs 関連の文字列は Account 設定ページとともに削除された。
 

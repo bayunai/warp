@@ -158,6 +158,8 @@ workspace-toast-disabled-synchronized-inputs = 已停用所有同步输入。
 workspace-toast-conversation-deleted = 对话已删除
 workspace-search-repos-placeholder = 搜索仓库
 workspace-search-tabs-placeholder = 搜索标签页...
+terminal-onekey-search-placeholder = 搜索已保存的 SSH 凭据…
+terminal-onekey-search-no-results = 未匹配到任何 SSH 凭据
 workspace-rearrange-toolbar-items = 重新排列工具栏项目
 workspace-new-session-agent = 智能体
 workspace-new-session-terminal = 终端
@@ -600,6 +602,10 @@ settings-about-update-up-to-date = 已是最新版本。
 settings-about-update-available = 发现新版本 { $version }。
 settings-about-update-check-now = 检查更新
 settings-about-update-open-release = 前往 GitHub 下载
+settings-about-export-logs = 导出日志…
+settings-about-export-logs-description = 将最近的应用日志(以及存在时的 MCP / 自动更新日志)和一份诊断摘要打包为 zip，由您选择保存位置，便于分享给排查人员。
+settings-about-export-logs-success = 日志已导出到 { $path }
+settings-about-export-logs-failure = 导出日志失败：{ $error }
 
 # OpenWarp：main_page.rs 相关文案随 Account 设置页一同删除。
 

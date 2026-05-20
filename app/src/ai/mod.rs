@@ -18,6 +18,7 @@ pub mod aws_credentials;
 pub(crate) mod block_context;
 pub(crate) mod blocklist;
 pub(crate) mod byop_compaction;
+pub(crate) mod byop_readiness;
 pub mod control_code_parser;
 pub(crate) mod conversation_navigation;
 pub(crate) mod conversation_status_ui;

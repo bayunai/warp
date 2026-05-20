@@ -30,6 +30,7 @@ use crate::ai::mcp::{
 };
 use crate::ai::request_usage_model::{AIRequestUsageModel, AIRequestUsageModelEvent};
 use crate::search::slash_command_menu::static_commands::commands;
+use crate::settings::{InputSettings, InputSettingsChangedEvent};
 use crate::terminal::input::buffer_model::{InputBufferModel, InputBufferUpdateEvent};
 use crate::terminal::input::message_bar::attached_context::{
     AttachedBlocksMessageProducer, AttachedContextArgs, AttachedTextSelectionMessageProducer,
@@ -47,7 +48,6 @@ use crate::terminal::input::suggestions_mode_model::{
 use crate::terminal::input::{InputAction, SET_INPUT_MODE_AGENT_ACTION_NAME};
 use crate::terminal::model::TerminalModel;
 use crate::terminal::view::TerminalAction;
-use crate::settings::{InputSettings, InputSettingsChangedEvent};
 use crate::ui_components::blended_colors;
 use crate::util::bindings::keybinding_name_to_keystroke;
 use crate::workspace::tab_settings::{TabSettings, TabSettingsChangedEvent};
@@ -198,7 +198,10 @@ impl AgentMessageBar {
 
         // 订阅「显示 Agent 快捷键提示」设置，开关改变后重渲染 message bar 以隐藏/恢复 4 项 hint。
         ctx.subscribe_to_model(&InputSettings::handle(ctx), |_, _, event, ctx| {
-            if matches!(event, InputSettingsChangedEvent::ShowAgentZeroStateHints { .. }) {
+            if matches!(
+                event,
+                InputSettingsChangedEvent::ShowAgentZeroStateHints { .. }
+            ) {
                 ctx.notify();
             }
         });

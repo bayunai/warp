@@ -66,8 +66,6 @@ use crate::{
     TelemetryEvent,
 };
 
-const SKILL_MANAGER_MIN_SIDEBAR_WIDTH: f32 = 360.0;
-
 #[derive(Default)]
 struct MouseStateHandles {
     project_explorer_button: MouseStateHandle,
@@ -100,6 +98,11 @@ pub enum LeftPanelEvent {
     },
     OpenSkillFile {
         source: CodeSource,
+    },
+    /// 用户在远端文件树里点击一个文件 → 主窗口应以远端 buffer 方式打开它。
+    #[cfg_attr(not(feature = "local_tty"), allow(dead_code))]
+    OpenRemoteFile {
+        remote_path: crate::code::buffer_location::RemotePath,
     },
     NewConversationInNewTab,
     ShowDeleteConfirmationDialog {
@@ -872,6 +875,14 @@ impl LeftPanelView {
                     pane_group::Event::OpenDirectoryInNewTab { path: path.clone() },
                 ));
             }
+            FileTreeEvent::OpenRemoteFile { remote_path } => {
+                #[cfg(feature = "local_tty")]
+                ctx.emit(LeftPanelEvent::OpenRemoteFile {
+                    remote_path: remote_path.clone(),
+                });
+                #[cfg(not(feature = "local_tty"))]
+                let _ = remote_path;
+            }
         }
     }
 }
@@ -1316,18 +1327,13 @@ impl View for LeftPanelView {
             super::PanelPosition::Left => DragBarSide::Right,
             super::PanelPosition::Right => DragBarSide::Left,
         };
-        let min_sidebar_width = if self.active_view.get() == ToolPanelView::SkillManager {
-            SKILL_MANAGER_MIN_SIDEBAR_WIDTH
-        } else {
-            MIN_SIDEBAR_WIDTH
-        };
         Resizable::new(self.resizable_state_handle.clone(), panel_content)
             .with_dragbar_side(drag_side)
             .on_resize(move |ctx, _| {
                 ctx.notify();
             })
             .with_bounds_callback(Box::new(move |window_size| {
-                let min_width = min_sidebar_width;
+                let min_width = MIN_SIDEBAR_WIDTH;
                 let max_width = window_size.x() * MAX_SIDEBAR_WIDTH_RATIO;
                 (min_width, max_width.max(min_width))
             }))

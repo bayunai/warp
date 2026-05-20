@@ -2167,6 +2167,12 @@ impl<A: Action + Clone> Menu<A> {
         self.menu.with_height(height);
     }
 
+    /// 运行时切换菜单变体（例如把同一个 `Menu` 实例临时切到 `Scrollable`
+    /// 给 OneKey 密码候选弹窗使用,关闭后再切回 `Fixed`)。
+    pub fn set_menu_variant(&mut self, menu_variant: MenuVariant) {
+        self.menu.with_menu_variant(menu_variant);
+    }
+
     pub fn set_items(
         &mut self,
         items: impl IntoIterator<Item = MenuItem<A>>,

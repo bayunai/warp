@@ -16,6 +16,7 @@ use crate::{
         AIAgentInput, AIIdentifiers, CancellationReason,
     },
     ai::blocklist::BlocklistAIHistoryModel,
+    ai::byop_readiness::BlockedByopReadinessError,
     network::NetworkStatus,
     report_error, send_telemetry_from_ctx,
 };
@@ -168,6 +169,10 @@ fn pending_title_generation_from_byop(
 pub struct ResponseStreamId(String);
 
 impl ResponseStreamId {
+    pub fn new_local() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+
     pub fn for_shared_session(init_event: &response_event::StreamInit) -> Self {
         // Make the stream ID unique per viewing by appending a local UUID
         // This prevents collisions when replaying the same conversation multiple times
@@ -177,7 +182,7 @@ impl ResponseStreamId {
 
     #[cfg(test)]
     pub fn new_for_test() -> Self {
-        Self(Uuid::new_v4().to_string())
+        Self::new_local()
     }
 }
 
@@ -424,6 +429,10 @@ impl ResponseStream {
             }
             Err(e) => {
                 log::error!("Failed to send request to multi-agent API: {e:?}");
+                let api_error = convert_to_api_error(e);
+                ctx.emit(ResponseStreamEvent::ReceivedEvent(Consumable::new(Err(
+                    Arc::new(api_error),
+                ))));
                 self.on_response_stream_complete(request_id, ctx);
             }
         }
@@ -548,6 +557,22 @@ impl ResponseStream {
         }
         ctx.emit(ResponseStreamEvent::AfterStreamFinished { cancellation: None });
         self.cancellation_tx = None;
+    }
+}
+
+fn convert_to_api_error(error: ConvertToAPITypeError) -> AIApiError {
+    match &error {
+        ConvertToAPITypeError::Other(inner)
+            if inner.downcast_ref::<BlockedByopReadinessError>().is_some() =>
+        {
+            let blocked = inner
+                .downcast_ref::<BlockedByopReadinessError>()
+                .expect("checked blocked readiness error");
+            AIApiError::Other(BlockedByopReadinessError::new(blocked.category()).into())
+        }
+        ConvertToAPITypeError::Ignore
+        | ConvertToAPITypeError::Unimplemented(_)
+        | ConvertToAPITypeError::Other(_) => AIApiError::Other(anyhow!(error.to_string())),
     }
 }
 

@@ -111,9 +111,7 @@ pub fn resolve_proxy(uri: &http::Uri) -> anyhow::Result<Option<ProxyInfo>> {
             let trimmed = global_cfg.url.trim();
             if trimmed.is_empty() {
                 // Custom 但 URL 为空: 与 http_client 一致,静默退回环境变量解析。
-                log::warn!(
-                    "WebSocket: HTTP 代理设置为 Custom 但 URL 为空,退回环境变量"
-                );
+                log::warn!("WebSocket: HTTP 代理设置为 Custom 但 URL 为空,退回环境变量");
             } else {
                 let info = parse_proxy_url_with_optional_auth(
                     trimmed,

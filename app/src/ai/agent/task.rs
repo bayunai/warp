@@ -707,6 +707,24 @@ impl Task {
         Ok(())
     }
 
+    pub(super) fn append_source_messages(
+        &mut self,
+        messages: Vec<api::Message>,
+    ) -> Result<(), UpdateTaskError> {
+        self.try_get_source_mut()?.messages.extend(messages);
+        Ok(())
+    }
+
+    pub(super) fn remove_source_messages_by_ids(
+        &mut self,
+        message_ids: &std::collections::HashSet<String>,
+    ) -> Result<(), UpdateTaskError> {
+        self.try_get_source_mut()?
+            .messages
+            .retain(|message| !message_ids.contains(&message.id));
+        Ok(())
+    }
+
     pub(super) fn upsert_message(
         &mut self,
         message: api::Message,
