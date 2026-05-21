@@ -9,6 +9,7 @@ use remote_server::proto::{
     resolve_path_response, write_file_chunk_response, FileSystemEntryKind,
 };
 use walkdir::WalkDir;
+use warp_completer::completer::CommandExitStatus;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::HostId;
 use warp_util::standardized_path::StandardizedPath;
@@ -31,6 +32,7 @@ use crate::editor::{
     PropagateHorizontalNavigationKeys, SingleLineEditorOptions, TextOptions,
 };
 use crate::remote_server::manager::RemoteServerManager;
+use crate::terminal::model::session::{ExecuteCommandOptions, Session};
 use crate::ui_components::icons::Icon;
 
 const ITEM_FONT_SIZE: f32 = 14.0;
@@ -81,6 +83,9 @@ struct ServerFileBrowserEntry {
 
 pub struct ServerFileBrowserView {
     host_id: Option<HostId>,
+    /// Fallback session for executing remote commands when the
+    /// remote server daemon is not yet installed / connected.
+    session: Option<Arc<Session>>,
     current_path: String,
     path_editor: ViewHandle<EditorView>,
     entries: Vec<ServerFileBrowserEntry>,
@@ -126,6 +131,7 @@ impl ServerFileBrowserView {
 
         Self {
             host_id: None,
+            session: None,
             current_path: String::new(),
             path_editor,
             entries: Vec::new(),
@@ -148,10 +154,19 @@ impl ServerFileBrowserView {
         &mut self,
         host_id: HostId,
         path: String,
+        session: Option<Arc<Session>>,
         ctx: &mut ViewContext<Self>,
     ) {
-        let should_load = self.host_id.as_ref() != Some(&host_id) || self.current_path != path;
+        let session_changed = match (&self.session, &session) {
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            (None, None) => false,
+            _ => true,
+        };
+        let should_load = self.host_id.as_ref() != Some(&host_id)
+            || self.current_path != path
+            || session_changed;
         self.host_id = Some(host_id);
+        self.session = session;
         if should_load {
             self.current_path = path;
             self.sync_editor_to_current_path(ctx);
@@ -189,86 +204,132 @@ impl ServerFileBrowserView {
     }
 
     fn load_current_directory(&mut self, ctx: &mut ViewContext<Self>) {
-        let Some(client) = self.client(ctx) else {
-            self.set_error(crate::t!("server-file-browser-no-session"), ctx);
-            return;
-        };
         let path = if self.current_path.is_empty() {
             "~".to_string()
         } else {
             self.current_path.clone()
         };
-        self.loading = true;
-        self.status = None;
-        ctx.notify();
 
-        ctx.spawn(
-            async move { list_directory(client, path).await },
-            |me, result, ctx| {
-                me.loading = false;
-                match result {
-                    Ok((canonical_path, entries)) => {
-                        me.current_path = canonical_path;
-                        me.sync_editor_to_current_path(ctx);
-                        me.expanded_directories.clear();
-                        me.loaded_directories.clear();
-                        me.entries = entries;
-                        me.status = None;
+        let path_for_spawn = path.clone();
+
+        if let Some(client) = self.client(ctx) {
+            self.loading = true;
+            self.status = None;
+            ctx.notify();
+            ctx.spawn(
+                async move { list_directory(client, path_for_spawn).await },
+                |me, result, ctx| {
+                    me.loading = false;
+                    match result {
+                        Ok((canonical_path, entries)) => {
+                            me.current_path = canonical_path;
+                            me.sync_editor_to_current_path(ctx);
+                            me.expanded_directories.clear();
+                            me.loaded_directories.clear();
+                            me.entries = entries;
+                            me.status = None;
+                        }
+                        Err(error) => {
+                            me.status = Some(error);
+                        }
                     }
-                    Err(error) => {
-                        me.status = Some(error);
+                    ctx.notify();
+                },
+            );
+        } else if let Some(session) = self.session.clone() {
+            self.loading = true;
+            self.status = None;
+            ctx.notify();
+            ctx.spawn(
+                async move { list_directory_via_session(session, path_for_spawn).await },
+                |me, result, ctx| {
+                    me.loading = false;
+                    match result {
+                        Ok((canonical_path, entries)) => {
+                            me.current_path = canonical_path;
+                            me.sync_editor_to_current_path(ctx);
+                            me.expanded_directories.clear();
+                            me.loaded_directories.clear();
+                            me.entries = entries;
+                            me.status = None;
+                        }
+                        Err(error) => {
+                            me.status = Some(error);
+                        }
                     }
-                }
-                ctx.notify();
-            },
-        );
+                    ctx.notify();
+                },
+            );
+        } else {
+            self.set_error(crate::t!("server-file-browser-no-session"), ctx);
+        }
     }
 
     fn resolve_and_open(&mut self, path: String, ctx: &mut ViewContext<Self>) {
-        let Some(client) = self.client(ctx) else {
-            self.set_error(crate::t!("server-file-browser-no-session"), ctx);
-            return;
-        };
         let host_id = self.host_id.clone();
-        self.loading = true;
-        self.status = None;
-        ctx.notify();
+        let path_for_spawn = path.clone();
 
-        ctx.spawn(
-            async move { resolve_path(client, path).await },
-            move |me, result, ctx| {
-                me.loading = false;
-                match result {
-                    Ok(resolved) if resolved.kind == FileSystemEntryKind::Directory => {
-                        me.current_path = resolved.canonical_path;
-                        me.sync_editor_to_current_path(ctx);
-                        me.load_current_directory(ctx);
-                    }
-                    Ok(resolved) if resolved.kind == FileSystemEntryKind::File => {
-                        if let (Some(host_id), Ok(path)) = (
-                            host_id.clone(),
-                            StandardizedPath::try_new(&resolved.canonical_path),
-                        ) {
-                            ctx.emit(ServerFileBrowserEvent::OpenRemoteFile {
-                                remote_path: RemotePath::new(host_id, path),
-                            });
-                        }
-                        if let Some(parent) = remote_parent(&resolved.canonical_path) {
-                            me.current_path = parent;
-                            me.sync_editor_to_current_path(ctx);
-                            me.load_current_directory(ctx);
-                        }
-                    }
-                    Ok(_) => {
-                        me.status = Some(crate::t!("server-file-browser-unsupported-path"));
-                    }
-                    Err(error) => {
-                        me.status = Some(error);
-                    }
+        if let Some(client) = self.client(ctx) {
+            self.loading = true;
+            self.status = None;
+            ctx.notify();
+            ctx.spawn(
+                async move { resolve_path(client, path_for_spawn).await },
+                move |me, result, ctx| {
+                    me.finish_resolve_and_open(result, host_id, ctx);
+                },
+            );
+        } else if let Some(session) = self.session.clone() {
+            self.loading = true;
+            self.status = None;
+            ctx.notify();
+            ctx.spawn(
+                async move { resolve_path_via_session(session, path_for_spawn).await },
+                move |me, result, ctx| {
+                    me.finish_resolve_and_open(result, host_id, ctx);
+                },
+            );
+        } else {
+            self.set_error(crate::t!("server-file-browser-no-session"), ctx);
+        }
+    }
+
+    fn finish_resolve_and_open(
+        &mut self,
+        result: Result<ResolvedRemotePath, String>,
+        host_id: Option<HostId>,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        self.loading = false;
+        match result {
+            Ok(resolved) if resolved.kind == FileSystemEntryKind::Directory => {
+                self.current_path = resolved.canonical_path;
+                self.sync_editor_to_current_path(ctx);
+                self.load_current_directory(ctx);
+            }
+            Ok(resolved) if resolved.kind == FileSystemEntryKind::File => {
+                if let (Some(host_id), Ok(path)) = (
+                    host_id.clone(),
+                    StandardizedPath::try_new(&resolved.canonical_path),
+                ) {
+                    ctx.emit(ServerFileBrowserEvent::OpenRemoteFile {
+                        remote_path: RemotePath::new(host_id, path),
+                    });
                 }
-                ctx.notify();
-            },
-        );
+                if let Some(parent) = remote_parent(&resolved.canonical_path) {
+                    self.current_path = parent;
+                    self.sync_editor_to_current_path(ctx);
+                    self.load_current_directory(ctx);
+                }
+            }
+            Ok(_) => {
+                self.status = Some(crate::t!("server-file-browser-unsupported-path"));
+            }
+            Err(error) => {
+                self.status = Some(error);
+            }
+        }
+        ctx.notify();
     }
 
     fn toggle_directory(&mut self, path: String, ctx: &mut ViewContext<Self>) {
@@ -285,26 +346,44 @@ impl ServerFileBrowserView {
             return;
         }
 
-        let Some(client) = self.client(ctx) else {
-            self.set_error(crate::t!("server-file-browser-no-session"), ctx);
-            return;
-        };
-        self.loading = true;
-        ctx.notify();
-        ctx.spawn(
-            async move { list_directory(client, path).await },
-            |me, result, ctx| {
-                me.loading = false;
-                match result {
-                    Ok((path, entries)) => {
-                        me.loaded_directories.insert(path, entries);
-                        me.rebuild_entries();
+        let path_for_spawn = path.clone();
+        if let Some(client) = self.client(ctx) {
+            self.loading = true;
+            ctx.notify();
+            ctx.spawn(
+                async move { list_directory(client, path_for_spawn).await },
+                |me, result, ctx| {
+                    me.loading = false;
+                    match result {
+                        Ok((path, entries)) => {
+                            me.loaded_directories.insert(path, entries);
+                            me.rebuild_entries();
+                        }
+                        Err(error) => me.status = Some(error),
                     }
-                    Err(error) => me.status = Some(error),
-                }
-                ctx.notify();
-            },
-        );
+                    ctx.notify();
+                },
+            );
+        } else if let Some(session) = self.session.clone() {
+            self.loading = true;
+            ctx.notify();
+            ctx.spawn(
+                async move { list_directory_via_session(session, path_for_spawn).await },
+                |me, result, ctx| {
+                    me.loading = false;
+                    match result {
+                        Ok((path, entries)) => {
+                            me.loaded_directories.insert(path, entries);
+                            me.rebuild_entries();
+                        }
+                        Err(error) => me.status = Some(error),
+                    }
+                    ctx.notify();
+                },
+            );
+        } else {
+            self.set_error(crate::t!("server-file-browser-no-session"), ctx);
+        }
     }
 
     fn rebuild_entries(&mut self) {
@@ -961,6 +1040,129 @@ async fn list_directory(
         Some(list_directory_response::Result::Error(error)) => Err(error.message),
         None => Err(crate::t!("server-file-browser-empty-response")),
     }
+}
+
+/// Fallback directory listing via `Session::execute_command` when the
+/// remote server daemon is not installed.
+async fn list_directory_via_session(
+    session: Arc<Session>,
+    path: String,
+) -> Result<(String, Vec<ServerFileBrowserEntry>), String> {
+    let escaped = warp_util::path::ShellFamily::Posix.shell_escape(&path);
+    let script = format!(
+        "cd {escaped} && find . -maxdepth 1 -type d -print0 && printf '\\000' && find . -maxdepth 1 -not -type d -print0"
+    );
+    let output = session
+        .execute_command(&script, None, None, ExecuteCommandOptions::default())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    if output.status != CommandExitStatus::Success {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ls failed: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut parts = stdout.split('\0');
+    // Directories come first, separated from files by an empty entry
+    // (double null). Find the separator.
+    let mut dirs: Vec<&str> = Vec::new();
+    let mut files: Vec<&str> = Vec::new();
+    let mut found_separator = false;
+    for part in parts.by_ref() {
+        if part.is_empty() {
+            found_separator = true;
+            break;
+        }
+        if part != "." {
+            dirs.push(part);
+        }
+    }
+    if found_separator {
+        for part in parts {
+            if !part.is_empty() {
+                files.push(part);
+            }
+        }
+    }
+
+    let mut entries = Vec::with_capacity(dirs.len() + files.len());
+    // Canonical path: if the path is relative, use it as-is (the remote
+    // host may not support canonicalize).
+    let canonical_path = path.clone();
+    for name in dirs {
+        let name = Path::new(name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(name)
+            .to_string();
+        entries.push(ServerFileBrowserEntry {
+            path: join_remote_path(&canonical_path, &name),
+            name,
+            kind: FileSystemEntryKind::Directory,
+            size_bytes: None,
+            modified_epoch_millis: None,
+            depth: 0,
+        });
+    }
+    for name in files {
+        let name = Path::new(name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(name)
+            .to_string();
+        entries.push(ServerFileBrowserEntry {
+            path: join_remote_path(&canonical_path, &name),
+            name,
+            kind: FileSystemEntryKind::File,
+            size_bytes: None,
+            modified_epoch_millis: None,
+            depth: 0,
+        });
+    }
+    // Sort alphabetically, directories first.
+    entries.sort_by(|a, b| {
+        let a_is_dir = a.kind == FileSystemEntryKind::Directory;
+        let b_is_dir = b.kind == FileSystemEntryKind::Directory;
+        b_is_dir
+            .cmp(&a_is_dir)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Ok((canonical_path, entries))
+}
+
+/// Fallback path resolution via `Session::execute_command`.
+async fn resolve_path_via_session(
+    session: Arc<Session>,
+    path: String,
+) -> Result<ResolvedRemotePath, String> {
+    let escaped = warp_util::path::ShellFamily::Posix.shell_escape(&path);
+    // Use a single stat command to determine file type.
+    let script = format!(
+        "if [ -d {escaped} ]; then echo d; elif [ -f {escaped} ]; then echo f; elif [ -L {escaped} ]; then echo l; else echo o; fi"
+    );
+    let output = session
+        .execute_command(&script, None, None, ExecuteCommandOptions::default())
+        .await
+        .map_err(|e| format!("{e:#}"))?;
+
+    if output.status != CommandExitStatus::Success {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("stat failed: {}", stderr.trim()));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let kind = match stdout.as_str() {
+        "d" => FileSystemEntryKind::Directory,
+        "f" => FileSystemEntryKind::File,
+        "l" => FileSystemEntryKind::Symlink,
+        _ => FileSystemEntryKind::Other,
+    };
+
+    Ok(ResolvedRemotePath {
+        canonical_path: path,
+        kind,
+    })
 }
 
 #[derive(Clone)]

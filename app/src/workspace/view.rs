@@ -350,6 +350,7 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::{SystemTime, UNIX_EPOCH};
 use warp_core::context_flag::ContextFlag;
+use warp_core::HostId;
 use warp_core::semantic_selection::SemanticSelection;
 use warp_util::path::{user_friendly_path, LineAndColumnArg};
 use warpui::fonts::Weight;
@@ -12610,6 +12611,7 @@ impl Workspace {
                         left_panel.set_server_file_browser_root(
                             host_id.clone(),
                             indexed_path.to_string(),
+                            None,
                             ctx,
                         );
                     });
@@ -13469,6 +13471,7 @@ impl Workspace {
 
             let window_id = ctx.window_id();
             let path_if_local_clone = path_if_local.clone();
+            let server_file_browser_session = session.clone();
             ActiveSession::handle(ctx).update(ctx, |active_session, ctx| {
                 active_session.set_session_state(
                     window_id,
@@ -13496,9 +13499,33 @@ impl Workspace {
             // directory so it can start indexing and push repo metadata back.
             #[cfg(feature = "local_fs")]
             if has_remote_server {
-                if let (Some(sid), Some(cwd)) = (session_id, pwd) {
+                if let (Some(sid), Some(cwd)) = (session_id, pwd.clone()) {
                     RemoteServerManager::handle(ctx).update(ctx, |mgr, ctx| {
-                        mgr.navigate_to_directory(sid, cwd, ctx);
+                        mgr.navigate_to_directory(sid, cwd.clone(), ctx);
+                    });
+                }
+            }
+
+            // Bind the server file browser to the active remote session.
+            // When the remote server is connected, the client path is fast
+            // and feature-complete. Otherwise fall back to
+            // `Session::execute_command` for basic directory browsing.
+            #[cfg(feature = "local_fs")]
+            if let (Some(sid), Some(cwd), Some(s)) =
+                (session_id, pwd.clone(), server_file_browser_session)
+            {
+                if is_remote && FeatureFlag::SshRemoteServer.is_enabled() {
+                    let host_id = RemoteServerManager::as_ref(ctx)
+                        .host_id_for_session(sid)
+                        .cloned()
+                        .unwrap_or_else(|| HostId::new(format!("ssh-{sid:?}")));
+                    self.left_panel_view.update(ctx, |left_panel, ctx| {
+                        left_panel.set_server_file_browser_root(
+                            host_id,
+                            cwd,
+                            Some(s),
+                            ctx,
+                        );
                     });
                 }
             }

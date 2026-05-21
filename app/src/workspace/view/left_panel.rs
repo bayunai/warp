@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::{send_telemetry_from_ctx, ui::Icon, HostId};
@@ -32,6 +33,7 @@ use crate::server::telemetry::{FileTreeSource, WarpDriveSource};
 use crate::settings_view::keybindings::{KeybindingChangedEvent, KeybindingChangedNotifier};
 use crate::skill_manager::{SkillManagerPanel, SkillManagerPanelEvent};
 use crate::ssh_manager::SshManagerPanel;
+use crate::terminal::model::session::Session;
 #[cfg(feature = "local_fs")]
 use crate::util::file::external_editor::EditorSettings;
 #[cfg(feature = "local_fs")]
@@ -644,10 +646,11 @@ impl LeftPanelView {
         &mut self,
         host_id: HostId,
         path: String,
+        session: Option<Arc<Session>>,
         ctx: &mut ViewContext<Self>,
     ) {
         self.server_file_browser_view.update(ctx, |view, ctx| {
-            view.set_remote_root(host_id, path, ctx);
+            view.set_remote_root(host_id, path, session, ctx);
         });
     }
 

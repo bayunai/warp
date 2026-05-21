@@ -11,6 +11,7 @@ anyhow.workspace = true
 async-channel.workspace = true
 command.workspace = true
 dashmap.workspace = true
+dirs.workspace = true
 futures.workspace = true
 futures-lite.workspace = true
 log.workspace = true
@@ -36,3 +37,7 @@ tokio-util = { workspace = true, features = ["compat"] }
 
 [build-dependencies]
 prost-build.workspace = true
+
+[[bin]]
+name = "remote_server_daemon"
+path = "src/main.rs"
