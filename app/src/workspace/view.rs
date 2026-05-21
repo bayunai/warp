@@ -8,6 +8,7 @@ pub(crate) mod left_panel;
 pub(crate) mod onboarding;
 pub(crate) mod zap_launch_modal;
 pub(crate) mod right_panel;
+pub(crate) mod server_file_browser;
 mod startup_directory;
 #[cfg(test)]
 #[path = "view_test.rs"]
@@ -3516,6 +3517,7 @@ impl Workspace {
                 LeftPanelDisplayedTab::ZapDrive => ToolPanelView::ZapDrive,
                 LeftPanelDisplayedTab::ConversationListView => ToolPanelView::ConversationListView,
                 LeftPanelDisplayedTab::SshManager => ToolPanelView::SshManager,
+                LeftPanelDisplayedTab::ServerFileBrowser => ToolPanelView::ServerFileBrowser,
                 LeftPanelDisplayedTab::SkillManager => ToolPanelView::SkillManager,
             };
             lp.restore_active_view_from_snapshot(active_view, ctx);
@@ -5201,6 +5203,16 @@ impl Workspace {
             LeftPanelEvent::ZapDrive(drive_event) => {
                 self.handle_warp_drive_event(drive_event, ctx);
             }
+            LeftPanelEvent::ServerFileBrowser(event) => match event {
+                crate::workspace::view::server_file_browser::ServerFileBrowserEvent::OpenRemoteFile {
+                    remote_path,
+                } => {
+                    #[cfg(feature = "local_tty")]
+                    self.open_remote_file(remote_path.clone(), ctx);
+                    #[cfg(not(feature = "local_tty"))]
+                    let _ = remote_path;
+                }
+            },
             LeftPanelEvent::OpenFileWithTarget {
                 path,
                 target,
@@ -12594,6 +12606,13 @@ impl Workspace {
                 if let Ok(std_path) = StandardizedPath::try_new(indexed_path) {
                     let remote_id = RemoteRepositoryIdentifier::new(host_id.clone(), std_path);
                     let pane_group_id = pane_group.id();
+                    self.left_panel_view.update(ctx, |left_panel, ctx| {
+                        left_panel.set_server_file_browser_root(
+                            host_id.clone(),
+                            indexed_path.to_string(),
+                            ctx,
+                        );
+                    });
                     if let Some(file_tree_view) = self
                         .working_directories_model
                         .as_ref(ctx)
@@ -15513,6 +15532,9 @@ impl Workspace {
                         ToolPanelView::SshManager => {
                             crate::t!("workspace-left-panel-ssh-manager")
                         }
+                        ToolPanelView::ServerFileBrowser => {
+                            crate::t!("workspace-left-panel-server-file-browser")
+                        }
                         ToolPanelView::SkillManager => {
                             crate::t!("workspace-left-panel-skill-manager")
                         }
@@ -15578,6 +15600,9 @@ impl Workspace {
                 }
                 ToolPanelView::SshManager => {
                     crate::t!("workspace-left-panel-ssh-manager")
+                }
+                ToolPanelView::ServerFileBrowser => {
+                    crate::t!("workspace-left-panel-server-file-browser")
                 }
                 ToolPanelView::SkillManager => {
                     crate::t!("workspace-left-panel-skill-manager")
@@ -18252,6 +18277,9 @@ impl Workspace {
         }
         // openWarp 独有:SSH 管理器,无 feature flag,默认始终显示。
         views.push(ToolPanelView::SshManager);
+        if FeatureFlag::ServerFileBrowser.is_enabled() && FeatureFlag::SshRemoteServer.is_enabled() {
+            views.push(ToolPanelView::ServerFileBrowser);
+        }
         // openWarp 独有:Skill 管理器,无 feature flag,local_fs 构建下默认显示。
         if cfg!(feature = "local_fs") {
             views.push(ToolPanelView::SkillManager);
