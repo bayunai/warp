@@ -2939,5 +2939,12 @@ impl<A: Action + Clone> Menu<A> {
 }
 
 #[cfg(test)]
+impl<A: Action + Clone> Menu<A> {
+    pub fn submenu_save_position_id_for_tests(&self, depth: usize, row_index: usize) -> String {
+        SubMenu::<A>::save_position_id(self.submenu_position_namespace, depth, row_index)
+    }
+}
+
+#[cfg(test)]
 #[path = "menu_test.rs"]
 mod tests;
