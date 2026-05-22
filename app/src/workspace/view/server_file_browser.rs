@@ -15,9 +15,11 @@ use warp_core::HostId;
 use warp_util::standardized_path::StandardizedPath;
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::{
-    Border, ChildAnchor, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Element, Empty,
-    Flex, Hoverable, MainAxisSize, MouseStateHandle, OffsetPositioning,
-    ParentAnchor, ParentElement, ParentOffsetBounds, Radius, SavePosition, Shrinkable, Stack, Text,
+    ChildAnchor, ChildView, ConstrainedBox, Container, CornerRadius, CrossAxisAlignment,
+    DispatchEventResult, Element, Empty, EventHandler, Flex, Hoverable, MainAxisSize,
+    MouseStateHandle, OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds, Radius,
+    SavePosition, ScrollStateHandle, Scrollable, ScrollableElement, ScrollbarWidth, Shrinkable,
+    Stack, Text, UniformList, UniformListState,
 };
 use warpui::platform::{Cursor, FilePickerConfiguration, SaveFilePickerConfiguration};
 use warpui::ui_components::components::{Coords, UiComponent, UiComponentStyles};
@@ -31,6 +33,7 @@ use crate::editor::{
     EditorView, Event as EditorEvent, PropagateAndNoOpNavigationKeys,
     PropagateHorizontalNavigationKeys, SingleLineEditorOptions, TextOptions,
 };
+use crate::menu::{Menu, MenuItem, MenuItemFields};
 use crate::remote_server::manager::RemoteServerManager;
 use crate::terminal::model::session::{ExecuteCommandOptions, Session};
 use crate::ui_components::icons::Icon;
@@ -44,7 +47,6 @@ const ITEM_PADDING_HORIZONTAL: f32 = 8.0;
 const ITEM_ICON_TEXT_SPACING: f32 = 8.0;
 const PANEL_HORIZONTAL_PADDING: f32 = 8.0;
 const INPUT_HEIGHT: f32 = 30.0;
-const CONTEXT_MENU_WIDTH: f32 = 190.0;
 const CONTEXT_MENU_POSITION_ID: &str = "server_file_browser_panel_root";
 const TRANSFER_CHUNK_BYTES: u64 = 1024 * 1024;
 
@@ -52,10 +54,16 @@ const TRANSFER_CHUNK_BYTES: u64 = 1024 * 1024;
 pub enum ServerFileBrowserAction {
     Refresh,
     JumpToPath,
-    ClickEntry(String),
+    ClickEntry(usize),
+    OpenEntry(usize),
     ToggleDirectory(String),
+    SelectPreviousItem,
+    SelectNextItem,
+    ExpandSelectedItem,
+    CollapseSelectedItem,
+    ExecuteSelectedItem,
     OpenContextMenu {
-        path: String,
+        index: usize,
         position: Vector2F,
     },
     DismissContextMenu,
@@ -91,20 +99,30 @@ pub struct ServerFileBrowserView {
     entries: Vec<ServerFileBrowserEntry>,
     expanded_directories: HashSet<String>,
     loaded_directories: HashMap<String, Vec<ServerFileBrowserEntry>>,
-    selected_path: Option<String>,
+    selected_index: Option<usize>,
+    list_state: UniformListState,
+    scroll_state: ScrollStateHandle,
     loading: bool,
     status: Option<String>,
     refresh_button: MouseStateHandle,
     upload_file_button: MouseStateHandle,
     upload_folder_button: MouseStateHandle,
     row_states: HashMap<String, MouseStateHandle>,
+    context_menu: ViewHandle<Menu<ServerFileBrowserAction>>,
     context_menu_position: Option<Vector2F>,
-    context_menu_target: Option<String>,
-    context_menu_item_states: Vec<MouseStateHandle>,
 }
 
 impl ServerFileBrowserView {
     pub fn new(ctx: &mut ViewContext<Self>) -> Self {
+        let context_menu = ctx.add_typed_action_view(|_| {
+            Menu::new()
+                .prevent_interaction_with_other_elements()
+                .with_drop_shadow()
+        });
+        ctx.subscribe_to_view(&context_menu, |me, _, event, ctx| {
+            me.handle_menu_event(event, ctx);
+        });
+
         let path_editor = ctx.add_typed_action_view(|ctx| {
             let appearance = crate::appearance::Appearance::as_ref(ctx);
             let mut editor = EditorView::single_line(
@@ -137,16 +155,17 @@ impl ServerFileBrowserView {
             entries: Vec::new(),
             expanded_directories: HashSet::new(),
             loaded_directories: HashMap::new(),
-            selected_path: None,
+            selected_index: None,
+            list_state: UniformListState::new(),
+            scroll_state: ScrollStateHandle::default(),
             loading: false,
             status: Some(crate::t!("server-file-browser-empty")),
             refresh_button: Default::default(),
             upload_file_button: Default::default(),
             upload_folder_button: Default::default(),
             row_states: HashMap::new(),
+            context_menu,
             context_menu_position: None,
-            context_menu_target: None,
-            context_menu_item_states: (0..5).map(|_| MouseStateHandle::default()).collect(),
         }
     }
 
@@ -175,7 +194,11 @@ impl ServerFileBrowserView {
     }
 
     pub fn on_left_panel_focused(&mut self, ctx: &mut ViewContext<Self>) {
-        ctx.focus(&self.path_editor);
+        ctx.focus_self();
+        if self.selected_index.is_none() && !self.entries.is_empty() {
+            self.selected_index = Some(0);
+        }
+        ctx.notify();
     }
 
     fn sync_editor_to_current_path(&mut self, ctx: &mut ViewContext<Self>) {
@@ -224,9 +247,9 @@ impl ServerFileBrowserView {
                         Ok((canonical_path, entries)) => {
                             me.current_path = canonical_path;
                             me.sync_editor_to_current_path(ctx);
-                            me.expanded_directories.clear();
-                            me.loaded_directories.clear();
+                            me.reset_tree_state();
                             me.entries = entries;
+                            me.sync_row_states();
                             me.status = None;
                         }
                         Err(error) => {
@@ -248,9 +271,9 @@ impl ServerFileBrowserView {
                         Ok((canonical_path, entries)) => {
                             me.current_path = canonical_path;
                             me.sync_editor_to_current_path(ctx);
-                            me.expanded_directories.clear();
-                            me.loaded_directories.clear();
+                            me.reset_tree_state();
                             me.entries = entries;
+                            me.sync_row_states();
                             me.status = None;
                         }
                         Err(error) => {
@@ -332,6 +355,24 @@ impl ServerFileBrowserView {
         ctx.notify();
     }
 
+    fn reset_tree_state(&mut self) {
+        self.expanded_directories.clear();
+        self.loaded_directories.clear();
+        self.selected_index = None;
+        self.list_state = UniformListState::new();
+        self.scroll_state = ScrollStateHandle::default();
+        self.context_menu_position = None;
+        self.row_states.clear();
+    }
+
+    fn sync_row_states(&mut self) {
+        let active_paths: HashSet<String> = self.entries.iter().map(|entry| entry.path.clone()).collect();
+        for path in &active_paths {
+            self.row_states.entry(path.clone()).or_default();
+        }
+        self.row_states.retain(|path, _| active_paths.contains(path));
+    }
+
     fn toggle_directory(&mut self, path: String, ctx: &mut ViewContext<Self>) {
         if self.expanded_directories.remove(&path) {
             self.rebuild_entries();
@@ -339,6 +380,12 @@ impl ServerFileBrowserView {
             return;
         }
 
+        let child_depth = self
+            .entries
+            .iter()
+            .find(|entry| entry.path == path)
+            .map(|entry| entry.depth + 1)
+            .unwrap_or(1);
         self.expanded_directories.insert(path.clone());
         if self.loaded_directories.contains_key(&path) {
             self.rebuild_entries();
@@ -352,10 +399,11 @@ impl ServerFileBrowserView {
             ctx.notify();
             ctx.spawn(
                 async move { list_directory(client, path_for_spawn).await },
-                |me, result, ctx| {
+                move |me, result, ctx| {
                     me.loading = false;
                     match result {
                         Ok((path, entries)) => {
+                            let entries = entries_with_depth(entries, child_depth);
                             me.loaded_directories.insert(path, entries);
                             me.rebuild_entries();
                         }
@@ -369,10 +417,11 @@ impl ServerFileBrowserView {
             ctx.notify();
             ctx.spawn(
                 async move { list_directory_via_session(session, path_for_spawn).await },
-                |me, result, ctx| {
+                move |me, result, ctx| {
                     me.loading = false;
                     match result {
                         Ok((path, entries)) => {
+                            let entries = entries_with_depth(entries, child_depth);
                             me.loaded_directories.insert(path, entries);
                             me.rebuild_entries();
                         }
@@ -387,35 +436,44 @@ impl ServerFileBrowserView {
     }
 
     fn rebuild_entries(&mut self) {
+        let selected_path = self
+            .selected_index
+            .and_then(|index| self.entries.get(index))
+            .map(|entry| entry.path.clone());
         let roots = self.entries.iter().filter(|entry| entry.depth == 0).cloned().collect();
-        let mut rebuilt = Vec::new();
-        self.append_entries(roots, &mut rebuilt);
-        self.entries = rebuilt;
+        self.entries =
+            rebuild_entries_from(roots, &self.expanded_directories, &self.loaded_directories);
+        self.selected_index =
+            selected_index_after_rebuild(&self.entries, selected_path.as_deref(), self.selected_index);
+        self.sync_row_states();
     }
 
-    fn append_entries(
-        &self,
-        entries: Vec<ServerFileBrowserEntry>,
-        out: &mut Vec<ServerFileBrowserEntry>,
-    ) {
-        for entry in entries {
-            let path = entry.path.clone();
-            out.push(entry);
-            if self.expanded_directories.contains(&path) {
-                if let Some(children) = self.loaded_directories.get(&path) {
-                    self.append_entries(children.clone(), out);
-                }
-            }
+    fn select_index(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        if index < self.entries.len() {
+            self.selected_index = Some(index);
+            ctx.notify();
         }
     }
 
-    fn open_path(&mut self, path: String, ctx: &mut ViewContext<Self>) {
-        let Some(entry) = self.entries.iter().find(|entry| entry.path == path).cloned() else {
+    fn click_entry(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        let Some(entry) = self.entries.get(index).cloned() else {
             return;
         };
-        self.selected_path = Some(path.clone());
+        self.selected_index = Some(index);
+        if entry.kind == FileSystemEntryKind::Directory {
+            self.toggle_directory(entry.path, ctx);
+        } else {
+            ctx.notify();
+        }
+    }
+
+    fn open_index(&mut self, index: usize, ctx: &mut ViewContext<Self>) {
+        let Some(entry) = self.entries.get(index).cloned() else {
+            return;
+        };
+        self.selected_index = Some(index);
         match entry.kind {
-            FileSystemEntryKind::Directory => self.toggle_directory(path, ctx),
+            FileSystemEntryKind::Directory => self.toggle_directory(entry.path, ctx),
             FileSystemEntryKind::File => {
                 if let (Some(host_id), Ok(path)) = (
                     self.host_id.clone(),
@@ -435,16 +493,29 @@ impl ServerFileBrowserView {
         }
     }
 
-    fn open_context_menu(&mut self, path: String, position: Vector2F, ctx: &mut ViewContext<Self>) {
-        self.selected_path = Some(path.clone());
-        self.context_menu_target = Some(path);
+    fn open_context_menu(&mut self, index: usize, position: Vector2F, ctx: &mut ViewContext<Self>) {
+        let Some(entry) = self.entries.get(index).cloned() else {
+            return;
+        };
+        self.selected_index = Some(index);
         self.context_menu_position = Some(position);
+        let menu_items = self.context_menu_items(&entry);
+        self.context_menu.update(ctx, move |menu, ctx| {
+            menu.set_items(menu_items, ctx);
+            ctx.notify();
+        });
         ctx.notify();
     }
 
     fn dismiss_context_menu(&mut self, ctx: &mut ViewContext<Self>) {
-        self.context_menu_target = None;
         self.context_menu_position = None;
+        ctx.notify();
+    }
+
+    fn handle_menu_event(&mut self, event: &crate::menu::Event, ctx: &mut ViewContext<Self>) {
+        if let crate::menu::Event::Close { .. } = event {
+            self.context_menu_position = None;
+        }
         ctx.notify();
     }
 
@@ -453,6 +524,88 @@ impl ServerFileBrowserView {
             .write(ClipboardContent::plain_text(path.clone()));
         self.status = Some(crate::t!("server-file-browser-copied-path"));
         self.dismiss_context_menu(ctx);
+    }
+
+    fn select_previous_item(&mut self, ctx: &mut ViewContext<Self>) {
+        self.selected_index = previous_index(self.selected_index, self.entries.len());
+        ctx.notify();
+    }
+
+    fn select_next_item(&mut self, ctx: &mut ViewContext<Self>) {
+        self.selected_index = next_index(self.selected_index, self.entries.len());
+        ctx.notify();
+    }
+
+    fn expand_selected_item(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(entry) = self
+            .selected_index
+            .and_then(|index| self.entries.get(index))
+            .cloned()
+        else {
+            return;
+        };
+        if entry.kind == FileSystemEntryKind::Directory
+            && !self.expanded_directories.contains(&entry.path)
+        {
+            self.toggle_directory(entry.path, ctx);
+        }
+    }
+
+    fn collapse_selected_item(&mut self, ctx: &mut ViewContext<Self>) {
+        let Some(entry) = self
+            .selected_index
+            .and_then(|index| self.entries.get(index))
+            .cloned()
+        else {
+            return;
+        };
+        if entry.kind == FileSystemEntryKind::Directory
+            && self.expanded_directories.contains(&entry.path)
+        {
+            self.toggle_directory(entry.path, ctx);
+        }
+    }
+
+    fn execute_selected_item(&mut self, ctx: &mut ViewContext<Self>) {
+        if let Some(index) = self.selected_index {
+            self.open_index(index, ctx);
+        }
+    }
+
+    fn context_menu_items(
+        &self,
+        target: &ServerFileBrowserEntry,
+    ) -> Vec<MenuItem<ServerFileBrowserAction>> {
+        let target_is_directory = target.kind == FileSystemEntryKind::Directory;
+        let upload_target = if target_is_directory {
+            target.path.clone()
+        } else {
+            remote_parent(&target.path).unwrap_or_else(|| self.current_path.clone())
+        };
+        let mut items = vec![
+            MenuItemFields::new(crate::t!("server-file-browser-menu-download"))
+                .with_on_select_action(ServerFileBrowserAction::Download(target.path.clone()))
+                .into_item(),
+            MenuItemFields::new(crate::t!("server-file-browser-menu-upload-file"))
+                .with_on_select_action(ServerFileBrowserAction::UploadFiles(upload_target.clone()))
+                .into_item(),
+            MenuItemFields::new(crate::t!("server-file-browser-menu-upload-folder"))
+                .with_on_select_action(ServerFileBrowserAction::UploadFolder(upload_target))
+                .into_item(),
+            MenuItemFields::new(crate::t!("server-file-browser-menu-copy-path"))
+                .with_on_select_action(ServerFileBrowserAction::CopyPath(target.path.clone()))
+                .into_item(),
+        ];
+        if target_is_directory {
+            items.push(
+                MenuItemFields::new(crate::t!("server-file-browser-menu-jump-to-path"))
+                    .with_on_select_action(ServerFileBrowserAction::JumpToDirectory(
+                        target.path.clone(),
+                    ))
+                    .into_item(),
+            );
+        }
+        items
     }
 
     fn choose_and_upload_files(&mut self, remote_directory: String, ctx: &mut ViewContext<Self>) {
@@ -614,27 +767,25 @@ impl ServerFileBrowserView {
             .with_main_axis_size(MainAxisSize::Max)
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
             .with_spacing(6.0)
-            .with_child(
-                ConstrainedBox::new(
-                    appearance
-                        .ui_builder()
-                        .text_input(self.path_editor.clone())
-                        .with_style(UiComponentStyles {
-                            height: Some(INPUT_HEIGHT),
-                            padding: Some(Coords::uniform(6.0)),
-                            background: Some(theme.surface_2().into()),
-                            border_color: Some(theme.nonactive_ui_detail().into()),
-                            border_width: Some(1.0),
-                            border_radius: Some(CornerRadius::with_all(Radius::Pixels(4.0))),
-                            font_size: Some(ITEM_FONT_SIZE),
-                            ..Default::default()
-                        })
-                        .build()
-                        .finish(),
-                )
-                .with_width(230.0)
-                .finish(),
+            .with_child(Shrinkable::new(
+                1.0,
+                appearance
+                    .ui_builder()
+                    .text_input(self.path_editor.clone())
+                    .with_style(UiComponentStyles {
+                        height: Some(INPUT_HEIGHT),
+                        padding: Some(Coords::uniform(6.0)),
+                        background: Some(theme.surface_2().into()),
+                        border_color: Some(theme.nonactive_ui_detail().into()),
+                        border_width: Some(1.0),
+                        border_radius: Some(CornerRadius::with_all(Radius::Pixels(4.0))),
+                        font_size: Some(ITEM_FONT_SIZE),
+                        ..Default::default()
+                    })
+                    .build()
+                    .finish(),
             )
+            .finish())
             .with_child(make_btn(
                 Icon::Refresh,
                 self.refresh_button.clone(),
@@ -655,20 +806,63 @@ impl ServerFileBrowserView {
 
     fn render_entries(&self, appearance: &crate::appearance::Appearance) -> Box<dyn Element> {
         let theme = appearance.theme();
-        let mut col = Flex::column();
-
         if self.host_id.is_none() {
-            col.add_child(self.render_status_text(crate::t!("server-file-browser-no-session"), appearance));
+            return self.render_status_text(crate::t!("server-file-browser-no-session"), appearance);
         } else if self.loading && self.entries.is_empty() {
-            col.add_child(self.render_status_text(crate::t!("server-file-browser-loading"), appearance));
+            return self.render_status_text(crate::t!("server-file-browser-loading"), appearance);
         } else if self.entries.is_empty() {
-            col.add_child(self.render_status_text(crate::t!("server-file-browser-empty-directory"), appearance));
-        } else {
-            for entry in &self.entries {
-                col.add_child(self.render_row(entry, appearance));
-            }
+            return self.render_status_text(crate::t!("server-file-browser-empty-directory"), appearance);
         }
 
+        let entries = self.entries.clone();
+        let selected_index = self.selected_index;
+        let expanded_directories = self.expanded_directories.clone();
+        let row_states = self.row_states.clone();
+        let uniform_list = UniformList::new(
+            self.list_state.clone(),
+            entries.len(),
+            move |range, app| {
+                let appearance = crate::appearance::Appearance::as_ref(app);
+                range
+                    .filter_map(|index| {
+                        let entry = entries.get(index)?;
+                        let state = row_states
+                            .get(&entry.path)
+                            .cloned()
+                            .expect("row mouse state is synced before render");
+                        Some(render_entry_row(
+                            index,
+                            entry,
+                            selected_index == Some(index),
+                            expanded_directories.contains(&entry.path),
+                            state,
+                            appearance,
+                        ))
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+            },
+        )
+        .finish_scrollable();
+
+        let scrollable = Shrinkable::new(
+            1.0,
+            Scrollable::vertical(
+                self.scroll_state.clone(),
+                uniform_list,
+                ScrollbarWidth::Auto,
+                theme.nonactive_ui_detail().into(),
+                theme.active_ui_detail().into(),
+                warpui::elements::Fill::None,
+            )
+            .with_overlayed_scrollbar()
+            .finish(),
+        )
+        .finish();
+
+        let mut col = Flex::column()
+            .with_main_axis_size(MainAxisSize::Max)
+            .with_child(scrollable);
         if let Some(status) = &self.status {
             col.add_child(
                 Container::new(
@@ -685,11 +879,9 @@ impl ServerFileBrowserView {
 
         let content = Container::new(
             col.with_cross_axis_alignment(CrossAxisAlignment::Stretch)
-                .with_main_axis_size(MainAxisSize::Min)
                 .finish(),
         )
-        .with_padding_left(PANEL_HORIZONTAL_PADDING - ITEM_PADDING_HORIZONTAL)
-        .with_padding_right(PANEL_HORIZONTAL_PADDING - ITEM_PADDING_HORIZONTAL);
+        .with_horizontal_padding(PANEL_HORIZONTAL_PADDING - ITEM_PADDING_HORIZONTAL);
 
         content.finish()
     }
@@ -712,197 +904,117 @@ impl ServerFileBrowserView {
         .finish()
     }
 
-    fn render_row(
-        &self,
-        entry: &ServerFileBrowserEntry,
-        appearance: &crate::appearance::Appearance,
-    ) -> Box<dyn Element> {
-        let theme = appearance.theme();
-        let icon_color = theme.sub_text_color(theme.background());
-        let is_selected = self.selected_path.as_deref() == Some(entry.path.as_str());
-        let is_directory = entry.kind == FileSystemEntryKind::Directory;
-        let is_expanded = self.expanded_directories.contains(&entry.path);
+}
 
-        let chevron: Box<dyn Element> = if is_directory {
-            let icon = if is_expanded {
-                Icon::ChevronDown
-            } else {
-                Icon::ChevronRight
-            };
-            ConstrainedBox::new(icon.to_warpui_icon(icon_color).finish())
-                .with_width(ITEM_ICON_SIZE)
-                .with_height(ITEM_ICON_SIZE)
-                .finish()
+fn render_entry_row(
+    index: usize,
+    entry: &ServerFileBrowserEntry,
+    is_selected: bool,
+    is_expanded: bool,
+    state: MouseStateHandle,
+    appearance: &crate::appearance::Appearance,
+) -> Box<dyn Element> {
+    let theme = appearance.theme();
+    let icon_color = theme.sub_text_color(theme.background());
+    let is_directory = entry.kind == FileSystemEntryKind::Directory;
+
+    let chevron: Box<dyn Element> = if is_directory {
+        let icon = if is_expanded {
+            Icon::ChevronDown
         } else {
-            ConstrainedBox::new(Empty::new().finish())
-                .with_width(ITEM_ICON_SIZE)
-                .finish()
+            Icon::ChevronRight
         };
-        let icon = if is_directory { Icon::Folder } else { Icon::File };
-        let icon_el = ConstrainedBox::new(icon.to_warpui_icon(icon_color).finish())
+        ConstrainedBox::new(icon.to_warpui_icon(icon_color).finish())
             .with_width(ITEM_ICON_SIZE)
             .with_height(ITEM_ICON_SIZE)
-            .finish();
-        let label = Text::new_inline(
-            entry.name.clone(),
-            appearance.ui_font_family(),
-            ITEM_FONT_SIZE,
-        )
-        .with_color(theme.main_text_color(theme.background()).into())
+            .finish()
+    } else {
+        ConstrainedBox::new(Empty::new().finish())
+            .with_width(ITEM_ICON_SIZE)
+            .finish()
+    };
+    let icon = if is_directory { Icon::Folder } else { Icon::File };
+    let icon_el = ConstrainedBox::new(icon.to_warpui_icon(icon_color).finish())
+        .with_width(ITEM_ICON_SIZE)
+        .with_height(ITEM_ICON_SIZE)
         .finish();
+    let label = Text::new_inline(
+        entry.name.clone(),
+        appearance.ui_font_family(),
+        ITEM_FONT_SIZE,
+    )
+    .with_color(theme.main_text_color(theme.background()).into())
+    .finish();
 
-        let mut metadata_parts = Vec::new();
-        if let Some(size) = entry.size_bytes {
-            metadata_parts.push(format_file_size(size));
-        }
-        if entry.modified_epoch_millis.is_some() {
-            metadata_parts.push(crate::t!("server-file-browser-modified"));
-        }
-        let metadata = (!metadata_parts.is_empty()).then(|| {
-            Text::new_inline(metadata_parts.join(" · "), appearance.ui_font_family(), 11.0)
-                .with_color(theme.sub_text_color(theme.background()).into())
-                .finish()
-        });
+    let mut metadata_parts = Vec::new();
+    if let Some(size) = entry.size_bytes {
+        metadata_parts.push(format_file_size(size));
+    }
+    if entry.modified_epoch_millis.is_some() {
+        metadata_parts.push(crate::t!("server-file-browser-modified"));
+    }
+    let metadata = (!metadata_parts.is_empty()).then(|| {
+        Text::new_inline(metadata_parts.join(" · "), appearance.ui_font_family(), 11.0)
+            .with_color(theme.sub_text_color(theme.background()).into())
+            .finish()
+    });
 
-        let text_column = {
-            let mut col = Flex::column()
-                .with_main_axis_size(MainAxisSize::Min)
-                .with_child(label);
-            if let Some(metadata) = metadata {
-                col.add_child(metadata);
-            }
-            col.finish()
-        };
-
-        let row = Flex::row()
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_spacing(ITEM_ICON_TEXT_SPACING)
-            .with_child(
-                ConstrainedBox::new(Empty::new().finish())
-                    .with_width(entry.depth as f32 * 16.0)
-                    .finish(),
-            )
-            .with_child(chevron)
-            .with_child(icon_el)
-            .with_child(text_column)
+    let text_column = {
+        let mut col = Flex::column()
             .with_main_axis_size(MainAxisSize::Min)
-            .finish();
-
-        let state = self.row_states.get(&entry.path).cloned().unwrap_or_default();
-        let click_path = entry.path.clone();
-        let toggle_path = entry.path.clone();
-        let menu_path = entry.path.clone();
-        let hoverable = Hoverable::new(state, move |_| {
-            let mut container = Container::new(row)
-                .with_padding_top(ITEM_PADDING_VERTICAL)
-                .with_padding_bottom(ITEM_PADDING_VERTICAL)
-                .with_padding_left(ITEM_PADDING_HORIZONTAL)
-                .with_padding_right(ITEM_PADDING_HORIZONTAL)
-                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
-            if is_selected {
-                container = container.with_background(internal_colors::fg_overlay_3(theme));
-            }
-            container.finish()
-        })
-        .with_cursor(Cursor::PointingHand)
-        .on_click(move |ctx, _, _| {
-            ctx.dispatch_typed_action(ServerFileBrowserAction::ClickEntry(click_path.clone()));
-        })
-        .on_double_click(move |ctx, _, _| {
-            ctx.dispatch_typed_action(ServerFileBrowserAction::ToggleDirectory(toggle_path.clone()));
-        })
-        .on_right_click(move |ctx, _, position| {
-            let offset = match ctx.element_position_by_id(CONTEXT_MENU_POSITION_ID) {
-                Some(bounds) => position - bounds.origin(),
-                None => position,
-            };
-            ctx.dispatch_typed_action(ServerFileBrowserAction::OpenContextMenu {
-                path: menu_path.clone(),
-                position: offset,
-            });
-        })
-        .finish();
-
-        Container::new(hoverable).finish()
-    }
-
-    fn render_context_menu(&self, appearance: &crate::appearance::Appearance) -> Box<dyn Element> {
-        let Some(target) = self.context_menu_target.clone() else {
-            return Empty::new().finish();
-        };
-        let target_entry = self.entries.iter().find(|entry| entry.path == target);
-        let target_is_directory = target_entry
-            .map(|entry| entry.kind == FileSystemEntryKind::Directory)
-            .unwrap_or(false);
-        let upload_target = if target_is_directory {
-            target.clone()
-        } else {
-            remote_parent(&target).unwrap_or_else(|| self.current_path.clone())
-        };
-        let mut items = vec![
-            (
-                crate::t!("server-file-browser-menu-download"),
-                ServerFileBrowserAction::Download(target.clone()),
-            ),
-            (
-                crate::t!("server-file-browser-menu-upload-file"),
-                ServerFileBrowserAction::UploadFiles(upload_target.clone()),
-            ),
-            (
-                crate::t!("server-file-browser-menu-upload-folder"),
-                ServerFileBrowserAction::UploadFolder(upload_target),
-            ),
-            (
-                crate::t!("server-file-browser-menu-copy-path"),
-                ServerFileBrowserAction::CopyPath(target.clone()),
-            ),
-        ];
-        if target_is_directory {
-            items.push((
-                crate::t!("server-file-browser-menu-jump-to-path"),
-                ServerFileBrowserAction::JumpToDirectory(target),
-            ));
+            .with_child(label);
+        if let Some(metadata) = metadata {
+            col.add_child(metadata);
         }
+        col.finish()
+    };
 
-        let theme = appearance.theme();
-        let mut col = Flex::column();
-        for (idx, (label, action)) in items.into_iter().enumerate() {
-            let state = self
-                .context_menu_item_states
-                .get(idx)
-                .cloned()
-                .unwrap_or_default();
-            col.add_child(
-                Hoverable::new(state, move |_| {
-                    Container::new(
-                        Text::new_inline(label.clone(), appearance.ui_font_family(), ITEM_FONT_SIZE)
-                            .with_color(theme.main_text_color(theme.background()).into())
-                            .finish(),
-                    )
-                    .with_padding_top(7.0)
-                    .with_padding_bottom(7.0)
-                    .with_padding_left(12.0)
-                    .with_padding_right(12.0)
-                    .finish()
-                })
-                .with_cursor(Cursor::PointingHand)
-                .on_click(move |ctx, _, _| {
-                    ctx.dispatch_typed_action(action.clone());
-                })
-                .finish(),
-            );
-        }
-
-        ConstrainedBox::new(
-            Container::new(col.finish())
-                .with_background(theme.surface_1())
-                .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0)))
-                .with_border(Border::all(1.0).with_border_fill(theme.nonactive_ui_detail()))
+    let row = Flex::row()
+        .with_main_axis_size(MainAxisSize::Max)
+        .with_cross_axis_alignment(CrossAxisAlignment::Center)
+        .with_spacing(ITEM_ICON_TEXT_SPACING)
+        .with_child(
+            ConstrainedBox::new(Empty::new().finish())
+                .with_width(entry.depth as f32 * 16.0)
                 .finish(),
         )
-        .with_width(CONTEXT_MENU_WIDTH)
-        .finish()
-    }
+        .with_child(chevron)
+        .with_child(icon_el)
+        .with_child(Shrinkable::new(1.0, text_column).finish())
+        .finish();
+
+    let hoverable = Hoverable::new(state, move |_| {
+        let mut container = Container::new(row)
+            .with_padding_top(ITEM_PADDING_VERTICAL)
+            .with_padding_bottom(ITEM_PADDING_VERTICAL)
+            .with_padding_left(ITEM_PADDING_HORIZONTAL)
+            .with_padding_right(ITEM_PADDING_HORIZONTAL)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
+        if is_selected {
+            container = container.with_background(internal_colors::fg_overlay_3(theme));
+        }
+        container.finish()
+    })
+    .with_cursor(Cursor::PointingHand)
+    .on_click(move |ctx, _, _| {
+        ctx.dispatch_typed_action(ServerFileBrowserAction::ClickEntry(index));
+    })
+    .on_double_click(move |ctx, _, _| {
+        ctx.dispatch_typed_action(ServerFileBrowserAction::OpenEntry(index));
+    })
+    .on_right_click(move |ctx, _, position| {
+        let offset = match ctx.element_position_by_id(CONTEXT_MENU_POSITION_ID) {
+            Some(bounds) => position - bounds.origin(),
+            None => position,
+        };
+        ctx.dispatch_typed_action(ServerFileBrowserAction::OpenContextMenu {
+            index,
+            position: offset,
+        });
+    })
+    .finish();
+
+    Container::new(hoverable).finish()
 }
 
 impl Entity for ServerFileBrowserView {
@@ -916,10 +1028,22 @@ impl TypedActionView for ServerFileBrowserView {
         match action {
             ServerFileBrowserAction::Refresh => self.load_current_directory(ctx),
             ServerFileBrowserAction::JumpToPath => self.jump_to_editor_path(ctx),
-            ServerFileBrowserAction::ClickEntry(path) => self.open_path(path.clone(), ctx),
+            ServerFileBrowserAction::ClickEntry(index) => {
+                ctx.focus_self();
+                self.click_entry(*index, ctx);
+            }
+            ServerFileBrowserAction::OpenEntry(index) => {
+                ctx.focus_self();
+                self.open_index(*index, ctx);
+            }
             ServerFileBrowserAction::ToggleDirectory(path) => self.toggle_directory(path.clone(), ctx),
-            ServerFileBrowserAction::OpenContextMenu { path, position } => {
-                self.open_context_menu(path.clone(), *position, ctx);
+            ServerFileBrowserAction::SelectPreviousItem => self.select_previous_item(ctx),
+            ServerFileBrowserAction::SelectNextItem => self.select_next_item(ctx),
+            ServerFileBrowserAction::ExpandSelectedItem => self.expand_selected_item(ctx),
+            ServerFileBrowserAction::CollapseSelectedItem => self.collapse_selected_item(ctx),
+            ServerFileBrowserAction::ExecuteSelectedItem => self.execute_selected_item(ctx),
+            ServerFileBrowserAction::OpenContextMenu { index, position } => {
+                self.open_context_menu(*index, *position, ctx);
             }
             ServerFileBrowserAction::DismissContextMenu => self.dismiss_context_menu(ctx),
             ServerFileBrowserAction::CopyPath(path) => self.copy_path(path.clone(), ctx),
@@ -952,7 +1076,10 @@ impl View for ServerFileBrowserView {
 
     fn on_focus(&mut self, focus_ctx: &FocusContext, ctx: &mut ViewContext<Self>) {
         if focus_ctx.is_self_focused() {
-            ctx.focus(&self.path_editor);
+            if self.selected_index.is_none() && !self.entries.is_empty() {
+                self.selected_index = Some(0);
+                ctx.notify();
+            }
         }
     }
 
@@ -976,23 +1103,129 @@ impl View for ServerFileBrowserView {
         )
         .finish();
 
-        let Some(position) = self.context_menu_position else {
-            return panel;
-        };
-
-        let menu = self.render_context_menu(appearance);
-        let positioning = OffsetPositioning::offset_from_parent(
-            position,
-            ParentOffsetBounds::ParentByPosition,
-            ParentAnchor::TopLeft,
-            ChildAnchor::TopLeft,
-        );
-
         let mut stack = Stack::new();
         stack.add_child(panel);
-        stack.add_positioned_overlay_child(menu, positioning);
-        stack.finish()
+        if let Some(position) = self.context_menu_position {
+            stack.add_positioned_overlay_child(
+                ChildView::new(&self.context_menu).finish(),
+                OffsetPositioning::offset_from_parent(
+                    position,
+                    ParentOffsetBounds::ParentByPosition,
+                    ParentAnchor::TopLeft,
+                    ChildAnchor::TopLeft,
+                ),
+            );
+        }
+        EventHandler::new(stack.finish())
+            .on_keydown(|ctx, _app, keystroke| {
+                match keystroke.normalized().as_str() {
+                    "up" => {
+                        ctx.dispatch_typed_action(ServerFileBrowserAction::SelectPreviousItem);
+                        DispatchEventResult::StopPropagation
+                    }
+                    "down" => {
+                        ctx.dispatch_typed_action(ServerFileBrowserAction::SelectNextItem);
+                        DispatchEventResult::StopPropagation
+                    }
+                    "right" => {
+                        ctx.dispatch_typed_action(ServerFileBrowserAction::ExpandSelectedItem);
+                        DispatchEventResult::StopPropagation
+                    }
+                    "left" => {
+                        ctx.dispatch_typed_action(ServerFileBrowserAction::CollapseSelectedItem);
+                        DispatchEventResult::StopPropagation
+                    }
+                    "enter" => {
+                        ctx.dispatch_typed_action(ServerFileBrowserAction::ExecuteSelectedItem);
+                        DispatchEventResult::StopPropagation
+                    }
+                    "escape" => {
+                        ctx.dispatch_typed_action(ServerFileBrowserAction::DismissContextMenu);
+                        DispatchEventResult::StopPropagation
+                    }
+                    _ => DispatchEventResult::PropagateToParent,
+                }
+            })
+            .finish()
     }
+}
+
+fn entries_with_depth(
+    mut entries: Vec<ServerFileBrowserEntry>,
+    depth: usize,
+) -> Vec<ServerFileBrowserEntry> {
+    for entry in &mut entries {
+        entry.depth = depth;
+    }
+    entries
+}
+
+fn rebuild_entries_from(
+    entries: Vec<ServerFileBrowserEntry>,
+    expanded_directories: &HashSet<String>,
+    loaded_directories: &HashMap<String, Vec<ServerFileBrowserEntry>>,
+) -> Vec<ServerFileBrowserEntry> {
+    let roots = entries
+        .into_iter()
+        .filter(|entry| entry.depth == 0)
+        .collect();
+    let mut rebuilt = Vec::new();
+    append_entries_from(roots, expanded_directories, loaded_directories, &mut rebuilt);
+    rebuilt
+}
+
+fn append_entries_from(
+    entries: Vec<ServerFileBrowserEntry>,
+    expanded_directories: &HashSet<String>,
+    loaded_directories: &HashMap<String, Vec<ServerFileBrowserEntry>>,
+    out: &mut Vec<ServerFileBrowserEntry>,
+) {
+    for entry in entries {
+        let path = entry.path.clone();
+        out.push(entry);
+        if expanded_directories.contains(&path) {
+            if let Some(children) = loaded_directories.get(&path) {
+                append_entries_from(
+                    children.clone(),
+                    expanded_directories,
+                    loaded_directories,
+                    out,
+                );
+            }
+        }
+    }
+}
+
+fn previous_index(selected_index: Option<usize>, len: usize) -> Option<usize> {
+    if len == 0 {
+        None
+    } else {
+        Some(selected_index.unwrap_or(0).saturating_sub(1))
+    }
+}
+
+fn next_index(selected_index: Option<usize>, len: usize) -> Option<usize> {
+    if len == 0 {
+        None
+    } else {
+        Some((selected_index.unwrap_or(0) + 1).min(len - 1))
+    }
+}
+
+fn selected_index_after_rebuild(
+    entries: &[ServerFileBrowserEntry],
+    selected_path: Option<&str>,
+    fallback_index: Option<usize>,
+) -> Option<usize> {
+    selected_path
+        .and_then(|path| entries.iter().position(|entry| entry.path == path))
+        .or_else(|| {
+            (!entries.is_empty()).then_some(
+                fallback_index
+                    .unwrap_or(0)
+                    .min(entries.len().saturating_sub(1)),
+            )
+        })
 }
 
 async fn resolve_path(
@@ -1385,5 +1618,138 @@ fn format_file_size(size: u64) -> String {
         format!("{:.1} KB", size / KB)
     } else {
         format!("{} B", size as u64)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(
+        path: &str,
+        name: &str,
+        kind: FileSystemEntryKind,
+        depth: usize,
+    ) -> ServerFileBrowserEntry {
+        ServerFileBrowserEntry {
+            name: name.to_string(),
+            path: path.to_string(),
+            kind,
+            size_bytes: None,
+            modified_epoch_millis: None,
+            depth,
+        }
+    }
+
+    #[test]
+    fn rebases_loaded_directory_entries_to_parent_depth() {
+        let entries = vec![
+            entry(
+                "/root/.openwarp/remote-server/warp-oss",
+                "warp-oss",
+                FileSystemEntryKind::File,
+                0,
+            ),
+            entry(
+                "/root/.openwarp/remote-server/logs",
+                "logs",
+                FileSystemEntryKind::Directory,
+                0,
+            ),
+        ];
+
+        let entries = entries_with_depth(entries, 1);
+
+        assert_eq!(
+            entries.iter().map(|entry| entry.depth).collect::<Vec<_>>(),
+            vec![1, 1]
+        );
+    }
+
+    #[test]
+    fn rebuild_entries_does_not_promote_loaded_children_to_roots() {
+        let root = entry(
+            "/root/.openwarp/remote-server",
+            "remote-server",
+            FileSystemEntryKind::Directory,
+            0,
+        );
+        let child = entry(
+            "/root/.openwarp/remote-server/warp-oss",
+            "warp-oss",
+            FileSystemEntryKind::File,
+            0,
+        );
+        let expanded_directories = HashSet::from([root.path.clone()]);
+        let loaded_directories =
+            HashMap::from([(root.path.clone(), entries_with_depth(vec![child], 1))]);
+
+        let rebuilt = rebuild_entries_from(
+            vec![root.clone()],
+            &expanded_directories,
+            &loaded_directories,
+        );
+        let rebuilt_again =
+            rebuild_entries_from(rebuilt, &expanded_directories, &loaded_directories);
+
+        assert_eq!(
+            rebuilt_again
+                .iter()
+                .map(|entry| (entry.path.as_str(), entry.depth))
+                .collect::<Vec<_>>(),
+            vec![
+                ("/root/.openwarp/remote-server", 0),
+                ("/root/.openwarp/remote-server/warp-oss", 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn selected_index_navigation_stays_in_bounds() {
+        assert_eq!(previous_index(None, 0), None);
+        assert_eq!(next_index(None, 0), None);
+        assert_eq!(previous_index(None, 3), Some(0));
+        assert_eq!(previous_index(Some(0), 3), Some(0));
+        assert_eq!(previous_index(Some(2), 3), Some(1));
+        assert_eq!(next_index(None, 3), Some(1));
+        assert_eq!(next_index(Some(1), 3), Some(2));
+        assert_eq!(next_index(Some(2), 3), Some(2));
+    }
+
+    #[test]
+    fn selected_index_preserves_matching_path_after_rebuild() {
+        let entries = vec![
+            entry("/root/.openwarp", ".openwarp", FileSystemEntryKind::Directory, 0),
+            entry(
+                "/root/.openwarp/remote-server",
+                "remote-server",
+                FileSystemEntryKind::Directory,
+                1,
+            ),
+        ];
+
+        assert_eq!(
+            selected_index_after_rebuild(&entries, Some("/root/.openwarp/remote-server"), Some(0)),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn selected_index_falls_back_when_collapsed_child_disappears() {
+        let entries = vec![entry(
+            "/root/.openwarp",
+            ".openwarp",
+            FileSystemEntryKind::Directory,
+            0,
+        )];
+
+        assert_eq!(
+            selected_index_after_rebuild(
+                &entries,
+                Some("/root/.openwarp/remote-server"),
+                Some(4),
+            ),
+            Some(0)
+        );
     }
 }
