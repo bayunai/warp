@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 在远端主机安装 OpenWarp CLI 二进制,用于 remote-server-proxy。
+# 在远端主机安装 Zap CLI 二进制,用于 remote-server-proxy。
 #
 # setup.rs 会在运行时替换这些占位符:
 #   {download_base_url}     - 例如 https://github.com/zerx-lab/warp/releases/latest/download
-#   {install_dir}           - 例如 ~/.openwarp/remote-server
-#   {binary_name}           - 例如 warp-oss
+#   {install_dir}           - 例如 ~/.zap/remote-server
+#   {binary_name}           - 例如 zap-oss
 #   {version_suffix}        - 例如 -v0.2026...,没有 release tag 时为空
 #   {staging_tarball_path}  - SCP fallback 预上传 tarball 路径,常规下载路径为空
 set -e
@@ -43,24 +43,24 @@ if [ -n "$staging_tarball_path" ]; then
   case "$staging_tarball_path" in
     "~"|"~/"*) staging_tarball_path="${HOME}${staging_tarball_path#\~}" ;;
   esac
-  mv "$staging_tarball_path" "$tmpdir/openwarp.tar.gz"
+  mv "$staging_tarball_path" "$tmpdir/zap.tar.gz"
 else
-  url="{download_base_url}/openwarp-$os_name-$arch_name.tar.gz"
+  url="{download_base_url}/zap-$os_name-$arch_name.tar.gz"
   if command -v curl >/dev/null 2>&1; then
-    curl -fSL --connect-timeout 15 "$url" -o "$tmpdir/openwarp.tar.gz"
+    curl -fSL --connect-timeout 15 "$url" -o "$tmpdir/zap.tar.gz"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$tmpdir/openwarp.tar.gz" "$url"
+    wget -q -O "$tmpdir/zap.tar.gz" "$url"
   else
     echo "error: neither curl nor wget is available" >&2
     exit 3
   fi
 fi
 
-tar -xzf "$tmpdir/openwarp.tar.gz" -C "$tmpdir"
+tar -xzf "$tmpdir/zap.tar.gz" -C "$tmpdir"
 
 bin="$tmpdir/{binary_name}"
 if [ ! -f "$bin" ]; then
-  bin=$(find "$tmpdir" -type f \( -name 'warp-oss' -o -name 'oz*' \) ! -path "$tmpdir/resources/*" ! -name '*.tar.gz' | head -n1)
+  bin=$(find "$tmpdir" -type f \( -name 'zap-oss' -o -name 'warp-oss' -o -name 'oz*' \) ! -path "$tmpdir/resources/*" ! -name '*.tar.gz' | head -n1)
 fi
 if [ -z "$bin" ]; then echo "no binary found in tarball" >&2; exit 1; fi
 chmod +x "$bin"

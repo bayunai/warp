@@ -256,7 +256,7 @@ impl PassiveSuggestionsModel {
         };
 
         // BYOP 路径:把 ServerApi 调用替换为 BYOP one-shot completion。
-        // OpenWarp 已剥离 Warp Inc 云端,无 BYOP 配置时静默 no-op。
+        // Zap 已剥离 Zap Inc 云端,无 BYOP 配置时静默 no-op。
         let Some(rendered) = build_prompt_suggestions_byop_request(
             &block_completed,
             execution_context,

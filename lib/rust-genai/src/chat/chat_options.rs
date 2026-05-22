@@ -78,7 +78,7 @@ pub struct ChatOptions {
 	/// OpenAI prompt cache key.
 	pub prompt_cache_key: Option<String>,
 
-	/// OpenWarp fork extension — extra JSON object merged shallowly into the request body
+	/// Zap fork extension — extra JSON object merged shallowly into the request body
 	/// at the top level (only for keys not already set by the adapter).
 	///
 	/// Designed for provider-specific fields the typed API doesn't expose, e.g. DeepSeek's
@@ -204,7 +204,7 @@ impl ChatOptions {
 		self
 	}
 
-	/// OpenWarp fork — see `extra_body` field doc. Pass a JSON object;
+	/// Zap fork — see `extra_body` field doc. Pass a JSON object;
 	/// non-object values are accepted but only `Object` shape is merged.
 	pub fn with_extra_body(mut self, value: Value) -> Self {
 		self.extra_body = Some(value);
@@ -602,7 +602,7 @@ impl ChatOptionsSet<'_, '_> {
 			.or_else(|| self.client.and_then(|client| client.cache_control.as_ref()))
 	}
 
-	/// OpenWarp fork — extra JSON body fields. See `ChatOptions::extra_body` doc.
+	/// Zap fork — extra JSON body fields. See `ChatOptions::extra_body` doc.
 	pub fn extra_body(&self) -> Option<&Value> {
 		self.chat
 			.and_then(|chat| chat.extra_body.as_ref())

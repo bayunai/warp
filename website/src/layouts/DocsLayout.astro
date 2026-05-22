@@ -30,7 +30,7 @@ interface Props {
 
 const { title, title_zh, title_ja, lede, lede_zh, lede_ja, section, section_zh, section_ja, activeSlug, headings, prev, next } = Astro.props;
 const tocItems = headings.filter((h) => h.depth === 2);
-const repo = 'https://github.com/zerx-lab/warp';
+const repo = 'https://github.com/zerx-lab/zap';
 const editUrl = `${repo}/blob/main/website/src/content/docs/${activeSlug}.mdx`;
 ---
 <!doctype html>
@@ -38,7 +38,7 @@ const editUrl = `${repo}/blob/main/website/src/content/docs/${activeSlug}.mdx`;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{`OpenWarp · Docs · ${title}`}</title>
+    <title>{`Zap · Docs · ${title}`}</title>
     <meta name="description" content={lede} />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -175,7 +175,7 @@ const editUrl = `${repo}/blob/main/website/src/content/docs/${activeSlug}.mdx`;
         function setLocale(l: string) {
           // 仅在用户显式选择语言时持久化;自动检测应在后续访问继续跟随系统/浏览器。
           const locale = normalizeLocale(l) || 'en';
-          localStorage.setItem('openwarp:locale', locale);
+          localStorage.setItem('zap:locale', locale);
           applyLocale(locale);
         }
         applyLocale((document.body.dataset.locale as string) || 'en');

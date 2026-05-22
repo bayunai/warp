@@ -58,7 +58,7 @@ async fn byop_generate_input_suggestions(
     request: &GenerateAIInputSuggestionsRequest,
 ) -> Result<GenerateAIInputSuggestionsResponseV2, AIApiError> {
     let Some(cfg) = byop_cfg else {
-        // OpenWarp 已剥云,无 BYOP 配置时不再 fallback ServerApi —— 返回空响应,
+        // Zap 已剥云,无 BYOP 配置时不再 fallback ServerApi —— 返回空响应,
         // UI 自然不会展示建议,也不会刷错误日志。
         return Ok(GenerateAIInputSuggestionsResponseV2::default());
     };

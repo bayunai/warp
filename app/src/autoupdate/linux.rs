@@ -29,7 +29,7 @@ pub(super) async fn download_update_and_cleanup(
             appimage::download_update_and_cleanup(version_info, &appimage_path, client).await
         }
         UpdateMethod::PackageManager(package_manager) => {
-            log::info!("Detected that Warp was installed using {package_manager:?}");
+            log::info!("Detected that Zap was installed using {package_manager:?}");
             Ok(DownloadReady::NeedsAuthorization)
         }
     }
@@ -43,7 +43,7 @@ pub(super) fn apply_update() -> Result<ReadyForRelaunch> {
         UpdateMethod::Unknown => bail!("Cannot apply update for unknown update method!"),
         UpdateMethod::AppImage(_) => Ok(ReadyForRelaunch::Yes),
         UpdateMethod::PackageManager(package_manager) => bail!(
-            "OpenWarp does not support package-manager autoupdate for {package_manager}; install the new release manually"
+            "Zap does not support package-manager autoupdate for {package_manager}; install the new release manually"
         ),
     }
 }
@@ -107,7 +107,7 @@ mod appimage {
             .as_file_mut()
             .set_permissions(appimage_path.metadata()?.permissions())?;
 
-        // Move new AppImage over the one that launched the current Warp instance.
+        // Move new AppImage over the one that launched the current Zap instance.
         let new_appimage_path = new_appimage.into_temp_path();
         let mv_status = command::r#async::Command::new("mv")
             .arg(new_appimage_path.as_os_str())
@@ -178,14 +178,14 @@ mod package_manager {
     }
 }
 
-/// Returns which method should be used to update Warp.
+/// Returns which method should be used to update Zap.
 #[derive(Debug)]
 pub(crate) enum UpdateMethod {
-    /// We don't know how to update Warp.
+    /// We don't know how to update Zap.
     Unknown,
-    /// Warp is running as an AppImage and should be updated in-place.
+    /// Zap is running as an AppImage and should be updated in-place.
     AppImage(PathBuf),
-    /// Warp can be updated using the given package manager.
+    /// Zap can be updated using the given package manager.
     PackageManager(PackageManager),
 }
 
@@ -300,7 +300,7 @@ fn package_name(channel: Channel) -> &'static str {
         Channel::Dev => "warp-terminal-dev",
         Channel::Integration => "warp-terminal-integration",
         Channel::Local => "warp-terminal-local",
-        Channel::Oss => "warp-oss",
+        Channel::Oss => "zap-oss",
     }
 }
 

@@ -1139,7 +1139,7 @@ esac
     # the shell, but once bootstrap has completes, we want the value to be what
     # it would have been if we hadn't set an initial value.
     #
-    # For more context, see: https://github.com/warpdotdev/Warp/issues/1262
+    #
     if [[ $HISTFILESIZE == $WARP_INITIAL_HISTFILESIZE ]]; then
         unset HISTFILESIZE
     fi
@@ -1192,7 +1192,7 @@ esac
     # bash-preexec uses a DEBUG trap to trigger the preexec functions, it will run our preexec
     # functions before the command at PROMPT_COMMAND[1], PROMPT_COMMAND[2], etc. This means our
     # Preexec hook gets called without the user submitting a command, putting the input block into
-    # a broken state, e.g. see https://github.com/warpdotdev/Warp/issues/2636
+    # a broken state
     # If they end up fixing this, we may be able to remove this at some point, check this:
     #   https://github.com/rcaloras/bash-preexec/issues/130
     #

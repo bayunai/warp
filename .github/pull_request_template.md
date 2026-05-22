@@ -5,7 +5,7 @@
 <!--
 How did you test this change?  What automated tests did you add?  If you didn't add any new tests, what's your justification for not adding any?
 
-If you're not sure whether you should add a test, check our testing policy: https://www.notion.so/warpdev/How-We-Code-at-Warp-257fe43d556e4b3c8dfd42f70004cc72#1f97825450504baa9c5fd87a737daa09
+If you're not sure whether you should add a test, check our testing policy: https://www.notion.so/warpdev/How-We-Code-at-Zap-257fe43d556e4b3c8dfd42f70004cc72#1f97825450504baa9c5fd87a737daa09
 -->
 
 ## Server API dependencies
@@ -17,7 +17,7 @@ If you're not sure whether you should add a test, check our testing policy: http
   - [ ] If so, has the new server API been stable on production for at least one server release cycle? See [here](https://www.notion.so/warpdev/How-to-add-a-new-full-stack-feature-8412cede405a4ec194b32bdd4b951035?pvs=4#73b202f939834b97ab1fbdf7fc82cd53) for more details.
 
 ## Agent Mode
-- [ ] Warp Agent Mode - This PR was created via Warp's AI Agent Mode
+- [ ] Zap Agent Mode - This PR was created via Zap's AI Agent Mode
 
 ## Changelog Entries for Stable
 <!--

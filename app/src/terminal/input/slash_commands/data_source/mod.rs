@@ -418,13 +418,13 @@ impl InlineItem {
             override_icon
         } else {
             match skill.provider {
-                SkillProvider::Warp => WarpIcon::Warp,
+                SkillProvider::Zap => WarpIcon::Zap,
                 SkillProvider::Claude => WarpIcon::ClaudeLogo,
                 SkillProvider::Codex => WarpIcon::OpenAILogo,
                 SkillProvider::Gemini => WarpIcon::GeminiLogo,
                 SkillProvider::Droid => WarpIcon::DroidLogo,
                 SkillProvider::OpenCode => WarpIcon::OpenCodeLogo,
-                _ => WarpIcon::Warp,
+                _ => WarpIcon::Zap,
             }
         };
 

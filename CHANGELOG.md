@@ -1,6 +1,6 @@
 # Changelog
 
-本文档记录 OpenWarp 各个发布版本的关键变更。仅收录功能性 commit,省略 dev / stable 等内部滚动 tag。
+本文档记录 Zap 各个发布版本的关键变更。仅收录功能性 commit,省略 dev / stable 等内部滚动 tag。
 
 ## [Unreleased]
 
@@ -35,7 +35,7 @@
 
 ## [v2026.05.03.preview(.2/.3/.4)] — 2026-05-03
 
-- **上游同步**:合入大批 warp-upstream commit(tab 跨窗口拖拽、shell 脚本识别、IME cursor、远程服务器初始化重构、SSH remote-server 自动升级、跨窗口 tab drag 等);建立 rerere + `openwarp-ours` 合并驱动;新增黑名单文档
+- **上游同步**:合入大批 warp-upstream commit(tab 跨窗口拖拽、shell 脚本识别、IME cursor、远程服务器初始化重构、SSH remote-server 自动升级、跨窗口 tab drag 等);建立 rerere + `zap-ours` 合并驱动;新增黑名单文档
 - **AI / BYOP**:工具参数 type-mismatched 输出的 coerce 层;suspicious backslash 扫描收紧消除 ls/diff 误报
 - **i18n**:中文国际化补齐(设置面板等)
 - **网站**:GitHub 地址统一为 `zerx-lab/warp`;移动端横向溢出修复
@@ -76,9 +76,9 @@
 
 ## [v2026.04.30.preview] — 2026-04-30
 
-OpenWarp 社区分支首个预览版本。
+Zap 社区分支首个预览版本。
 
-- **品牌与定位**:OpenWarp 改名 + logo 重制 + 社区分支 README
+- **品牌与定位**:Zap 改名 + logo 重制 + 社区分支 README
 - **BYOP**
   - `async-openai` → `genai`,支持 5 种原生协议显式绑定
   - Providers 子页 + models.dev 数据源 + 快速添加搜索框

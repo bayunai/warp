@@ -67,6 +67,7 @@ pub fn is_agent_supported(agent: &CLIAgent) -> bool {
             | CLIAgent::Auggie
             | CLIAgent::Pi
             | CLIAgent::DeepSeek
+            | CLIAgent::Antigravity
     )
 }
 
@@ -82,7 +83,8 @@ fn create_handler(agent: &CLIAgent) -> Option<Box<dyn CLIAgentSessionHandler>> {
         | CLIAgent::OpenCode
         | CLIAgent::Gemini
         | CLIAgent::Auggie
-        | CLIAgent::Pi => Some(Box::new(DefaultSessionListener)),
+        | CLIAgent::Pi
+        | CLIAgent::Antigravity => Some(Box::new(DefaultSessionListener)),
         CLIAgent::Codex => Some(Box::new(CodexSessionHandler)),
         CLIAgent::DeepSeek => Some(Box::new(DeepSeekSessionHandler)),
         CLIAgent::Amp
@@ -408,6 +410,46 @@ mod tests {
         let event = CLIAgentEvent {
             v: 1,
             agent: CLIAgent::Pi,
+            event: CLIAgentEventType::Stop,
+            session_id: None,
+            cwd: None,
+            project: None,
+            payload: CLIAgentEventPayload::default(),
+        };
+        assert!(handler.handle_event(event).is_some());
+    }
+
+    #[test]
+    fn antigravity_is_supported() {
+        assert!(is_agent_supported(&CLIAgent::Antigravity));
+    }
+
+    #[test]
+    fn antigravity_uses_default_handler_with_rich_status() {
+        assert!(agent_supports_rich_status(&CLIAgent::Antigravity));
+    }
+
+    #[test]
+    fn antigravity_default_handler_skips_session_start() {
+        let mut handler = DefaultSessionListener;
+        let event = CLIAgentEvent {
+            v: 1,
+            agent: CLIAgent::Antigravity,
+            event: CLIAgentEventType::SessionStart,
+            session_id: None,
+            cwd: None,
+            project: None,
+            payload: CLIAgentEventPayload::default(),
+        };
+        assert!(handler.handle_event(event).is_none());
+    }
+
+    #[test]
+    fn antigravity_default_handler_forwards_stop() {
+        let mut handler = DefaultSessionListener;
+        let event = CLIAgentEvent {
+            v: 1,
+            agent: CLIAgent::Antigravity,
             event: CLIAgentEventType::Stop,
             session_id: None,
             cwd: None,

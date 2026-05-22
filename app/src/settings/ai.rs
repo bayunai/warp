@@ -1129,7 +1129,7 @@ impl settings_value::SettingsValue for BYOPLastUsedReasoningMap {
 }
 
 define_settings_group!(AISettings, settings: [
-    // 历史遗留设置。OpenWarp 的 Warp 智能体现在固定开启,不要用这个字段判断启用状态。
+    // 历史遗留设置。Zap 的 Zap 智能体现在固定开启,不要用这个字段判断启用状态。
     is_any_ai_enabled: IsAnyAIEnabled {
         type: bool,
         default: true,
@@ -1428,7 +1428,7 @@ define_settings_group!(AISettings, settings: [
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
         private: false,
         toml_path: "cloud_platform.third_party_api_keys.aws_bedrock_credentials_enabled",
-        description: "Whether Warp should use your local AWS credentials for Bedrock-enabled requests.",
+        description: "Whether Zap should use your local AWS credentials for Bedrock-enabled requests.",
     }
     // Whether to automatically run the AWS login command when Bedrock credentials are expired.
     //
@@ -1483,7 +1483,7 @@ define_settings_group!(AISettings, settings: [
         toml_path: "agents.knowledge.rules_enabled",
         description: "Whether the agent uses your saved rules during requests.",
     }
-    // Whether warp drive context should be included in AI requests
+    // Whether zap drive context should be included in AI requests
     warp_drive_context_enabled: WarpDriveContextEnabled {
         type: bool,
         default: true,
@@ -1491,7 +1491,7 @@ define_settings_group!(AISettings, settings: [
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
         private: false,
         toml_path: "agents.knowledge.warp_drive_context_enabled",
-        description: "Whether Warp Drive context is included in AI requests.",
+        description: "Whether Zap Drive context is included in AI requests.",
     }
 
     // Whether the agent mode setup banner has been shown for a given repo path.
@@ -1548,7 +1548,7 @@ define_settings_group!(AISettings, settings: [
         private: true,
     }
 
-    // Whether or not the user has enabled the ability to use Warp credits even when providing
+    // Whether or not the user has enabled the ability to use Zap credits even when providing
     // their own LLM provider API key.
     can_use_warp_credits_with_byok: CanUseWarpCreditsWithByok {
         type: bool,
@@ -1557,7 +1557,7 @@ define_settings_group!(AISettings, settings: [
         sync_to_cloud: SyncToCloud::Globally(RespectUserSyncSetting::Yes),
         private: false,
         toml_path: "cloud_platform.third_party_api_keys.can_use_warp_credits_with_byok",
-        description: "Whether Warp credits can be used even when providing your own API key.",
+        description: "Whether Zap credits can be used even when providing your own API key.",
     }
 
     should_render_use_agent_footer_for_user_commands: ShouldRenderUseAgentToolbarForUserCommands {
@@ -1702,7 +1702,7 @@ define_settings_group!(AISettings, settings: [
     }
 
     // Whether file-based MCP servers from third-party AI tools (e.g. Claude, Codex) should
-    // be automatically detected and spawned. Warp-native config files (.warp/.mcp.json) are
+    // be automatically detected and spawned. Zap-native config files (.warp/.mcp.json) are
     // always detected and spawned, regardless of this setting.
     file_based_mcp_enabled: FileBasedMcpEnabled {
         type: bool,
@@ -1753,7 +1753,7 @@ define_settings_group!(AISettings, settings: [
         description: "Whether agent notifications are shown.",
     }
 
-    // OpenWarp T1-2:已完成工具卡默认隐藏(对齐 opencode TUI showDetails 行为)。
+    // Zap T1-2:已完成工具卡默认隐藏(对齐 opencode TUI showDetails 行为)。
     // true → 默认隐藏 status.is_done() 的 RequestCommandOutput / ReadFiles /
     // Grep / FileGlob / RequestFileEdits 等卡片,只保留 in-progress + error,
     // 长 session 不被历史卡片堆积淹没新内容。folded 状态可由外观设置面板切换。
@@ -1803,7 +1803,7 @@ define_settings_group!(AISettings, settings: [
         description: "User-configured custom Agent providers (OpenAI-compatible).",
     }
 
-    // OpenWarp BYOP 本地会话压缩 — 1:1 对齐 opencode `Config.compaction.auto`。
+    // Zap BYOP 本地会话压缩 — 1:1 对齐 opencode `Config.compaction.auto`。
     // true 时按 token-overflow 自动触发摘要;false 仅手动 /compact /compact-and 触发。
     byop_compaction_auto: ByopCompactionAuto {
         type: bool,
@@ -1815,7 +1815,7 @@ define_settings_group!(AISettings, settings: [
         description: "Enable BYOP automatic conversation compaction on context overflow.",
     }
 
-    // OpenWarp BYOP 本地会话压缩 — 1:1 对齐 opencode `Config.compaction.prune`。
+    // Zap BYOP 本地会话压缩 — 1:1 对齐 opencode `Config.compaction.prune`。
     // true 时每次 LLM 请求前清旧 tool output(替换为占位符)。
     byop_compaction_prune: ByopCompactionPrune {
         type: bool,
@@ -1827,7 +1827,7 @@ define_settings_group!(AISettings, settings: [
         description: "Auto-prune older tool outputs to free BYOP context.",
     }
 
-    // OpenWarp BYOP 本地会话压缩 — 1:1 对齐 opencode `Config.compaction.tail_turns`(默认 2)。
+    // Zap BYOP 本地会话压缩 — 1:1 对齐 opencode `Config.compaction.tail_turns`(默认 2)。
     // 保留最近 N 个 user turn 作 tail,前面的进入 head 给摘要 LLM。0 关闭压缩。
     byop_compaction_tail_turns: ByopCompactionTailTurns {
         type: u32,
@@ -1839,7 +1839,7 @@ define_settings_group!(AISettings, settings: [
         description: "Number of recent user turns to keep verbatim during compaction.",
     }
 
-    // OpenWarp BYOP 本地会话压缩 — 1:1 对齐 `Config.compaction.preserve_recent_tokens`。
+    // Zap BYOP 本地会话压缩 — 1:1 对齐 `Config.compaction.preserve_recent_tokens`。
     // 0 = 自动按公式算(min(MAX=8000, max(MIN=2000, usable * 0.25)));> 0 强制覆盖。
     byop_compaction_preserve_recent_tokens: ByopCompactionPreserveRecentTokens {
         type: u32,
@@ -1851,7 +1851,7 @@ define_settings_group!(AISettings, settings: [
         description: "Override the recent-tokens preservation budget (0 = auto).",
     }
 
-    // OpenWarp BYOP 本地会话压缩 — 1:1 对齐 `Config.compaction.reserved`。
+    // Zap BYOP 本地会话压缩 — 1:1 对齐 `Config.compaction.reserved`。
     // overflow 判定时 usable = input_limit - reserved。0 = 自动按 min(20_000, max_output) 算。
     byop_compaction_reserved: ByopCompactionReserved {
         type: u32,
@@ -1863,7 +1863,7 @@ define_settings_group!(AISettings, settings: [
         description: "Reserved buffer tokens for compaction overflow check (0 = auto).",
     }
 
-    // OpenWarp BYOP 本地会话压缩 — 摘要专用模型(可选)。
+    // Zap BYOP 本地会话压缩 — 摘要专用模型(可选)。
     // 设置后:摘要 LLM 调用走这个 provider+model 而非当前 conversation 模型。
     // 留空两个字段 = 用 conversation 当前模型。
     byop_compaction_model_provider_id: ByopCompactionModelProviderId {
@@ -1886,7 +1886,7 @@ define_settings_group!(AISettings, settings: [
         description: "Optional dedicated model id for compaction LLM calls.",
     }
 
-    // OpenWarp BYOP 模型 + 思考深度持久化(picker 切换后立即写入,新 tab/重启沿用)。
+    // Zap BYOP 模型 + 思考深度持久化(picker 切换后立即写入,新 tab/重启沿用)。
     // 模型用 LLMId 字符串形式;空串 = 没有 last_used,落回 profile 默认。
     byop_last_used_model_id: ByopLastUsedModelId {
         type: String,
@@ -1898,7 +1898,7 @@ define_settings_group!(AISettings, settings: [
         description: "Last selected BYOP model id (picker hydrates new tabs/sessions from this).",
     }
 
-    // OpenWarp BYOP per-(api_type, model) 思考深度记忆。
+    // Zap BYOP per-(api_type, model) 思考深度记忆。
     // key = `<api_type>:<model_id>`,value = ReasoningEffortSetting。picker 切换写入。
     byop_last_used_reasoning: ByopLastUsedReasoning {
         type: BYOPLastUsedReasoningMap,
@@ -1931,7 +1931,7 @@ impl AISettings {
     }
 
     pub fn is_any_ai_enabled(&self, _app: &AppContext) -> bool {
-        // OpenWarp 不再允许通过设置关闭 Warp 智能体。旧配置文件里持久化的
+        // Zap 不再允许通过设置关闭 Zap 智能体。旧配置文件里持久化的
         // `agents.warp_agent.is_any_ai_enabled = false` 会被忽略。
         true
     }

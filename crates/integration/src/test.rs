@@ -622,7 +622,7 @@ pub fn test_suggestions_menu_positioning() -> Builder {
                 ),
         )
         .with_step(
-            new_step_with_default_assertions("Open Warp Drive")
+            new_step_with_default_assertions("Open Zap Drive")
                 .with_click_on_saved_position("workspace:toggle_left_panel")
                 .add_assertion(assert_is_left_panel_open()),
         )
@@ -2481,7 +2481,7 @@ precmd_functions+=(_p9k_precmd)
         )
         .with_step(wait_until_bootstrapped_single_pane_for_tab(1))
         .with_step(check_banner_open(1, true))
-        // If the user then switches back to the Warp prompt, we should close the banner.
+        // If the user then switches back to the Zap prompt, we should close the banner.
         .with_step(
             new_step_with_default_assertions("Disable honor_ps1").with_action(|app, _, _| {
                 SessionSettings::handle(app).update(app, |session_settings, ctx| {
@@ -3379,7 +3379,7 @@ pub fn test_custom_ps1_expansion_bash() -> Builder {
         )
 }
 
-/// Default auto title. We test that Warp's auto title is used and verify that that
+/// Default auto title. We test that Zap's auto title is used and verify that that
 /// DISABLE_AUTO_TITLE is set correctly.
 pub fn test_auto_title() -> Builder {
     new_builder()
@@ -3401,7 +3401,7 @@ pub fn test_auto_title() -> Builder {
         ))
 }
 
-/// Validate that disabling Warp's auto title feature will not mess with oh-my-zsh settings.
+/// Validate that disabling Zap's auto title feature will not mess with oh-my-zsh settings.
 pub fn test_warp_auto_title_disabled() -> Builder {
     new_builder()
         .set_should_run_test(|| {
@@ -3430,7 +3430,7 @@ WARP_DISABLE_AUTO_TITLE="true"
             );
         })
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
-        // If Warp title is disabled, we don't set the DISABLE_AUTO_TITLE env variable
+        // If Zap title is disabled, we don't set the DISABLE_AUTO_TITLE env variable
         .with_step(execute_command_for_single_terminal_in_tab(
             0,
             "echo $DISABLE_AUTO_TITLE".to_string(),
@@ -3442,7 +3442,7 @@ WARP_DISABLE_AUTO_TITLE="true"
         ))
 }
 
-/// Checks that the tab title set by the user takes precedence over the Warp's default title and
+/// Checks that the tab title set by the user takes precedence over the Zap's default title and
 /// doesn't require any additional setting from the user's POV. This is bash-specific test.
 pub fn test_warp_honors_user_title_bash() -> Builder {
     new_builder()
@@ -3474,7 +3474,7 @@ PROMPT_COMMAND='echo -en "\033]0;TEST_TAB_TITLE\a"'
         ))
 }
 
-/// Checks that the tab title set by the user takes precedence over the Warp's default title and
+/// Checks that the tab title set by the user takes precedence over the Zap's default title and
 /// doesn't require any additional setting from the user's POV. This is zsh-specific test.
 pub fn test_warp_honors_user_title_zsh() -> Builder {
     new_builder()
@@ -6661,7 +6661,7 @@ pub fn test_agent_mode_pane_minimum_size() -> Builder {
 }
 
 // cheating a little bit in this test; it's hard to tell if the create folder dialog is open from
-// the workspace view, but we DO force warp drive open to show the dialog, so we can look for that
+// the workspace view, but we DO force zap drive open to show the dialog, so we can look for that
 pub fn test_create_folder_from_command_palette() -> Builder {
     new_builder()
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
@@ -6730,7 +6730,7 @@ pub fn test_context_chips_prompt_at_bootstrap() -> Builder {
             (String::from("SavedPrompt"), String::from("Default")),
         ]))
         .with_step(
-            new_step_with_default_assertions("Check Warp prompt")
+            new_step_with_default_assertions("Check Zap prompt")
                 .add_assertion(assert_working_dir_is_present(0)),
         )
 }

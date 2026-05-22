@@ -12,7 +12,7 @@ Product spec: `specs/APP-3680/PRODUCT.md`
 
 **DefaultSessionMode:** `DefaultSessionMode` (`app/src/settings/ai.rs:252`) has `Terminal` and `Agent` variants. Set during onboarding via `apply_agent_settings` (`app/src/settings/onboarding.rs:122`).
 
-**Feature flags:** `TabConfigs`, `AgentOnboarding`, `OpenWarpNewSettingsModes`, and `AgentView` are the relevant flags (`warp_core/src/features.rs`). We'll add a new flag for this modal.
+**Feature flags:** `TabConfigs`, `AgentOnboarding`, `ZapNewSettingsModes`, and `AgentView` are the relevant flags (`warp_core/src/features.rs`). We'll add a new flag for this modal.
 
 ## Relevant Code
 
@@ -33,7 +33,7 @@ Product spec: `specs/APP-3680/PRODUCT.md`
 
 ### 1. New feature flag
 
-No new feature flag needed. Gate the modal behind both `FeatureFlag::OpenWarpNewSettingsModes` (this is the new onboarding path) and `FeatureFlag::TabConfigs` (the modal produces a tab config, so the tab config system must be enabled). Both flags must be on for the modal to appear. When either is off, the old onboarding flow runs unchanged.
+No new feature flag needed. Gate the modal behind both `FeatureFlag::ZapNewSettingsModes` (this is the new onboarding path) and `FeatureFlag::TabConfigs` (the modal produces a tab config, so the tab config system must be enabled). Both flags must be on for the modal to appear. When either is off, the old onboarding flow runs unchanged.
 
 ### 2. Add `Serialize` to tab config types
 
@@ -157,7 +157,7 @@ Agent view entry for Oz is handled automatically by `PaneMode::Agent` in the tab
 
 ### 9. Triggering the modal after onboarding
 
-In `handle_agent_onboarding_event` (`app/src/root_view.rs:2080`), after the existing `OnboardingCompleted` handling, when both `FeatureFlag::OpenWarpNewSettingsModes.is_enabled()` and `FeatureFlag::TabConfigs.is_enabled()`:
+In `handle_agent_onboarding_event` (`app/src/root_view.rs:2080`), after the existing `OnboardingCompleted` handling, when both `FeatureFlag::ZapNewSettingsModes.is_enabled()` and `FeatureFlag::TabConfigs.is_enabled()`:
 
 Instead of calling `start_agent_onboarding_tutorial` directly, dispatch a new `WorkspaceAction::ShowSessionConfigModal`. The workspace opens the modal. On `Completed`, the workspace replaces the tab and applies settings. On `Dismissed`, fall through to the existing tutorial path (or just leave the empty tab).
 
@@ -181,7 +181,7 @@ When either flag is off (old onboarding), the existing path (`start_agent_onboar
 
 ## Risks and Mitigations
 
-**Risk: Breaking existing onboarding.** All new behavior is gated behind both `FeatureFlag::OpenWarpNewSettingsModes` and `FeatureFlag::TabConfigs`. When either is off, `handle_agent_onboarding_event` follows the identical code path as today. No changes to `OnboardingTutorial`, `SelectedSettings`, or `apply_onboarding_settings`.
+**Risk: Breaking existing onboarding.** All new behavior is gated behind both `FeatureFlag::ZapNewSettingsModes` and `FeatureFlag::TabConfigs`. When either is off, `handle_agent_onboarding_event` follows the identical code path as today. No changes to `OnboardingTutorial`, `SelectedSettings`, or `apply_onboarding_settings`.
 
 **Risk: Tab index math when replacing.** Closing the wrong tab index would lose user work. Mitigated by: the old tab is always empty (just created by onboarding), and we close with `skip_confirmation = true`. We also use the tab index arithmetic described above, which can be validated in tests.
 
@@ -233,11 +233,11 @@ These verify the full pipeline from `build_tab_config` → `render_tab_config` p
 - Selecting Oz sets `DefaultSessionMode::Agent`.
 - Selecting Terminal sets `DefaultSessionMode::Terminal`.
 - Selecting a CLI agent sets `DefaultSessionMode::Terminal`.
-- When `OpenWarpNewSettingsModes` is off, `DefaultSessionMode` is not touched by this code path.
+- When `ZapNewSettingsModes` is off, `DefaultSessionMode` is not touched by this code path.
 
 ### Feature flag gating (integration)
-- When either `OpenWarpNewSettingsModes` or `TabConfigs` is off, `OnboardingCompleted` follows the old tutorial path — modal is never shown.
-- When both `OpenWarpNewSettingsModes` and `TabConfigs` are on, `OnboardingCompleted` dispatches `ShowSessionConfigModal`.
+- When either `ZapNewSettingsModes` or `TabConfigs` is off, `OnboardingCompleted` follows the old tutorial path — modal is never shown.
+- When both `ZapNewSettingsModes` and `TabConfigs` are on, `OnboardingCompleted` dispatches `ShowSessionConfigModal`.
 
 ### UI verification
 - Compare rendered modal against Figma mock.

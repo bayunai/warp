@@ -19,7 +19,7 @@ pub mod skill;
 pub mod agent;
 pub mod completions;
 pub mod config_file;
-// OpenWarp Wave 7-2:`environment` CLI 随 cloud ambient agent 主体子系统物理删。
+// Zap Wave 7-2:`environment` CLI 随 cloud ambient agent 主体子系统物理删。
 pub mod json_filter;
 pub mod mcp;
 pub mod model;
@@ -30,14 +30,14 @@ pub const OZ_PARENT_RUN_ID_ENV: &str = "OZ_PARENT_RUN_ID";
 pub const OZ_CLI_ENV: &str = "OZ_CLI";
 pub const OZ_HARNESS_ENV: &str = "OZ_HARNESS";
 
-/// Options related to the parent process that spawned this Warp instance.
+/// Options related to the parent process that spawned this Zap instance.
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct ParentOpts {
-    /// The ID of the Warp process that spawned this one.
+    /// The ID of the Zap process that spawned this one.
     ///
-    /// Used by codepaths that attempt to detect when the parent Warp process
+    /// Used by codepaths that attempt to detect when the parent Zap process
     /// has terminated. Guaranteed to be [`None`] when this is the initial
-    /// Warp process, but may also be [`None`] for Warp child processes if the
+    /// Zap process, but may also be [`None`] for Zap child processes if the
     /// child process doesn't need to keep track of its parent.
     #[arg(long = "parent-pid", hide = true)]
     pub pid: Option<u32>,
@@ -52,7 +52,7 @@ pub struct ParentOpts {
 }
 
 /// Hidden worker args used to scope remote-server proxy/daemon sockets by
-/// Warp identity without exposing credentials.
+/// Zap identity without exposing credentials.
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct RemoteServerIdentityArgs {
     /// Non-secret identity partition key for the remote-server daemon.
@@ -78,12 +78,12 @@ pub struct GlobalOptions {
     pub output_format: OutputFormat,
 }
 
-/// Command-line argument parser for the main Warp binary. This is used across all channels.
+/// Command-line argument parser for the main Zap binary. This is used across all channels.
 #[derive(Debug, Default, Parser, Clone)]
 #[command(
     name = "oz",
     display_name = "Oz",
-    about = r#"OpenWarp local agent CLI
+    about = r#"Zap local agent CLI
 
 The Oz CLI is a tool for running and managing local coding agents.
 Use the CLI to:
@@ -107,11 +107,11 @@ pub struct Args {
     args: AppArgs,
 }
 
-/// Flags for the Warp application. Additional binaries, like test runners, may use this type
+/// Flags for the Zap application. Additional binaries, like test runners, may use this type
 /// along with their own flags, or convert their flags into an `AppArgs` value.
 #[derive(Debug, Default, clap::Args, Clone)]
 pub struct AppArgs {
-    /// True if this instance of Warp was launched at the end of the auto-update process.
+    /// True if this instance of Zap was launched at the end of the auto-update process.
     #[arg(long = "finish-update", hide = true)]
     pub finish_update: bool,
 
@@ -120,11 +120,11 @@ pub struct AppArgs {
     #[arg(long = "crash-recovery-mechanism", value_enum, requires = "ParentOpts")]
     pub crash_recovery_mechanism: Option<RecoveryMechanism>,
 
-    /// Options related to the parent process that spawned this Warp instance.
+    /// Options related to the parent process that spawned this Zap instance.
     #[clap(flatten)]
     pub parent: ParentOpts,
 
-    /// URLs to open in Warp.
+    /// URLs to open in Zap.
     #[arg(hide = true)]
     pub urls: Vec<Url>,
 }
@@ -140,7 +140,7 @@ impl Args {
             } else {
                 use clap::FromArgMatches as _;
 
-                // OpenWarp Wave 7-2:`warp environment` 子命令 随 cloud ambient agent 主体物理删 ——
+                // Zap Wave 7-2:`warp environment` 子命令 随 cloud ambient agent 主体物理删 ——
                 // 以前这里有个反向拦截:在 clap 解析前检查并提前报错。
                 // 现在 enum variant 已删，clap 会自然报“unrecognized subcommand”。
 
@@ -188,7 +188,7 @@ impl Args {
     pub fn clap_command() -> clap::Command {
         let mut command = <Args as CommandFactory>::command();
 
-        // OpenWarp Wave 7-2:`environment` 子命令与 `--environment` 参数随 cloud ambient agent
+        // Zap Wave 7-2:`environment` 子命令与 `--environment` 参数随 cloud ambient agent
         // 主体物理删 —— enum variant 已从 `CliCommand` 和 `RunAgentArgs` 移除。
 
         // Hide the provider subcommand from help text
@@ -212,7 +212,6 @@ impl Args {
 
 <bold><underline>Learn more:</underline></bold>
 * Use <bold>{bin_name} help</bold> to learn more about each command
-* Read the documentation at https://docs.warp.dev/reference/cli
 "#
         ));
 
@@ -224,12 +223,12 @@ impl Args {
         self.command.as_ref()
     }
 
-    /// Args for the main Warp application, if not running a subcommand.
+    /// Args for the main Zap application, if not running a subcommand.
     pub fn app_args(&self) -> &AppArgs {
         &self.args
     }
 
-    /// Extract the main Warp application args.
+    /// Extract the main Zap application args.
     pub fn into_app_args(self) -> AppArgs {
         self.args
     }
@@ -255,9 +254,9 @@ impl Args {
     }
 }
 
-/// Warp may spawn several worker processes - mostly servers that support the main application.
+/// Zap may spawn several worker processes - mostly servers that support the main application.
 ///
-/// These subcommands run those worker processes, which are bundled into the Warp binary.
+/// These subcommands run those worker processes, which are bundled into the Zap binary.
 #[derive(Debug, Clone, Subcommand)]
 pub enum WorkerCommand {
     /// Run the terminal server.
@@ -311,15 +310,15 @@ pub enum WorkerCommand {
     },
 }
 
-/// CLI-related subcommands. The command-line interface to Warp isn't a full SDK (e.g. with language bindings),
-/// but it allows scripting some Warp functionality.
+/// CLI-related subcommands. The command-line interface to Zap isn't a full SDK (e.g. with language bindings),
+/// but it allows scripting some Zap functionality.
 #[derive(Debug, Clone, Subcommand)]
 pub enum CliCommand {
     /// Interact with Oz.
     #[command(subcommand)]
     Agent(crate::agent::AgentCommand),
 
-    // OpenWarp Wave 7-2:`Environment` variant 随 cloud ambient agent 主体子系统物理删。
+    // Zap Wave 7-2:`Environment` variant 随 cloud ambient agent 主体子系统物理删。
     /// Manage MCP servers.
     #[command(subcommand)]
     MCP(crate::mcp::MCPCommand),
@@ -336,13 +335,13 @@ pub enum CliCommand {
     Provider(crate::provider::ProviderCommand),
 }
 
-/// A subcommand of the main Warp application. This includes all [`WorkerCommand`]s as well as app-specific debugging tools.
+/// A subcommand of the main Zap application. This includes all [`WorkerCommand`]s as well as app-specific debugging tools.
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
     #[clap(flatten)]
     Worker(WorkerCommand),
 
-    /// Commands that make up the Warp CLI.
+    /// Commands that make up the Zap CLI.
     #[clap(flatten)]
     CommandLine(Box<CliCommand>),
 
@@ -361,7 +360,7 @@ pub enum Command {
     /// For Powershell, add the following to $PROFILE:
     ///     path\to\warp | Out-String | Invoke-Expression
     ///
-    /// If no shell is provided, this defaults to the shell that Warp was run from.
+    /// If no shell is provided, this defaults to the shell that Zap was run from.
     #[command(verbatim_doc_comment)]
     Completions {
         /// Shell to generate completions for.
@@ -464,7 +463,7 @@ pub fn dump_debug_info_flag() -> String {
     format!("--{flag}")
 }
 
-/// Returns a flag that sets the current process as the parent of a Warp subcommand to spawn.
+/// Returns a flag that sets the current process as the parent of a Zap subcommand to spawn.
 pub fn parent_flag() -> String {
     let command = <Args as CommandFactory>::command();
     let flag = command

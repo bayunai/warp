@@ -48,7 +48,7 @@ cfg_if::cfg_if! {
 
 pub(crate) fn home_config_file_path(provider: MCPProvider) -> Option<PathBuf> {
     match provider {
-        MCPProvider::Warp => warp_core::paths::warp_home_mcp_config_file_path(),
+        MCPProvider::Zap => warp_core::paths::warp_home_mcp_config_file_path(),
         _ => dirs::home_dir().map(|home_dir| home_dir.join(provider.home_config_path())),
     }
 }
@@ -64,7 +64,7 @@ cfg_if::cfg_if! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub enum MCPProvider {
-    Warp,
+    Zap,
     Claude,
     Codex,
     Agents,
@@ -73,7 +73,7 @@ pub enum MCPProvider {
 impl MCPProvider {
     pub fn display_name(&self) -> &str {
         match self {
-            MCPProvider::Warp => "Warp",
+            MCPProvider::Zap => "Zap",
             MCPProvider::Claude => "Claude",
             MCPProvider::Codex => "Codex",
             MCPProvider::Agents => "Other Agents",
@@ -82,17 +82,17 @@ impl MCPProvider {
 
     pub fn icon(&self) -> Icon {
         match self {
-            MCPProvider::Warp => Icon::Warp,
+            MCPProvider::Zap => Icon::Zap,
             MCPProvider::Claude => Icon::ClaudeLogo,
             MCPProvider::Codex => Icon::OpenAILogo,
-            MCPProvider::Agents => Icon::Warp,
+            MCPProvider::Agents => Icon::Zap,
         }
     }
 
     /// Returns the path of the provider's config file relative to the home directory.
     pub fn home_config_path(&self) -> &'static Path {
         match self {
-            MCPProvider::Warp => Path::new(".warp/.mcp.json"),
+            MCPProvider::Zap => Path::new(".warp/.mcp.json"),
             MCPProvider::Claude => Path::new(".claude.json"),
             MCPProvider::Codex => Path::new(".codex/config.toml"),
             MCPProvider::Agents => Path::new(".agents/.mcp.json"),
@@ -102,7 +102,7 @@ impl MCPProvider {
     /// Returns the path of the provider's config file relative to a project root.
     pub fn project_config_path(&self) -> &'static Path {
         match self {
-            MCPProvider::Warp => Path::new(".warp/.mcp.json"),
+            MCPProvider::Zap => Path::new(".warp/.mcp.json"),
             MCPProvider::Claude => Path::new(".mcp.json"),
             MCPProvider::Codex => Path::new(".codex/config.toml"),
             MCPProvider::Agents => Path::new(".agents/.mcp.json"),
@@ -151,7 +151,7 @@ mod tests {
         {
             assert_eq!(
                 mcp_provider_from_file_path(&warp_home_mcp_config_file_path),
-                Some(MCPProvider::Warp)
+                Some(MCPProvider::Zap)
             );
         }
     }

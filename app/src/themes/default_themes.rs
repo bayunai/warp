@@ -631,7 +631,7 @@ pub(super) fn sent_referral_reward() -> WarpTheme {
             source: bundled_or_fetched_asset!("jpg/sent_referral_reward_bg.jpg"),
             opacity: 100,
         }),
-        Some("Warp Referral".to_string()),
+        Some("Zap Referral".to_string()),
     )
 }
 

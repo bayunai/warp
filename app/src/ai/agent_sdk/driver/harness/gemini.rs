@@ -186,7 +186,7 @@ impl HarnessRunner for GeminiHarnessRunner {
         };
 
         let _ = (foreground, conversation_id, block_id);
-        log::debug!("Skipping Gemini block snapshot export in OpenWarp");
+        log::debug!("Skipping Gemini block snapshot export in Zap");
         Ok(())
     }
 }

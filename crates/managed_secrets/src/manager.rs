@@ -11,7 +11,7 @@ use crate::{
     envelope::UploadKey,
 };
 
-/// Singleton model for working with Warp-managed secrets.
+/// Singleton model for working with Zap-managed secrets.
 pub struct ManagedSecretManager {
     client: Arc<dyn ManagedSecretsClient>,
     actor_provider: Arc<dyn ActorProvider>,
@@ -137,7 +137,7 @@ impl ManagedSecretManager {
         }
     }
 
-    /// Get Warp-managed secrets scoped to the currently-executing task.
+    /// Get Zap-managed secrets scoped to the currently-executing task.
     ///
     /// This will fail if not in an ambient agent.
     pub fn get_task_secrets(

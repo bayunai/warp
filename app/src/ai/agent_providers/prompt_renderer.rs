@@ -199,7 +199,7 @@ struct ProjectRuleCtx {
     content: String,
 }
 
-/// OpenWarp BYOP 修复 Issue #116:全局 Rules(用户在 设置 → Agents → Rules 创建)
+/// Zap BYOP 修复 Issue #116:全局 Rules(用户在 设置 → Agents → Rules 创建)
 /// 的扁平视图,喂给 `partials/user_rules.j2` 渲染进 system prompt。
 #[derive(Debug, Serialize)]
 struct UserRuleCtx {
@@ -220,7 +220,7 @@ struct PromptContext {
     git: Option<GitCtx>,
     skills: Vec<SkillCtx>,
     project_rules: Vec<ProjectRuleCtx>,
-    /// OpenWarp BYOP 修复 Issue #116:由 caller(`render_system`)从
+    /// Zap BYOP 修复 Issue #116:由 caller(`render_system`)从
     /// `RequestParams.user_rules` 注入,经 `partials/user_rules.j2` 渲染。
     user_rules: Vec<UserRuleCtx>,
     current_time: String,
@@ -274,7 +274,7 @@ fn collect_prompt_context(model_id: &str, ctx: &[AIAgentContext]) -> PromptConte
             }
             AIAgentContext::CurrentTime { current_time } => {
                 // P0-1:与默认值保持一致,只保留自然日粒度。
-                // 上游 Warp 有可能传入精确到秒的 timestamp,这里统一压到“当前日期”。
+                // 上游 Zap 有可能传入精确到秒的 timestamp,这里统一压到“当前日期”。
                 out.current_time = current_time.format("%Y-%m-%d").to_string();
             }
             // 代码索引功能未实现,Codebase 上下文不进 system prompt。
@@ -422,7 +422,7 @@ fn fallback_init_project_command(arguments: &str) -> String {
 /// 渲染兜底 system(只在模板加载/渲染失败时用,不应在正常路径触发)。
 fn fallback_system(model_id: &str) -> String {
     format!(
-        "You are the AI coding agent inside OpenWarp, an AI Development Environment (ADE). \
+        "You are the AI coding agent inside Zap, an AI Development Environment (ADE). \
          Model: {model_id}. \
          Use the registered tools (run_shell_command / read_files / apply_file_diffs / grep / file_glob / ...) \
          to take actions on the user's behalf. Be concise."
@@ -531,7 +531,7 @@ mod tests {
 
     #[test]
     fn render_produces_non_empty_for_all_families() {
-        // 任意 model id 都能渲染出非空字符串(包含 OpenWarp 自我标识)。
+        // 任意 model id 都能渲染出非空字符串(包含 Zap 自我标识)。
         for id in [
             "claude-sonnet-4-5",
             "gpt-4o",
@@ -550,8 +550,8 @@ mod tests {
                 &[],
             );
             assert!(
-                out.contains("OpenWarp"),
-                "id={id} should mention OpenWarp, got: {out}"
+                out.contains("Zap"),
+                "id={id} should mention Zap, got: {out}"
             );
         }
     }

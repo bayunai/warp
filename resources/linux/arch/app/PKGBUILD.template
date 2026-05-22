@@ -1,9 +1,9 @@
-pkgname=warp-terminal@@CHANNEL_SUFFIX@@
-pkgver=@@VERSION@@
+pkgname=@@PACKAGE_NAME@@
+pkgver=@@PKGVER@@
 pkgrel=@@RELEASE@@
-pkgdesc="Warp, the Rust-based terminal for developers and teams"
+pkgdesc="Zap, a community fork of the Rust-based Warp terminal"
 arch=('@@ARCH@@')
-url="https://warp.dev"
+url="https://github.com/zerx-lab/warp"
 license=('custom')
 depends=(
 	'curl'

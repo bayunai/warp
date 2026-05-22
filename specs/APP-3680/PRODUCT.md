@@ -29,7 +29,7 @@ A new modal ("Create your default tab config") appears after onboarding complete
 
 ### When the modal appears
 
-The modal appears once, immediately after the user completes the onboarding slide flow. It only appears when `OpenWarpNewSettingsModes` is enabled — this is the new onboarding path. Users on the old onboarding flow never see this modal. It is rendered as a centered overlay on top of the terminal workspace (not as a full-screen onboarding slide). The user cannot interact with the terminal behind it while the modal is open.
+The modal appears once, immediately after the user completes the onboarding slide flow. It only appears when `ZapNewSettingsModes` is enabled — this is the new onboarding path. Users on the old onboarding flow never see this modal. It is rendered as a centered overlay on top of the terminal workspace (not as a full-screen onboarding slide). The user cannot interact with the terminal behind it while the modal is open.
 
 ### Modal layout (per Figma)
 

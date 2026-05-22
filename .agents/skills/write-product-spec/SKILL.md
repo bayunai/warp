@@ -1,19 +1,19 @@
 ---
 name: write-product-spec
-description: Write a PRODUCT.md spec for a significant user-facing feature in Warp, focused on detailed behavior and validation. Use when the user asks for a product spec, desired behavior doc, or PRD, wants to define feature behavior before implementation, or when the feature is substantial or behaviorally ambiguous enough that a written spec would improve implementation or review.
+description: Write a PRODUCT.md spec for a significant user-facing feature in Zap, focused on detailed behavior and validation. Use when the user asks for a product spec, desired behavior doc, or PRD, wants to define feature behavior before implementation, or when the feature is substantial or behaviorally ambiguous enough that a written spec would improve implementation or review.
 ---
 
 # write-product-spec
 
-Write a `PRODUCT.md` spec for a significant feature in Warp.
+Write a `PRODUCT.md` spec for a significant feature in Zap.
 
 ## Overview
 
 The product spec should make the desired behavior unambiguous enough that an agent can implement it correctly and avoid regressions. Describe the feature purely from the user's perspective — what the user sees, does, and experiences, and the invariants that must hold for them. Do not include implementation details (internal types, state layout, module boundaries, data flow, algorithms).
 
-"User" is not limited to the end user of the Warp app. It means whoever consumes the surface being designed:
+"User" is not limited to the end user of the Zap app. It means whoever consumes the surface being designed:
 
-- For UI / UX features: the human using Warp.
+- For UI / UX features: the human using Zap.
 - For a data model: the code that reads and writes that model.
 - For an API, protocol, or library: the callers of that API — other services, client code, plugins, or agents.
 - For a CLI tool or developer-facing surface: the developer invoking it.
@@ -113,7 +113,7 @@ For large features, the implementer may optionally keep a `DECISIONS.md` file su
 
 ## Example Behavior section
 
-A sample Behavior section for a hypothetical feature: rendering GitHub-flavored Markdown tables in the Warp block list. It demonstrates the expected shape — numbered, testable, user-perspective invariants that enumerate defaults, edge cases, malformed input, streaming, selection/copy, search, sharing, theming, and cross-surface consistency, with one inline open question.
+A sample Behavior section for a hypothetical feature: rendering GitHub-flavored Markdown tables in the Zap block list. It demonstrates the expected shape — numbered, testable, user-perspective invariants that enumerate defaults, edge cases, malformed input, streaming, selection/copy, search, sharing, theming, and cross-surface consistency, with one inline open question.
 
 ````markdown
 ## Behavior
@@ -154,9 +154,9 @@ A sample Behavior section for a hypothetical feature: rendering GitHub-flavored 
 
 13. Search within a block (find-in-block) matches against cell text content. Matches highlight in place in the rendered cell; navigating matches scrolls the table into view, including horizontally if the match is in an off-screen column.
 
-14. Sharing or exporting a block (Warp Drive, share link, save as file) preserves the original markdown source, not the rendered form.
+14. Sharing or exporting a block (Zap Drive, share link, save as file) preserves the original markdown source, not the rendered form.
 
-15. Theming: table borders, header backgrounds, alternating row shading (if any), and link/code styles all come from the active Warp theme. No hard-coded colors.
+15. Theming: table borders, header backgrounds, alternating row shading (if any), and link/code styles all come from the active Zap theme. No hard-coded colors.
 
 16. Markdown tables render consistently wherever block-list markdown already renders — command output, agent responses, and any other block type that supports inline markdown. The same input produces the same table in each surface.
 

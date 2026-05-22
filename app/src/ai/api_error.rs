@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use warp_core::errors::{AnyhowErrorExt, ErrorExt};
 use warp_core::register_error;
 
-const WARP_ERROR_CODE_HEADER: &str = "X-Warp-Error-Code";
+const WARP_ERROR_CODE_HEADER: &str = "X-Zap-Error-Code";
 const WARP_ERROR_CODE_OUT_OF_CREDITS: &str = "OUT_OF_CREDITS";
 
 #[derive(thiserror::Error, Debug, Serialize, Deserialize)]
@@ -28,7 +28,7 @@ pub enum AIApiError {
     #[error("Request failed due to lack of AI quota.")]
     QuotaLimit,
 
-    #[error("Warp is currently overloaded. Please try again later.")]
+    #[error("Zap is currently overloaded. Please try again later.")]
     ServerOverloaded,
 
     #[error("Internal error occurred at transport layer.")]

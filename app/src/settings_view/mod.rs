@@ -78,15 +78,15 @@ pub mod mcp_servers_page;
 mod nav;
 mod network_page;
 pub mod pane_manager;
-// OpenWarp Wave 3-1:`platform` / `platform_page` 随 `OzCloudAPIKeys` settings 入口 +
-// Warp Inc 云端 API key 管理 UI 一同物理删。
-// OpenWarp Wave 6-8:`referrals_page` / `show_blocks_view` 随 `ReferralsClient` /
+// Zap Wave 3-1:`platform` / `platform_page` 随 `OzCloudAPIKeys` settings 入口 +
+// Zap Inc 云端 API key 管理 UI 一同物理删。
+// Zap Wave 6-8:`referrals_page` / `show_blocks_view` 随 `ReferralsClient` /
 // `BlockClient` trait 物理删 —— 两个页面全部 stub Err / 空列表,本地无价值。
 mod settings_file_footer;
 pub(crate) mod settings_page;
-// OpenWarp Wave 7-3:`telemetry` 随唯一 variant `EnvironmentsPageOpened` (ambient-agent UI)
+// Zap Wave 7-3:`telemetry` 随唯一 variant `EnvironmentsPageOpened` (ambient-agent UI)
 // 一同物理删。
-// OpenWarp Wave 7-2:`update_environment_form` 随 cloud ambient agent 主体物理删 ——
+// Zap Wave 7-2:`update_environment_form` 随 cloud ambient agent 主体物理删 ——
 // `terminal::view::ambient_agent::first_time_setup` 与 `cloud_environments` 一同下线。
 mod warp_drive_page;
 mod warpify_page;
@@ -142,7 +142,7 @@ pub(super) fn editor_text_colors(appearance: &Appearance) -> TextColors {
 pub enum SettingsViewEvent {
     Pane(PaneEvent),
     StartResize,
-    // OpenWarp 去中心化分支:`CheckForUpdate` / `OpenWarpDrive` 变体随 Account
+    // Zap 去中心化分支:`CheckForUpdate` / `ZapDrive` 变体随 Account
     // 主设置页唯一发射者(`MainSettingsPageView`)一同物理删。
     ShowToast {
         message: String,
@@ -164,7 +164,7 @@ pub enum SettingsSection {
     Appearance,
     Features,
     Keybindings,
-    WarpDrive,
+    ZapDrive,
     Warpify,
     /// Internal backing-page identifier for AISettingsPageView. Multiple subpages
     /// (WarpAgent, AgentProfiles, Knowledge, ThirdPartyCLIAgents) share this single
@@ -172,7 +172,7 @@ pub enum SettingsSection {
     /// External callers should navigate to a specific subpage (e.g. `WarpAgent`) instead.
     AI,
     // ── Agents umbrella subpages ──
-    // 去中心化分支:Settings 默认页改为 Warp Agent(本地 AI 设置)。
+    // 去中心化分支:Settings 默认页改为 Zap Agent(本地 AI 设置)。
     #[default]
     WarpAgent,
     AgentProfiles,
@@ -189,9 +189,9 @@ pub enum SettingsSection {
     /// removed.
     Code,
     EditorAndCodeReview,
-    // OpenWarp Wave 3-1:`OzCloudAPIKeys` enum variant 随 Warp Inc API key 管理 UI
+    // Zap Wave 3-1:`OzCloudAPIKeys` enum variant 随 Zap Inc API key 管理 UI
     // 一同物理删。
-    // OpenWarp Wave 7-3:`CloudEnvironments` 随 ambient-agent UI 子系统物理删。
+    // Zap Wave 7-3:`CloudEnvironments` 随 ambient-agent UI 子系统物理删。
 }
 
 use crate::util::bindings::custom_tag_to_keystroke;
@@ -205,7 +205,7 @@ impl Display for SettingsSection {
             SettingsSection::Appearance => crate::t!("settings-section-appearance"),
             SettingsSection::Features => crate::t!("settings-section-features"),
             SettingsSection::Keybindings => crate::t!("settings-section-keybindings"),
-            SettingsSection::WarpDrive => crate::t!("settings-section-warp-drive"),
+            SettingsSection::ZapDrive => crate::t!("settings-section-warp-drive"),
             SettingsSection::Warpify => crate::t!("settings-section-warpify"),
             SettingsSection::AI => crate::t!("settings-section-ai"),
             SettingsSection::WarpAgent => crate::t!("settings-section-warp-agent"),
@@ -222,8 +222,8 @@ impl Display for SettingsSection {
             }
             // 代理设置页面。i18n key `settings-section-network` 已在 en / zh-CN / ja 三种语言中齐全。
             SettingsSection::Network => crate::t!("settings-section-network"),
-            // OpenWarp Wave 3-1:`OzCloudAPIKeys` Display arm 随 variant 一同物理删。
-            // OpenWarp Wave 7-3:`CloudEnvironments` Display arm 随 variant 物理删。
+            // Zap Wave 3-1:`OzCloudAPIKeys` Display arm 随 variant 一同物理删。
+            // Zap Wave 7-3:`CloudEnvironments` Display arm 随 variant 物理删。
         };
         write!(f, "{s}")
     }
@@ -258,8 +258,8 @@ impl SettingsSection {
             s if s.is_ai_subpage() => Self::AI,
             // EditorAndCodeReview is the only label still pointing at the Code page.
             Self::EditorAndCodeReview => Self::Code,
-            // OpenWarp Wave 3-1:`OzCloudAPIKeys` 随 UI 一同物理删。
-            // OpenWarp Wave 7-3:`CloudEnvironments` umbrella 随 ambient-agent UI 一同物理删。
+            // Zap Wave 3-1:`OzCloudAPIKeys` 随 UI 一同物理删。
+            // Zap Wave 7-3:`CloudEnvironments` umbrella 随 ambient-agent UI 一同物理删。
             other => *other,
         }
     }
@@ -290,9 +290,9 @@ impl FromStr for SettingsSection {
             "Features" => Ok(Self::Features),
             "Keyboard shortcuts" => Ok(Self::Keybindings),
             "Warpify" => Ok(Self::Warpify),
-            "WarpDrive" | "Warp Drive" => Ok(Self::WarpDrive),
+            "ZapDrive" | "Zap Drive" => Ok(Self::ZapDrive),
             // This page was called "Oz" at one point, keep for backward compatibility.
-            "Oz" | "Warp Agent" => Ok(Self::WarpAgent),
+            "Oz" | "Zap Agent" => Ok(Self::WarpAgent),
             "Profiles" | "AgentProfiles" => Ok(Self::AgentProfiles),
             "MCP servers" | "AgentMCPServers" => Ok(Self::AgentMCPServers),
             "Providers" | "AgentProviders" => Ok(Self::AgentProviders),
@@ -300,8 +300,8 @@ impl FromStr for SettingsSection {
             "Third party CLI agents" | "ThirdPartyCLIAgents" => Ok(Self::ThirdPartyCLIAgents),
             "Editor and Code Review" | "EditorAndCodeReview" => Ok(Self::EditorAndCodeReview),
             "Network" | "网络" => Ok(Self::Network),
-            // OpenWarp Wave 3-1:`OzCloudAPIKeys` 随 UI 一同物理删。
-            // OpenWarp Wave 7-3:`CloudEnvironments` FromStr arm 随 variant 物理删。
+            // Zap Wave 3-1:`OzCloudAPIKeys` 随 UI 一同物理删。
+            // Zap Wave 7-3:`CloudEnvironments` FromStr arm 随 variant 物理删。
             _ => Err(()),
         }
     }
@@ -765,7 +765,7 @@ pub enum SettingsAction {
     FeaturesPageToggle(FeaturesPageAction),
     AI(AISettingsPageAction),
     Code(CodeSettingsPageAction),
-    WarpDrive(warp_drive_page::WarpDriveSettingsPageAction),
+    ZapDrive(warp_drive_page::WarpDriveSettingsPageAction),
     WarpifyPageToggle(WarpifyPageAction),
     Tab,
     Split(Direction),
@@ -910,14 +910,14 @@ macro_rules! update_page {
             SettingsPageViewHandle::Features(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Keybindings(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Warpify(handle) => $ctx.update_view(handle, $update),
-            // OpenWarp Wave 3-1:`OzCloudAPIKeys` arm 随 variant 一同物理删。
-            // OpenWarp Wave 6-8:`SharedBlocks` / `Referrals` arm 随 variant 物理删。
-            // OpenWarp Wave 7-3:`CloudEnvironments` arm 随 ambient-agent UI 一同物理删。
+            // Zap Wave 3-1:`OzCloudAPIKeys` arm 随 variant 一同物理删。
+            // Zap Wave 6-8:`SharedBlocks` / `Referrals` arm 随 variant 物理删。
+            // Zap Wave 7-3:`CloudEnvironments` arm 随 ambient-agent UI 一同物理删。
             SettingsPageViewHandle::AI(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::About(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::Code(handle) => $ctx.update_view(handle, $update),
             SettingsPageViewHandle::MCPServers(handle) => $ctx.update_view(handle, $update),
-            SettingsPageViewHandle::WarpDrive(handle) => $ctx.update_view(handle, $update),
+            SettingsPageViewHandle::ZapDrive(handle) => $ctx.update_view(handle, $update),
             // Issue #72: 全局 HTTP 代理设置页。
             SettingsPageViewHandle::Network(handle) => $ctx.update_view(handle, $update),
         }
@@ -978,7 +978,7 @@ impl SettingsView {
             me.handle_features_page_event(event, ctx);
         });
 
-        // OpenWarp Wave 6-8:Shared blocks 设置页随 `ShowBlocksView` / `BlockClient`
+        // Zap Wave 6-8:Shared blocks 设置页随 `ShowBlocksView` / `BlockClient`
         // 物理删,handle / 事件订阅一同移除。
 
         // About page
@@ -992,7 +992,7 @@ impl SettingsView {
         });
 
         // Environments page
-        // OpenWarp Wave 7-3:`environments_page_handle` 随 ambient-agent UI 子系统物理删。
+        // Zap Wave 7-3:`environments_page_handle` 随 ambient-agent UI 子系统物理删。
 
         // Keybindings page
         let keybindings_handle = ctx.add_typed_action_view(KeybindingsView::new);
@@ -1009,14 +1009,14 @@ impl SettingsView {
             me.handle_warpify_page_event(event, ctx);
         });
 
-        // OpenWarp Wave 6-8:Referrals 设置页随 `ReferralsPageView` / `ReferralsClient`
+        // Zap Wave 6-8:Referrals 设置页随 `ReferralsPageView` / `ReferralsClient`
         // 物理删,handle / 事件订阅一同移除。
 
-        // Warp Drive page
+        // Zap Drive page
         let warp_drive_page_handle =
             ctx.add_typed_action_view(warp_drive_page::WarpDriveSettingsPageView::new);
 
-        // OpenWarp Wave 3-1:`platform_page_handle` 随 `platform_page` 一同物理删。
+        // Zap Wave 3-1:`platform_page_handle` 随 `platform_page` 一同物理删。
 
         // MCP Servers page
         let mcp_servers_page_handle = ctx.add_typed_action_view(MCPServersSettingsPageView::new);
@@ -1061,7 +1061,7 @@ impl SettingsView {
             SettingsPage::new(appearance_page_handle),
             SettingsPage::new(features_page_handle),
             SettingsPage::new(keybindings_handle),
-            // OpenWarp Wave 3-1:`platform_page_handle` 随 UI 一同物理删。
+            // Zap Wave 3-1:`platform_page_handle` 随 UI 一同物理删。
             SettingsPage::new(warpify_page_handle),
             SettingsPage::new(warp_drive_page_handle),
         ];
@@ -1463,7 +1463,7 @@ impl SettingsView {
         }
     }
 
-    // OpenWarp Wave 7-3:`handle_environments_page_event` 随 ambient-agent UI 子系统物理删。
+    // Zap Wave 7-3:`handle_environments_page_event` 随 ambient-agent UI 子系统物理删。
 
     fn handle_features_page_event(
         &mut self,
@@ -1492,7 +1492,7 @@ impl SettingsView {
         }
     }
 
-    // OpenWarp Wave 3-1:`handle_platform_page_event` 随 `platform_page::PlatformPageViewEvent`
+    // Zap Wave 3-1:`handle_platform_page_event` 随 `platform_page::PlatformPageViewEvent`
     // 一同物理删。
 
     fn handle_mcp_servers_page_event(
@@ -1614,7 +1614,7 @@ impl SettingsView {
             self.clear_search_query(ctx);
         }
         self.current_settings_page = section;
-        // OpenWarp Wave 7-3:`SettingsTelemetryEvent::EnvironmentsPageOpened` 随 ambient-agent UI
+        // Zap Wave 7-3:`SettingsTelemetryEvent::EnvironmentsPageOpened` 随 ambient-agent UI
         // 子系统物理删。
         let _ = previous_section;
 
@@ -1678,13 +1678,13 @@ impl SettingsView {
             SettingsPageViewHandle::Features(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Appearance(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::About(v) => v.as_ref(app).should_render(app),
-            // OpenWarp Wave 3-1:`OzCloudAPIKeys` arm 随 variant 一同物理删。
-            // OpenWarp Wave 6-8:`SharedBlocks` / `Referrals` arm 随 variant 物理删。
+            // Zap Wave 3-1:`OzCloudAPIKeys` arm 随 variant 一同物理删。
+            // Zap Wave 6-8:`SharedBlocks` / `Referrals` arm 随 variant 物理删。
             SettingsPageViewHandle::Warpify(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::AI(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::MCPServers(v) => v.as_ref(app).should_render(app),
             SettingsPageViewHandle::Code(v) => v.as_ref(app).should_render(app),
-            SettingsPageViewHandle::WarpDrive(v) => v.as_ref(app).should_render(app),
+            SettingsPageViewHandle::ZapDrive(v) => v.as_ref(app).should_render(app),
             // Issue #72: 全局 HTTP 代理设置页。
             SettingsPageViewHandle::Network(v) => v.as_ref(app).should_render(app),
         }
@@ -1873,7 +1873,7 @@ impl SettingsView {
         app: &AppContext,
     ) -> Option<Box<dyn Element>> {
         match page_handle {
-            // OpenWarp Wave 3-1:`OzCloudAPIKeys` modal arm 随 UI 一同物理删。
+            // Zap Wave 3-1:`OzCloudAPIKeys` modal arm 随 UI 一同物理删。
             SettingsPageViewHandle::MCPServers(view) => {
                 view.read(app, |view, _| view.get_modal_content(app))
             }
@@ -2174,7 +2174,7 @@ impl View for SettingsView {
             );
         }
 
-        // OpenWarp Wave 7-3:environment setup mode selector / agent-assisted environment
+        // Zap Wave 7-3:environment setup mode selector / agent-assisted environment
         // modal 覆盖渲染随 ambient-agent UI 子系统物理删。
 
         SavePosition::new(stack.finish(), POSITION_ID).finish()
@@ -2242,9 +2242,9 @@ impl TypedActionView for SettingsView {
                     }
                 }
             }
-            SettingsAction::WarpDrive(warp_drive_action) => {
-                if let Some(warp_drive_page) = self.settings_page(SettingsSection::WarpDrive) {
-                    if let SettingsPageViewHandle::WarpDrive(view) = &warp_drive_page.view_handle {
+            SettingsAction::ZapDrive(warp_drive_action) => {
+                if let Some(warp_drive_page) = self.settings_page(SettingsSection::ZapDrive) {
+                    if let SettingsPageViewHandle::ZapDrive(view) = &warp_drive_page.view_handle {
                         view.update(ctx, |view, ctx| {
                             view.handle_action(warp_drive_action, ctx);
                         })

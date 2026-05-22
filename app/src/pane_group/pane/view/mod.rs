@@ -32,7 +32,7 @@ pub use header_content::{
 };
 
 pub fn init(_app: &mut AppContext) {
-    // OpenWarp Phase 2a: pane:share_pane_contents keybinding removed (sharing UI gone).
+    // Zap Phase 2a: pane:share_pane_contents keybinding removed (sharing UI gone).
 }
 
 pub enum PaneViewEvent {

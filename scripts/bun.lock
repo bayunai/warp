@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "openwarp-scripts",
+      "name": "zap-scripts",
       "dependencies": {
         "png-to-ico": "^2.1.8",
         "potrace": "^2.1.8",

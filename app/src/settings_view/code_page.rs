@@ -1,4 +1,4 @@
-//! Code 设置页:OpenWarp 在 LSP 全栈 + 持久化 workspace 历史下线后,
+//! Code 设置页:Zap 在 LSP 全栈 + 持久化 workspace 历史下线后,
 //! 这个页面只剩「编辑器与代码评审」相关的几个本地开关。
 //!
 //! 历史上这里还承载 LSP 管理子页 + codebase indexing,但都已下线;
@@ -61,7 +61,7 @@ impl CodeSettingsPageView {
     fn build_page(
         ctx: &mut ViewContext<Self>,
     ) -> (PageType<Self>, Option<ViewHandle<ExternalEditorView>>) {
-        let (widgets, external_editor_view) = if FeatureFlag::OpenWarpNewSettingsModes.is_enabled()
+        let (widgets, external_editor_view) = if FeatureFlag::ZapNewSettingsModes.is_enabled()
         {
             let editor_view = ctx.add_typed_action_view(ExternalEditorView::new);
             let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> = vec![
@@ -90,7 +90,7 @@ impl CodeSettingsPageView {
         _ctx: &mut ViewContext<Self>,
     ) -> (PageType<Self>, Option<ViewHandle<ExternalEditorView>>) {
         let widgets: Vec<Box<dyn SettingsWidget<View = Self>>> =
-            if FeatureFlag::OpenWarpNewSettingsModes.is_enabled() {
+            if FeatureFlag::ZapNewSettingsModes.is_enabled() {
                 vec![
                     Box::new(AutoOpenCodeReviewPaneCodeWidget::default()),
                     Box::new(CodeReviewPanelToggleWidget::default()),
@@ -274,7 +274,7 @@ impl SettingsPageMeta for CodeSettingsPageView {
     }
 
     fn should_render(&self, _ctx: &AppContext) -> bool {
-        FeatureFlag::OpenWarpNewSettingsModes.is_enabled()
+        FeatureFlag::ZapNewSettingsModes.is_enabled()
     }
 
     fn on_page_selected(&mut self, _: bool, _ctx: &mut ViewContext<Self>) {}

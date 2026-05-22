@@ -11,7 +11,7 @@ interface Props {
   description?: string;
 }
 const {
-  title = 'OpenWarp — Bring any AI model into your terminal',
+  title = 'Zap — Bring any AI model into your terminal',
   description = 'A community fork of Warp that keeps the full terminal experience and opens the AI layer.',
 } = Astro.props;
 ---
@@ -76,7 +76,7 @@ const {
         function setLocale(l: string) {
           // 仅在用户显式选择语言时持久化;自动检测应在后续访问继续跟随系统/浏览器。
           const locale = normalizeLocale(l) || 'en';
-          localStorage.setItem('openwarp:locale', locale);
+          localStorage.setItem('zap:locale', locale);
           applyLocale(locale);
         }
         const initialLocale = (document.body.dataset.locale as string) || 'en';

@@ -78,7 +78,7 @@ use crate::cloud_object::{
 };
 use crate::code::editor_management::CodeSource;
 use crate::drive::folders::{FolderId, FolderObject, FolderObjectModel};
-use crate::drive::OpenWarpDriveObjectSettings;
+use crate::drive::ZapDriveObjectSettings;
 use crate::env_vars::{EnvVarCollectionObject, EnvVarCollectionObjectModel};
 use crate::features::FeatureFlag;
 use crate::notebooks::{NotebookId, NotebookObject};
@@ -134,7 +134,7 @@ const COMMANDS_COUNT_LIMIT: i64 = 10000;
 use crate::persistence::cloud_objects::{upsert_stored_object, StoredObjectId};
 
 const WARP_SQLITE_FILE_NAME: &str = "warp.sqlite";
-const OPENWARP_APP_GROUP_SQLITE_MIGRATION_MARKER: &str = ".openwarp-app-group-sqlite-migrated";
+const ZAP_APP_GROUP_SQLITE_MIGRATION_MARKER: &str = ".zap-app-group-sqlite-migrated";
 #[cfg(target_os = "macos")]
 const WARP_APP_GROUP_ID: &str = "2BBY89MBSN.dev.warp";
 
@@ -395,7 +395,7 @@ unsafe fn init_logging() {
             // According to the docs, this error means that the database file was moved (or deleted),
             // so SQLite can't safely modify it and the rollback journal:
             //     https://www.sqlite.org/rescode.html#readonly_dbmoved
-            // This is mostly outside of Warp's control (e.g. the user or some system program is
+            // This is mostly outside of Zap's control (e.g. the user or some system program is
             // moving around files in the user data directory), so downgrade to a warning.
             (_, sqlite3::SQLITE_READONLY_DBMOVED) => log::Level::Warn,
             _ => log::Level::Error,
@@ -457,9 +457,9 @@ pub(super) fn init_db() -> Result<SqliteConnection> {
 
     #[cfg(target_os = "macos")]
     if warp_core::channel::ChannelState::channel() == warp_core::channel::Channel::Oss {
-        if let Some(legacy_dir) = openwarp_legacy_app_group_sqlite_dir() {
-            if let Err(err) = migrate_openwarp_app_group_sqlite_if_needed(&db_path, &legacy_dir)
-                .context("Failed to migrate OpenWarp SQLite database out of legacy App Group")
+        if let Some(legacy_dir) = zap_legacy_app_group_sqlite_dir() {
+            if let Err(err) = migrate_zap_app_group_sqlite_if_needed(&db_path, &legacy_dir)
+                .context("Failed to migrate Zap SQLite database out of legacy App Group")
             {
                 report_error!(err);
                 log::warn!("Skipping legacy App Group SQLite migration and continuing startup");
@@ -512,7 +512,7 @@ pub(super) fn init_db() -> Result<SqliteConnection> {
 }
 
 #[cfg(target_os = "macos")]
-fn openwarp_legacy_app_group_sqlite_dir() -> Option<PathBuf> {
+fn zap_legacy_app_group_sqlite_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|home_dir| {
         home_dir
             .join("Library/Group Containers")
@@ -523,24 +523,24 @@ fn openwarp_legacy_app_group_sqlite_dir() -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn migrate_openwarp_app_group_sqlite_if_needed(target_db: &Path, legacy_dir: &Path) -> Result<()> {
+fn migrate_zap_app_group_sqlite_if_needed(target_db: &Path, legacy_dir: &Path) -> Result<()> {
     let Some(target_dir) = target_db.parent() else {
         return Ok(());
     };
 
-    let marker = target_dir.join(OPENWARP_APP_GROUP_SQLITE_MIGRATION_MARKER);
+    let marker = target_dir.join(ZAP_APP_GROUP_SQLITE_MIGRATION_MARKER);
     if marker.exists() {
         return Ok(());
     }
 
     let legacy_db = legacy_dir.join(WARP_SQLITE_FILE_NAME);
     if !legacy_db.exists() {
-        write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+        write_zap_app_group_sqlite_migration_marker(&marker)?;
         return Ok(());
     }
 
-    if !should_copy_legacy_openwarp_sqlite(&legacy_db, target_db)? {
-        write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+    if !should_copy_legacy_zap_sqlite(&legacy_db, target_db)? {
+        write_zap_app_group_sqlite_migration_marker(&marker)?;
         return Ok(());
     }
 
@@ -553,18 +553,18 @@ fn migrate_openwarp_app_group_sqlite_if_needed(target_db: &Path, legacy_dir: &Pa
     copy_sqlite_file(&legacy_db, target_db)?;
     copy_sqlite_sidecar(&legacy_db, target_db, "sqlite-wal")?;
     copy_sqlite_sidecar(&legacy_db, target_db, "sqlite-shm")?;
-    write_openwarp_app_group_sqlite_migration_marker(&marker)?;
+    write_zap_app_group_sqlite_migration_marker(&marker)?;
 
     safe_info!(
-        safe: ("Migrated OpenWarp SQLite database out of legacy App Group"),
-        full: ("Migrated OpenWarp SQLite database from `{}` to `{}`", legacy_db.display(), target_db.display())
+        safe: ("Migrated Zap SQLite database out of legacy App Group"),
+        full: ("Migrated Zap SQLite database from `{}` to `{}`", legacy_db.display(), target_db.display())
     );
 
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
-fn should_copy_legacy_openwarp_sqlite(legacy_db: &Path, target_db: &Path) -> Result<bool> {
+fn should_copy_legacy_zap_sqlite(legacy_db: &Path, target_db: &Path) -> Result<bool> {
     if !target_db.exists() {
         return Ok(true);
     }
@@ -623,7 +623,7 @@ fn copy_sqlite_file(source: &Path, target: &Path) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn write_openwarp_app_group_sqlite_migration_marker(marker: &Path) -> Result<()> {
+fn write_zap_app_group_sqlite_migration_marker(marker: &Path) -> Result<()> {
     std::fs::write(marker, b"migrated\n")
         .with_context(|| format!("Failed to write migration marker `{}`", marker.display()))
 }
@@ -1266,7 +1266,7 @@ fn save_pane_state(
         LeafContents::GetStarted => GET_STARTED_PANE_KIND,
         LeafContents::Welcome { .. } => WELCOME_PANE_KIND,
         LeafContents::AIDocument(_) => AI_DOCUMENT_PANE_KIND,
-        // OpenWarp Wave 7-3:`EnvironmentManagement` arm 随 variant 一同物理删。
+        // Zap Wave 7-3:`EnvironmentManagement` arm 随 variant 一同物理删。
         LeafContents::SshServer { .. } => {
             // These pane types are filtered out before this function is
             // called; see `LeafContents::is_persisted` and the skip in
@@ -1419,7 +1419,7 @@ fn save_pane_state(
                 .values(workflow)
                 .execute(conn)?;
         }
-        // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents arm 随 variant 一同物理删。
+        // Zap Wave 7-3:`EnvironmentManagement` LeafContents arm 随 variant 一同物理删。
         LeafContents::Settings(settings_pane_snapshot) => {
             let current_page = match settings_pane_snapshot {
                 SettingsPaneSnapshot::Local { current_page, .. } => current_page,
@@ -2474,7 +2474,7 @@ fn read_node(conn: &mut SqliteConnection, node: model::PaneNode) -> Result<PaneN
                         Some(path) => NotebookPaneSnapshot::LocalFileNotebook { path: Some(path) },
                         None => NotebookPaneSnapshot::NotebookObject {
                             notebook_id,
-                            settings: OpenWarpDriveObjectSettings::default(),
+                            settings: ZapDriveObjectSettings::default(),
                         },
                     })
                 }
@@ -2492,7 +2492,7 @@ fn read_node(conn: &mut SqliteConnection, node: model::PaneNode) -> Result<PaneN
 
                     LeafContents::Workflow(WorkflowPaneSnapshot::WorkflowObject {
                         workflow_id,
-                        settings: OpenWarpDriveObjectSettings::default(),
+                        settings: ZapDriveObjectSettings::default(),
                     })
                 }
                 CODE_PANE_KIND => {

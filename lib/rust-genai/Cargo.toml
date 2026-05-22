@@ -9,7 +9,7 @@ homepage = "https://github.com/jeremychone/rust-genai"
 repository = "https://github.com/jeremychone/rust-genai"
 
 [workspace]
-# Keep this fork out of the OpenWarp parent workspace.
+# Keep this fork out of the Zap parent workspace.
 
 [lints.rust]
 unsafe_code = "forbid"

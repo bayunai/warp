@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * OpenWarp logo 生成器
+ * Zap logo 生成器
  *
  * 流程:
  *   1. logo.png → potrace 矢量化 → assets/logo.svg(自动 trim 到 content bbox)

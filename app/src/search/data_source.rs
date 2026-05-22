@@ -180,7 +180,7 @@ pub enum QueryFilter {
     /// Filter results for launch configurations.
     LaunchConfigurations,
 
-    /// Filter for objects in Warp Drive
+    /// Filter for objects in Zap Drive
     Drive,
 
     /// Filter results for environment variables.

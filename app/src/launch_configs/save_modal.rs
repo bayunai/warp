@@ -528,7 +528,7 @@ impl LaunchConfigSaveModal {
                     .link(
                         crate::t!("launch-config-link-to-documentation"),
                         Some(
-                            "https://docs.warp.dev/terminal/sessions/launch-configurations"
+                            ""
                                 .to_string(),
                         ),
                         None,
@@ -686,7 +686,7 @@ impl TypedActionView for LaunchConfigSaveModal {
         // TODO(vorporeal): We should figure out a better way to handle the
         // interactions with the filesystem here, whether it's compiling out
         // the save modal more completely or doing something else.  Perhaps
-        // this will become moot when we put launch configs in Warp Drive.
+        // this will become moot when we put launch configs in Zap Drive.
         let action = match action {
             ActionRequest::Action(action) => action.clone(),
             ActionRequest::Enter => LaunchConfigSaveAction::from_state(&self.save_state),

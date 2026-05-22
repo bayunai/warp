@@ -31,13 +31,13 @@ const VERTICAL_TEXT_MARGIN: f32 = 16.;
 
 #[derive(Debug, Clone)]
 pub enum WarpifySuccessBlockEvent {
-    OpenWarpifySettings,
+    ZapifySettings,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum WarpifySuccessBlockAction {
     ClearAutoWarpifySnippet,
-    OpenWarpifySettings,
+    ZapifySettings,
     OpenUrl(String),
 }
 
@@ -118,7 +118,7 @@ impl WarpifySuccessBlock {
                 description: (if !output_grid.is_empty() {
                     "Run the following to automatically Warpify in the future:"
                 } else {
-                    "In remote subshells, Warp runs commands in the background to power completions, syntax highlighting, and other features."
+                    "In remote subshells, Zap runs commands in the background to power completions, syntax highlighting, and other features."
                 }).into(),
                 output_grid: output_grid.into(),
                 selection_handle: Default::default(),
@@ -157,7 +157,7 @@ impl WarpifySuccessBlock {
     pub fn render_title_ui(&self, theme: &WarpTheme, appearance: &Appearance) -> Box<dyn Element> {
         let header_contents = render::build_header_row(
             "Session Warpified",
-            Icon::new(UiIcon::Warp.into(), theme.active_ui_detail()),
+            Icon::new(UiIcon::Zap.into(), theme.active_ui_detail()),
             theme,
             appearance,
         )
@@ -346,8 +346,8 @@ impl TypedActionView for WarpifySuccessBlock {
 
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         match action {
-            WarpifySuccessBlockAction::OpenWarpifySettings => {
-                ctx.emit(WarpifySuccessBlockEvent::OpenWarpifySettings);
+            WarpifySuccessBlockAction::ZapifySettings => {
+                ctx.emit(WarpifySuccessBlockEvent::ZapifySettings);
             }
             WarpifySuccessBlockAction::OpenUrl(url) => {
                 ctx.open_url(url);

@@ -485,7 +485,7 @@ impl CommandSearchView {
                 AcceptHistory(_)
                 | AcceptWorkflow(_)
                 | AcceptNotebook(_)
-                | OpenWarpAI
+                | ZapAI
                 | AcceptEnvVarCollection(_)
                 | TranslateUsingWarpAI
                 | AcceptAIQuery(_) => false,

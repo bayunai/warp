@@ -156,7 +156,7 @@ fn should_skip_scp_fallback(error: &InstallError) -> bool {
 }
 
 // ===========================================================================
-// OpenWarp fork:开发模式 remote-server 安装路径
+// Zap fork:开发模式 remote-server 安装路径
 //
 // 上游 / release 构建会让远端安装脚本从 GitHub releases 下载预编译的
 // remote-server 二进制。但在本地源码构建(`cargo run`)时,这会下载到
@@ -308,11 +308,11 @@ async fn cross_compile_remote_server(backend: &DevBuildBackend) -> Result<PathBu
         remote_server::setup::DEV_REMOTE_PROFILE,
     );
     // 首次会编译整个 warp,耗时通常数分钟。stdout/stderr 直接 inherit 到运行
-    // OpenWarp 的终端,这样开发者能看到 cargo 的实时编译进度(否则全程静默,
+    // Zap 的终端,这样开发者能看到 cargo 的实时编译进度(否则全程静默,
     // 容易误以为卡死)。
     log::info!(
         "dev remote-server: 正在交叉编译,首次通常需数分钟 —— cargo 进度会打印到\
-         运行 OpenWarp 的终端"
+         运行 Zap 的终端"
     );
 
     let status = async {
@@ -370,7 +370,7 @@ async fn cross_compile_remote_server(backend: &DevBuildBackend) -> Result<PathBu
     if !status.success() {
         let code = status.code().unwrap_or(-1);
         return Err(anyhow!(
-            "cargo 交叉编译失败(exit {code}),详见运行 OpenWarp 的终端的 cargo 输出"
+            "cargo 交叉编译失败(exit {code}),详见运行 Zap 的终端的 cargo 输出"
         ));
     }
 
@@ -519,10 +519,10 @@ async fn scp_install_fallback(socket_path: &Path) -> Result<()> {
     }
 
     let tempdir = tempfile::tempdir()?;
-    let tarball_path = tempdir.path().join("openwarp.tar.gz");
+    let tarball_path = tempdir.path().join("zap.tar.gz");
     download_remote_server_tarball(&download_url, &tarball_path).await?;
 
-    let remote_tarball_path = format!("{remote_server_dir}/openwarp-upload.tar.gz");
+    let remote_tarball_path = format!("{remote_server_dir}/zap-upload.tar.gz");
     remote_server::ssh::scp_upload(
         socket_path,
         &tarball_path,
@@ -651,7 +651,7 @@ impl RemoteTransport for SshTransport {
                 remote_server::setup::remote_server_binary()
             );
 
-            // OpenWarp fork:DEBUG 源码构建(无 release tag)走开发模式,
+            // Zap fork:DEBUG 源码构建(无 release tag)走开发模式,
             // 交叉编译本地 `warp` 并上传,而不是下载陈旧的 GitHub release。
             // 失败时(交叉编译前置条件缺失等)打印告警并回退到下载安装,
             // 保证 dev 体验不被破坏。release 构建跳过整段逻辑,行为不变。

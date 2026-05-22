@@ -6,7 +6,7 @@ pub mod web_intent_parser;
 pub mod browser_url_handler;
 
 use crate::ai::agent::api::ServerConversationToken;
-use crate::drive::OpenWarpDriveObjectSettings;
+use crate::drive::ZapDriveObjectSettings;
 use crate::launch_configs::launch_config::LaunchConfig;
 use crate::linear::{LinearAction, LinearIssueWork};
 use crate::root_view::{open_new_window_get_handles, OpenLaunchConfigArg};
@@ -18,7 +18,7 @@ use crate::util::openable_file_type::{
 use crate::workspace::active_terminal_in_window;
 use crate::workspace::{Workspace, WorkspaceAction, WorkspaceRegistry};
 use crate::{cloud_object::ObjectType, workspace::ToastStack};
-use crate::{drive::OpenWarpDriveObjectArgs, view_components::DismissibleToast};
+use crate::{drive::ZapDriveObjectArgs, view_components::DismissibleToast};
 
 use crate::ai::ambient_agents::github_auth_notifier::GitHubAuthNotifier;
 use crate::settings_view::SettingsSection;
@@ -49,7 +49,7 @@ pub struct OpenMCPSettingsArgs {
 }
 
 /// Source query parameter value indicating auth was initiated from agent setup.
-/// OpenWarp Wave 7-3:URI handler / Settings UI 已删,仅供 `update_environment_form` 在 agent UI
+/// Zap Wave 7-3:URI handler / Settings UI 已删,仅供 `update_environment_form` 在 agent UI
 /// 大手术 commit 完成前充当起起过渡 (后者不拼发出的 URL 用到)。
 pub const CLOUD_SETUP_SOURCE: &str = "cloud_setup";
 
@@ -103,8 +103,8 @@ impl UriHost {
         match self {
             UriHost::Auth => {
                 safe_info!(
-                    safe: ("Ignored auth url because OpenWarp has no cloud login flow"),
-                    full: ("Ignored auth url {url} because OpenWarp has no cloud login flow")
+                    safe: ("Ignored auth url because Zap has no cloud login flow"),
+                    full: ("Ignored auth url {url} because Zap has no cloud login flow")
                 );
             }
             UriHost::Action => {
@@ -203,10 +203,10 @@ impl UriHost {
                         ctx.root_view_id(window_id)
                             .map(|view_id| (window_id, view_id))
                     });
-                    let args = OpenWarpDriveObjectArgs {
+                    let args = ZapDriveObjectArgs {
                         object_type,
                         server_id,
-                        settings: OpenWarpDriveObjectSettings {
+                        settings: ZapDriveObjectSettings {
                             focused_folder_id,
                             invitee_email,
                         },
@@ -255,7 +255,7 @@ impl UriHost {
                 if let Some(settings_sub_page) = settings_sub_page {
                     match settings_sub_page.as_str() {
                         "environments" => {
-                            // OpenWarp Wave 7-3:warp://settings/environments URI handler 随
+                            // Zap Wave 7-3:warp://settings/environments URI handler 随
                             // ambient-agent UI 子系统物理删。还保留 GitHub auth completion
                             // 通知 —— 其他独立的组件可能需要听。
                             GitHubAuthNotifier::handle(ctx).update(ctx, |notifier, ctx| {
@@ -277,12 +277,12 @@ impl UriHost {
                                 ctx,
                             );
                         }
-                        // OpenWarp Wave 3-1:"platform" URI 路由原指向
+                        // Zap Wave 3-1:"platform" URI 路由原指向
                         // `SettingsSection::OzCloudAPIKeys`(云端 API key 管理页),
                         // 随 UI 一同物理删。保留 arm 以记录原意图,物理处理为 no-op。
                         "platform" => {
                             log::warn!(
-                                "warp://settings/platform 路由在 OpenWarp 中已下线,忽略该请求"
+                                "warp://settings/platform 路由在 Zap 中已下线,忽略该请求"
                             );
                         }
                         "appearance" => {
@@ -660,7 +660,7 @@ impl Action {
             Self::Docker | Self::OpenRepo | Self::NewAgentConversation => W::default(),
             Self::NewTab => W::ShowPrimaryWindow(WindowActivationFallbackBehavior::Notify {
                 title: "New tab created".to_owned(),
-                description: "Go to Warp to see your new tab.".to_owned(),
+                description: "Go to Zap to see your new tab.".to_owned(),
             }),
             Self::NewWindow => W::Nothing,
         }
@@ -744,7 +744,7 @@ fn get_primary_window(
 enum OpenFileAction {
     /// Open in the markdown notebook pane.
     Notebook,
-    /// Open in Warp's code/text editor pane.
+    /// Open in Zap's code/text editor pane.
     Editor,
     /// Open a session at the parent directory and queue the file as the pending command,
     /// or just open a session at the directory path if `path` is a directory.
@@ -806,7 +806,7 @@ fn open_file(window_id: Option<WindowId>, path: PathBuf, ctx: &mut AppContext) {
                 openable_file_type::resolve_file_target_to_open_in_warp,
             };
 
-            // Open text/code files in Warp's code editor, respecting the user's layout preference.
+            // Open text/code files in Zap's code editor, respecting the user's layout preference.
             let editor_settings = EditorSettings::as_ref(ctx);
             let target = resolve_file_target_to_open_in_warp(&path, editor_settings, None);
 

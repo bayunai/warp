@@ -62,13 +62,13 @@ pub fn sections(ctx: &mut ViewContext<ResourceCenterMainView>) -> Vec<Section> {
             ContentItem {
                 title: crate::t!("resource-center-custom-prompt-title"),
                 description: crate::t!("resource-center-custom-prompt-description"),
-                url: "https://docs.warp.dev/terminal/appearance/prompt",
+                url: "",
                 button_label: crate::t!("resource-center-view-documentation"),
             },
             ContentItem {
                 title: crate::t!("resource-center-integrate-ide-title"),
                 description: crate::t!("resource-center-integrate-ide-description"),
-                url: "https://docs.warp.dev/terminal/integrations-and-plugins",
+                url: "",
                 button_label: crate::t!("resource-center-view-documentation"),
             },
             ContentItem {

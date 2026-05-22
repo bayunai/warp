@@ -434,7 +434,7 @@ impl CLISubagentView {
                 c.get_task(&task_id)
                     .and_then(|t| t.last_exchange().map(|e| e.id))
                     .or_else(|| {
-                        // OpenWarp BYOP fallback:agent 自起 LRC 时
+                        // Zap BYOP fallback:agent 自起 LRC 时
                         // `cli_controller::FinishedAction` 通过
                         // `create_silent_cli_subagent_task_for_conversation` 真实创建
                         // subtask 但暂未给它 append exchange(没新 query 触发
@@ -1559,7 +1559,7 @@ impl TypedActionView for CLISubagentView {
                     .write(ClipboardContent::plain_text(debug_id.clone()));
             }
             CLISubagentAction::OpenFeedbackDocs => {
-                ctx.open_url("https://docs.warp.dev/support-and-billing/sending-us-feedback");
+                ctx.open_url("");
             }
         }
     }

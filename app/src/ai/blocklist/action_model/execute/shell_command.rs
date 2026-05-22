@@ -320,7 +320,7 @@ impl ShellCommandExecutor {
                         RequestCommandOutputResult::CancelledBeforeExecution,
                     ));
                 }
-                // OpenWarp:同步等待型命令(wait_until_completion=true)无条件禁用 pager。
+                // Zap:同步等待型命令(wait_until_completion=true)无条件禁用 pager。
                 //
                 // 模型自报的 `uses_pager` 不可靠 —— deepseek-v4-flash 等小模型几乎不会主动标,
                 // 一旦命中 `git diff`/`git log`/`man` 等隐式 pager 就会卡在 less 提示符,
@@ -351,7 +351,10 @@ impl ShellCommandExecutor {
                 drop(model);
 
                 ActionExecution::new_async(
-                    self.action_result_future(block_selector.clone(), ActionResultDelay::Default),
+                    self.action_result_future(
+                        block_selector.clone(),
+                        action_result_delay_for_requested_command(*wait_until_completion),
+                    ),
                     move |result, ctx| {
                         // Remove the senders from the maps.
                         if let Some(handle) = handle.upgrade(ctx) {
@@ -621,41 +624,52 @@ impl ShellCommandExecutor {
         }
 
         async move {
-            // If we support long-running commands, set up a timeout after which we'll
-            // treat the command as long-running and give the agent a snapshot of the
-            // current state.  Otherwise, we'll wait indefinitely for the command to
-            // finish executing.
-            let mut timeout = match delay {
+            pin!(block_metadata_received_rx);
+            pin!(force_refresh_rx);
+
+            let timeout_duration = match delay {
+                ActionResultDelay::UntilCompletion => None,
                 ActionResultDelay::Duration(duration) => {
                     // Enforce a maximum allowed delay that the agent may request, never waiting longer than MAX_AGENT_DELAY_DURATION.
                     // If the requested duration exceeds this cap, we'll still behave as if the agent may expect a running command,
                     // so there's no need to signal preemption (the agent already anticipates an incomplete command state).
-                    Timer::after(duration.min(Self::MAX_AGENT_DELAY_DURATION))
+                    Some(duration.min(Self::MAX_AGENT_DELAY_DURATION))
                 }
                 ActionResultDelay::OnCompletion { timeout } => {
-                    Timer::after(timeout.min(Self::MAX_AGENT_DELAY_DURATION))
+                    Some(timeout.min(Self::MAX_AGENT_DELAY_DURATION))
                 }
-                ActionResultDelay::Default => Timer::after(Self::MAX_WAIT_DURATION),
-            }
-            .fuse();
+                ActionResultDelay::Default => Some(Self::MAX_WAIT_DURATION),
+            };
 
-            pin!(block_metadata_received_rx);
-            pin!(force_refresh_rx);
-
-            let wake_reason = select! {
-                val = block_metadata_received_rx => match val {
-                    Ok(_) => WakeReason::BlockFinished,
-                    Err(_) => return ActionResult::Cancelled,
-                },
-                val = force_refresh_rx => match val {
-                    // User asked the agent to check now; fall through to the snapshot
-                    // code path below. Treated as a preemption (snapshot arrives before
-                    // the agent's own timer would have fired).
-                    Ok(_) => WakeReason::ForceRefresh,
-                    // Sender was dropped (e.g. because the executor is being torn down).
-                    Err(_) => return ActionResult::Cancelled,
-                },
-                _ = timeout => WakeReason::Timeout,
+            let wake_reason = if let Some(timeout_duration) = timeout_duration {
+                let timeout = Timer::after(timeout_duration).fuse();
+                pin!(timeout);
+                select! {
+                    val = block_metadata_received_rx => match val {
+                        Ok(_) => WakeReason::BlockFinished,
+                        Err(_) => return ActionResult::Cancelled,
+                    },
+                    val = force_refresh_rx => match val {
+                        // User asked the agent to check now; fall through to the snapshot
+                        // code path below. Treated as a preemption (snapshot arrives before
+                        // the agent's own timer would have fired).
+                        Ok(_) => WakeReason::ForceRefresh,
+                        // Sender was dropped (e.g. because the executor is being torn down).
+                        Err(_) => return ActionResult::Cancelled,
+                    },
+                    _ = timeout => WakeReason::Timeout,
+                }
+            } else {
+                select! {
+                    val = block_metadata_received_rx => match val {
+                        Ok(_) => WakeReason::BlockFinished,
+                        Err(_) => return ActionResult::Cancelled,
+                    },
+                    val = force_refresh_rx => match val {
+                        Ok(_) => WakeReason::ForceRefresh,
+                        Err(_) => return ActionResult::Cancelled,
+                    },
+                }
             };
 
             // Mark the snapshot as preempted if woken early, allowing the server to distinguish
@@ -835,6 +849,7 @@ impl ShellCommandExecutor {
 /// `effective_read_shell_command_delay`)。
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum ActionResultDelay {
+    UntilCompletion,
     Default,
     Duration(Duration),
     OnCompletion { timeout: Duration },
@@ -849,6 +864,14 @@ impl ActionResultDelay {
             },
             None => Self::Default,
         }
+    }
+}
+
+fn action_result_delay_for_requested_command(wait_until_completion: bool) -> ActionResultDelay {
+    if wait_until_completion {
+        ActionResultDelay::UntilCompletion
+    } else {
+        ActionResultDelay::Default
     }
 }
 
@@ -881,7 +904,7 @@ fn effective_read_shell_command_delay(
 }
 
 /// 判断 `command` 是否会启动一个**永不主动退出**的交互会话。命中规则:
-/// - 被 Warp generator wrapper 包裹的命令,递归判断内部命令。
+/// - 被 Zap generator wrapper 包裹的命令,递归判断内部命令。
 /// - 裸 `ssh ...`(走 `parse_interactive_ssh_command`,会正确排除 `-T` / `-W`
 ///   等非交互形式)。
 /// - 带路径或带 `.exe` 的 ssh(改写为裸 `ssh` 后再判)。
@@ -906,12 +929,12 @@ fn command_starts_non_terminating_session(command: &str) -> bool {
         })
 }
 
-/// 解开 Warp 自身的 generator wrapper,把里面真正要跑的命令抽出来。
+/// 解开 Zap 自身的 generator wrapper,把里面真正要跑的命令抽出来。
 ///
 /// wrapper 协议形如:`<wrapper> <generator_id> '<inner_command>' [extra flags...]`
 /// 其中:
 /// - `<wrapper>` 是 `warp_run_generator_command`(POSIX shell)或
-///   `Warp-Run-GeneratorCommand`(PowerShell,大小写不敏感)。
+///   `Zap-Run-GeneratorCommand`(PowerShell,大小写不敏感)。
 /// - `<generator_id>` 是数字 id,这里不解析,直接跳过。
 /// - `<inner_command>` 是被单引号包裹的真实命令字符串,也就是我们要返回的内容。
 ///
@@ -920,7 +943,7 @@ fn command_starts_non_terminating_session(command: &str) -> bool {
 fn in_band_generator_command(command: &str) -> Option<String> {
     let tokens = shell_words::split(command.trim_start()).ok()?;
     if tokens.len() >= 3
-        && (tokens[0].eq_ignore_ascii_case("Warp-Run-GeneratorCommand")
+        && (tokens[0].eq_ignore_ascii_case("Zap-Run-GeneratorCommand")
             || tokens[0] == "warp_run_generator_command")
     {
         Some(tokens[2].clone())

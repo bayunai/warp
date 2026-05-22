@@ -137,7 +137,7 @@ where
 pub(super) fn relaunch() -> Result<()> {
     let bundle_path = PathBuf::from(get_bundle_path()?);
 
-    // 启动新版 Warp 前先等待当前进程退出，避免 Dock 中短暂出现多个图标。
+    // 启动新版 Zap 前先等待当前进程退出，避免 Dock 中短暂出现多个图标。
     // 这里用一个中间 shell 进程轮询当前 PID，进程退出后再启动新版应用。
     //
     // 每 200ms 检查一次当前进程是否仍在运行；进程退出后启动新版。
@@ -244,7 +244,7 @@ pub async fn cleanup_all_except(preserve_update_id: Option<&str>) {
     }
 }
 
-/// Determines if the user needs authorization in order to update Warp.
+/// Determines if the user needs authorization in order to update Zap.
 async fn needs_authorization(bundle_path: &Path) -> Result<bool> {
     // For the bundle path itself, check permissions without creating a test file so as to not
     // interfere with code signing.
@@ -269,8 +269,8 @@ async fn needs_authorization(bundle_path: &Path) -> Result<bool> {
 }
 
 /// Determines if a directory is writable as part of an update. This means:
-/// * Warp can create files in the directory
-/// * Warp can modify the permissions of created files
+/// * Zap can create files in the directory
+/// * Zap can modify the permissions of created files
 async fn is_directory_writable(directory: &Path) -> Result<bool> {
     // Just because we have writability access does not mean we can set the correct owner/group.
     // Test if we can set the owner/group on a temporarily created file. If we can, then we can
@@ -305,7 +305,7 @@ async fn is_directory_writable(directory: &Path) -> Result<bool> {
 }
 
 /// Verifies that the staged bundle path has a valid macOS code signature, and that its
-/// team identifier matches Warp's team identifier.
+/// team identifier matches Zap's team identifier.
 async fn verify_code_signature(component: &str, path: &Path) -> Result<()> {
     // Verify the signature of the staged update bundle with team identifier
     let codesign_verify_output = Command::new("/usr/bin/codesign")
@@ -412,7 +412,7 @@ async fn apply_update(channel: Channel, version_info: &VersionInfo, update_id: &
         .await
         .is_ok()
     {
-        // If we performed this process already but didn't relaunch Warp, the old executable will
+        // If we performed this process already but didn't relaunch Zap, the old executable will
         // still be located in the user application data directory.  In that case, leave it there.
         log::info!("Already autoupdated without relaunching; ignoring executable from old bundle");
     } else {
@@ -686,8 +686,8 @@ async fn mount_dmg(dmg_dir: &Path, update_id: &str) -> Result<PathBuf> {
     hdiutil_cmd.args(["attach", "-mountpoint"]);
     hdiutil_cmd.arg(&volume);
     // Explanation of flags:
-    // -nobrowse: Do not show the Warp DMG in Finder or similar apps.
-    // -noautoopen: Do not open the Warp DMG in Finder.
+    // -nobrowse: Do not show the Zap DMG in Finder or similar apps.
+    // -noautoopen: Do not open the Zap DMG in Finder.
     // -readonly: For safety, we mount read-only since there's no need to modify the new app version.
     // -autofsck: Ensure that the DMG contents are verified. This is on by default for quarantined images, but macOS
     //    doesn't necessarily recognize our download as such.
@@ -736,12 +736,12 @@ fn dmg_name(channel: Channel) -> String {
 
 fn app_name_prefix(channel: Channel) -> &'static str {
     match channel {
-        Channel::Stable => "Warp",
+        Channel::Stable => "Zap",
         Channel::Preview => "WarpPreview",
         Channel::Local => "warp",
         Channel::Integration => "integration",
         Channel::Dev => "WarpDev",
-        Channel::Oss => "warp-oss",
+        Channel::Oss => "zap-oss",
     }
 }
 
@@ -752,7 +752,7 @@ fn executable_name(channel: Channel) -> &'static str {
         Channel::Local => "warp",
         Channel::Integration => "integration",
         Channel::Dev => "dev",
-        Channel::Oss => "warp-oss",
+        Channel::Oss => "zap-oss",
     }
 }
 

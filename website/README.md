@@ -1,4 +1,4 @@
-# OpenWarp Website
+# Zap Website
 
 Astro 站点,源自 `design/` 下的视觉稿。
 

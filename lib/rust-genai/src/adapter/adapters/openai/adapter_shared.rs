@@ -80,7 +80,7 @@ impl OpenAIAdapter {
 		let stream = matches!(service_type, ServiceType::ChatStream);
 
 		// -- compute reasoning_effort and eventual trimmed model_name
-		// OpenWarp fork: openai-compat providers that accept top-level `reasoning_effort`
+		// Zap fork: openai-compat providers that accept top-level `reasoning_effort`
 		// per their own docs (DeepSeek's thinking_mode, Kimi via openai compat, etc).
 		// Upstream genai gates this on `OpenAI` only; we widen to DeepSeek here.
 		// DeepSeek docs: https://api-docs.deepseek.com/zh-cn/guides/thinking_mode
@@ -205,7 +205,7 @@ impl OpenAIAdapter {
 			}
 		}
 
-		// -- OpenWarp fork: shallow-merge extra_body into payload at top level.
+		// -- Zap fork: shallow-merge extra_body into payload at top level.
 		// Provider-specific fields (e.g. DeepSeek `thinking.type=disabled`) the typed
 		// API does not yet expose. Existing keys are not overwritten — typed fields win.
 		if let Some(extra_body) = options_set.extra_body()

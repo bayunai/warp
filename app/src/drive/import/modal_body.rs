@@ -39,7 +39,7 @@ pub(super) const INDENT_MARGIN: f32 = 22.;
 pub(super) const BASE_INDENT: f32 = 30.;
 
 const FILE_TYPE_DOCS_URL: &str =
-    "https://docs.warp.dev/knowledge-and-collaboration/warp-drive#import-and-export";
+    "";
 const SUPPORTED_FILE_TYPE_TEXT: &str = "md, yaml, yml";
 
 #[cfg(test)]
@@ -87,7 +87,7 @@ pub enum ImportModalBodyEvent {
 pub struct ImportModalBody {
     state: ImportState,
     in_progress_handle: Option<AbortHandle>,
-    // Queue to handle requests to upload objects to warp drive.
+    // Queue to handle requests to upload objects to zap drive.
     // All updates should go through the queue rather than calling
     // UpdateManager directly.
     import_queue: ModelHandle<ImportQueue>,
