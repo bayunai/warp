@@ -2643,6 +2643,12 @@ pub struct TerminalView {
 
     cli_subagent_views: HashMap<BlockId, ViewHandle<CLISubagentView>>,
     cli_subagent_controller: ModelHandle<CLISubagentController>,
+    /// When the agent transfers PTY control to the user for an interactive prompt (ssh password,
+    /// 2FA, etc.), we track the active block ID here. This is a more robust signal than relying
+    /// solely on [`LongRunningCommandControlState`] on the block, which can become stale or
+    /// inaccessible when terminal output triggers block state changes (e.g. Enter collapsing the
+    /// running-command header before the long-running threshold).
+    agent_transferred_pty_for_interactive_prompt: Option<BlockId>,
     use_agent_footer: ViewHandle<UseAgentToolbar>,
 
     agent_view_controller: ModelHandle<AgentViewController>,
@@ -3943,6 +3949,7 @@ impl TerminalView {
             ignore_next_set_title_event: false,
             cli_subagent_views: Default::default(),
             cli_subagent_controller,
+            agent_transferred_pty_for_interactive_prompt: None,
             use_agent_footer: use_agent_button_bar,
             agent_view_controller,
             agent_view_back_button,
@@ -5233,13 +5240,26 @@ impl TerminalView {
                 }
             }
             CLISubagentEvent::UpdatedControl {
-                agent_has_control, ..
+                agent_has_control,
+                is_transfer_from_agent,
+                ..
             } => {
                 self.redetermine_terminal_focus(ctx);
                 self.emit_long_running_command_agent_interaction_state_changed(
                     *agent_has_control,
                     ctx,
                 );
+                if *agent_has_control {
+                    // Agent regained control — clear the transfer tracking.
+                    self.agent_transferred_pty_for_interactive_prompt = None;
+                } else if *is_transfer_from_agent {
+                    // Agent handed the PTY to the user for an interactive prompt.
+                    // Focus the terminal so keystrokes go to the PTY, not the Steer input.
+                    self.focus_terminal(ctx);
+                } else {
+                    // Manual or Stop takeover — clear any stale transfer tracking.
+                    self.agent_transferred_pty_for_interactive_prompt = None;
+                }
             }
             CLISubagentEvent::FinishedSubagent {
                 block_id,
@@ -5284,6 +5304,8 @@ impl TerminalView {
             CLISubagentEvent::ToggledHideResponses => {}
             CLISubagentEvent::UpdatedLastSnapshot => {}
             CLISubagentEvent::ControlHandedBackAfterTransfer => {
+                // Agent took control back — clear the transfer tracking.
+                self.agent_transferred_pty_for_interactive_prompt = None;
                 // Notify the shell command executor that control was handed back after transfer.
                 self.ai_action_model
                     .as_ref(ctx)
@@ -6048,6 +6070,17 @@ impl TerminalView {
                 self.ctrl_c(ctx);
             }
             ShellCommandExecutorEvent::TransferControlToUser { reason, .. } => {
+                // Persist the transfer intent on the view so that `is_input_box_visible`
+                // and `redetermine_global_focus` can keep the Steer input hidden even when
+                // the block's `long_running_control_state` is reset by terminal output
+                // (e.g. Enter collapsing the running-command header before the long-running
+                // threshold). The field is cleared in `UpdatedControl` (agent regains
+                // control) and `ControlHandedBackAfterTransfer`.
+                {
+                    let model = self.model.lock();
+                    self.agent_transferred_pty_for_interactive_prompt =
+                        Some(model.block_list().active_block().id().clone());
+                }
                 // Transfer control of the long-running command to the user.
                 self.cli_subagent_controller.update(ctx, |controller, ctx| {
                     controller.switch_control_to_user(
@@ -6510,6 +6543,36 @@ impl TerminalView {
             }
         }
 
+        let active_command_block = model.block_list().active_block();
+        // Agent handed the PTY to the user (ssh password, 2FA, etc.). Keep Steer / agent input
+        // hidden for the whole interval — not only while `has_expanded_running_commands` is true.
+        // Otherwise submitting the password (Enter) collapses the running-command header, that
+        // predicate becomes false, the steer field reappears, steals focus, and the session can
+        // wedge with client-side tool warnings.
+        //
+        // Do not gate on `is_active_and_long_running()`: that can still be false briefly (no
+        // command_start_time yet, or before the long-running threshold), while the password prompt
+        // already needs PTY focus.
+        //
+        // Two sources of truth:
+        // 1. The block's `long_running_control_state` (set by `take_over_for_user`).
+        // 2. The view-level `agent_transferred_pty_for_interactive_prompt` flag — a fallback for
+        //    when terminal output resets the block state before this method runs.
+        let is_transfer_from_agent = |block: &Block| {
+            block
+                .long_running_control_state()
+                .and_then(|s| s.user_take_over_reason())
+                .is_some_and(UserTakeOverReason::is_transfer_from_agent)
+        };
+        if is_transfer_from_agent(active_command_block)
+            || self
+                .agent_transferred_pty_for_interactive_prompt
+                .as_ref()
+                .is_some_and(|id| active_command_block.id() == id)
+        {
+            return false;
+        }
+
         let active_ai_block = self.active_ai_block(app);
         if active_ai_block.is_some_and(|ai_block| {
             let ai_block = ai_block.as_ref(app);
@@ -6519,7 +6582,6 @@ impl TerminalView {
             return false;
         }
 
-        let active_command_block = model.block_list().active_block();
         let is_active_and_long_running = active_command_block.is_active_and_long_running();
         let is_running_in_band_command =
             model.block_list().is_writing_or_executing_in_band_command();
@@ -18413,13 +18475,31 @@ impl TerminalView {
 
             let has_bootstrapped = model.block_list().is_bootstrapping_precmd_done();
 
-            let has_active_user_terminal_command = block_list.active_block().is_active_and_long_running()
-                && !block_list.active_block().is_agent_in_control()
-                // The only case where terminal can take focus _while_ input is visible is
-                // pre-bootstrap, for example when oh-my-zsh prompts you to update -- at this point
-                // the input is visible but you should still be able to click into the block for the
-                // oh-my-zsh prompt and send input directly to the pty.
-                && (!is_input_visible || !has_bootstrapped);
+            // Agent handed the PTY to the user for an interactive prompt (password, 2FA, etc.).
+            // Otherwise `has_active_user_terminal_command` stays false while the AI input is visible
+            // (bootstrapped), and keystrokes go to "Steer the running agent" instead of ssh/sudo.
+            //
+            // Same as `is_input_box_visible`: do not require `is_active_and_long_running()` here —
+            // interactive prompts can appear before the block is classified as long-running.
+            //
+            // Two sources: the block's `long_running_control_state` and the view-level fallback
+            // (which survives terminal-output-driven block state resets).
+            let active_block = block_list.active_block();
+            let from_block_state = active_block
+                .long_running_control_state()
+                .and_then(|state| state.user_take_over_reason())
+                .is_some_and(UserTakeOverReason::is_transfer_from_agent);
+            let from_view_state = self
+                .agent_transferred_pty_for_interactive_prompt
+                .as_ref()
+                .is_some_and(|id| active_block.id() == id);
+            let agent_transferred_pty_for_interactive_prompt =
+                from_block_state || from_view_state;
+
+            let has_active_user_terminal_command = !block_list.active_block().is_agent_in_control()
+                && (agent_transferred_pty_for_interactive_prompt
+                    || (block_list.active_block().is_active_and_long_running()
+                        && (!is_input_visible || !has_bootstrapped)));
 
             let is_shell_mode = !self.ai_input_model.as_ref(ctx).is_ai_input_enabled();
             let are_blocks_selected = !self.selected_blocks.is_empty();

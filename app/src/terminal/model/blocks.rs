@@ -1889,7 +1889,10 @@ impl BlockList {
     }
 
     pub fn block_for_ai_action_id(&self, id: &AIAgentActionId) -> Option<&Block> {
-        self.blocks.iter().find(|block| {
+        // Prefer the most recently appended matching block. Older entries can still carry the same
+        // action id if metadata wasn't cleared (or on shells where an intermediate block finishes
+        // with no execution before the real PTY block appears).
+        self.blocks.iter().rev().find(|block| {
             block.agent_interaction_metadata().is_some_and(|metadata| {
                 metadata
                     .requested_command_action_id()

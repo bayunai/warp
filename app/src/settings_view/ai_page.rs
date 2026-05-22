@@ -3354,6 +3354,12 @@ impl TypedActionView for AISettingsPageView {
             AISettingsPageAction::EnsureModelsDevLoaded => {
                 use crate::ai::agent_providers::models_dev;
                 let had_disk = models_dev::load_from_disk();
+                if models_dev::skip_network_fetch() {
+                    // 禁止 rebuild：`AgentProvidersWidget::new` 会再次 defer 本 action，
+                    // 与 skip 组合会形成无限循环并疯狂刷 UI/日志。
+                    ctx.notify();
+                    return;
+                }
                 if !had_disk || models_dev::is_stale() {
                     let client = http_client::Client::new();
                     ctx.spawn(
@@ -3369,6 +3375,11 @@ impl TypedActionView for AISettingsPageView {
             }
             AISettingsPageAction::RefreshModelsDev => {
                 use crate::ai::agent_providers::models_dev;
+                if models_dev::skip_network_fetch() {
+                    log::info!("[models.dev] 已设置 OPENWARP_SKIP_MODELS_DEV,跳过刷新");
+                    ctx.notify();
+                    return;
+                }
                 let client = http_client::Client::new();
                 ctx.spawn(
                     async move { models_dev::fetch_and_cache(client).await },

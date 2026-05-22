@@ -546,7 +546,6 @@ impl<T: EventLoopSender> PtyController<T> {
         {
             let mut model = self.terminal_model.lock();
 
-            // Explicitly start the block now that the command is executed.
             match source {
                 CommandExecutionSource::AI { metadata } => {
                     model.start_command_execution_with_ai_metadata(metadata)
@@ -562,10 +561,9 @@ impl<T: EventLoopSender> PtyController<T> {
                 }
             }
 
-            // Ensure that the `TerminalModel` doesn't interpret any of the PTY output from the
-            // following commands as in-band command output. If the in-band command output is not
-            // currently being received by the `TerminalModel`, this is a no-op.
-            model.end_in_band_command_output(false);
+            if model.is_receiving_in_band_command_output() {
+                model.end_in_band_command_output(false);
+            }
         }
 
         self.pending_writes.clear();

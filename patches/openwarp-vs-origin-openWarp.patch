@@ -1,0 +1,502 @@
+diff --git a/app/channels/oss/dev.warp.OpenWarp.desktop b/app/channels/oss/dev.warp.OpenWarp.desktop
+index 4f64aa8..9d1c5f9 100644
+--- a/app/channels/oss/dev.warp.OpenWarp.desktop
++++ b/app/channels/oss/dev.warp.OpenWarp.desktop
+@@ -7,7 +7,7 @@ Type=Application
+ Name=OpenWarp
+ GenericName=TerminalEmulator
+ 
+-Exec=warp-oss %U
++Exec=warp-terminal-oss %U
+ StartupWMClass=dev.warp.OpenWarp
+ 
+ Keywords=shell;prompt;command;commandline;cmd;
+diff --git a/app/src/ai/blocklist/action_model/execute/shell_command.rs b/app/src/ai/blocklist/action_model/execute/shell_command.rs
+index 45fc504..2c90184 100644
+--- a/app/src/ai/blocklist/action_model/execute/shell_command.rs
++++ b/app/src/ai/blocklist/action_model/execute/shell_command.rs
+@@ -40,6 +40,43 @@ use crate::{send_telemetry_from_ctx, TelemetryEvent};
+ 
+ use super::{ActionExecution, AnyActionExecution, ExecuteActionInput, PreprocessActionInput};
+ 
++/// Text returned to the agent for `run_shell_command` / related tools.
++///
++/// Prefer unobfuscated grid text; some shells / timing paths leave the primary serialization empty
++/// while `output_to_string()` (displayed-output path) or the force-full path still has bytes.
++fn agent_shell_command_block_output(block: &Block) -> String {
++    let primary = block.output_with_secrets_unobfuscated();
++    if !primary.trim().is_empty() {
++        return primary;
++    }
++    let displayed = block.output_to_string();
++    if !displayed.trim().is_empty() {
++        return displayed;
++    }
++    let forced = block.output_to_string_force_full_grid_contents();
++    if !forced.trim().is_empty() {
++        return forced;
++    }
++    let command_grid = block.command_with_secrets_unobfuscated(false);
++    command_grid
++        .split_once('\n')
++        .map(|(_, output)| output.to_owned())
++        .filter(|output| !output.trim().is_empty())
++        .unwrap_or_default()
++}
++
++/// Gate for `BlockMetadataReceived` — matches upstream: command line grid has finished echoing.
++/// Interactive prompts (`sudo`, `ssh`, etc.) often keep the output grid open; using only
++/// [`Block::finished`] here would never wake the poll until the subprocess exits.
++fn block_ready_after_shell_metadata(block: &Block) -> bool {
++    block.is_command_finished()
++}
++
++/// Gate for [`ModelEvent::BlockCompleted`] — output grid is sealed (real command completion).
++fn block_ready_after_block_completed(block: &Block) -> bool {
++    block.finished()
++}
++
+ pub struct ShellCommandExecutor {
+     active_session: ModelHandle<ActiveSession>,
+     block_finished_senders: HashMap<BlockSelector, oneshot::Sender<()>>,
+@@ -54,6 +91,11 @@ pub struct ShellCommandExecutor {
+ }
+ 
+ impl ShellCommandExecutor {
++    /// When `finish()` races ahead of PTY parsing (common on some Linux sessions), first read can be
++    /// empty; polling briefly often picks up short stdout.
++    const EMPTY_OUTPUT_RETRY_ATTEMPTS: u32 = 12;
++    const EMPTY_OUTPUT_RETRY_INTERVAL_MS: u64 = 25;
++
+     pub const MAX_WAIT_DURATION: Duration = Duration::from_secs(2);
+     /// Maximum delay we will honor for any agent-requested wait. Applies both  
+     /// to finite `ShellCommandDelay::Duration` requests and to  
+@@ -80,25 +122,50 @@ impl ShellCommandExecutor {
+     }
+ 
+     fn handle_terminal_model_event(&mut self, event: &ModelEvent, _ctx: &mut ModelContext<Self>) {
+-        // We wait for precmd for the block _after_ the requested command's block so that
+-        // downstream checks for current working directory are fresh. The precmd hook is when
+-        // the shell relays current working directory to warp.
+-        if let ModelEvent::BlockMetadataReceived(BlockMetadataReceivedEvent { .. }) = event {
+-            let model = self.terminal_model.lock();
+-            let block_finished_senders = self.block_finished_senders.drain().collect_vec();
+-            for (block_selector, block_finished_tx) in block_finished_senders.into_iter() {
+-                if let Some(block) = block_selector.get_block(&model) {
+-                    if block.is_command_finished() {
+-                        if let Err(e) = block_finished_tx.send(()) {
+-                            log::warn!(
+-                                "Failed to notify block completion for running requested command: {e:?}"
+-                            )
+-                        }
+-                    } else {
+-                        self.block_finished_senders
+-                            .insert(block_selector, block_finished_tx);
++        match event {
++            // Primary signal: the shell block just finished (`finish()`), output grids are sealed.
++            // Prefer this over `BlockMetadataReceived` so we resolve after the same event that
++            // fills the block — on some shells/OSes precmd/metadata arrives with timing where the
++            // agent snapshot still sees an empty output grid.
++            ModelEvent::BlockCompleted(completed) => {
++                self.maybe_notify_shell_command_finished(
++                    |block| block.id() == &completed.block_id,
++                    block_ready_after_block_completed,
++                );
++            }
++            // Fallback: precmd / cwd hooks — same readiness as upstream (`is_command_finished`).
++            ModelEvent::BlockMetadataReceived(BlockMetadataReceivedEvent { .. }) => {
++                self.maybe_notify_shell_command_finished(|_| true, block_ready_after_shell_metadata);
++            }
++            _ => {}
++        }
++    }
++
++    /// Wakes any pending `action_result_future` when the selected block passes `ready` and
++    /// `block_filter` (used to correlate `BlockCompleted` with the right block id).
++    fn maybe_notify_shell_command_finished(
++        &mut self,
++        block_filter: impl Fn(&Block) -> bool,
++        ready: impl Fn(&Block) -> bool,
++    ) {
++        let model = self.terminal_model.lock();
++        let block_finished_senders = self.block_finished_senders.drain().collect_vec();
++        for (block_selector, block_finished_tx) in block_finished_senders.into_iter() {
++            if let Some(block) = block_selector.get_block(&model) {
++                if ready(block) && block_filter(block) {
++                    if let Err(e) = block_finished_tx.send(()) {
++                        log::warn!(
++                            "Failed to notify block completion for running requested command: {e:?}"
++                        )
+                     }
++                } else {
++                    self.block_finished_senders
++                        .insert(block_selector, block_finished_tx);
+                 }
++            } else {
++                // e.g. `BlockSelector::Action` before the agent command block exists in the list
++                self.block_finished_senders
++                    .insert(block_selector, block_finished_tx);
+             }
+         }
+     }
+@@ -275,7 +342,10 @@ impl ShellCommandExecutor {
+                     command: decorated_command,
+                 });
+ 
+-                let block_selector = BlockSelector::RequestedCommandId(action_id.clone());
++                // Resolve stdout via `block_for_ai_action_id`, not `active_block_id`. On bash with
++                // precmd hooks, the active block at dispatch can be a synthetic `precmd-*` block
++                // that finishes with exit 0 and empty output before the real command block exists.
++                let block_selector = BlockSelector::Action(action_id.clone());
+                 let command = command.clone();
+                 drop(model);
+ 
+@@ -309,7 +379,7 @@ impl ShellCommandExecutor {
+                     );
+                 };
+                 if block.finished() {
+-                    let output: String = block.output_with_secrets_unobfuscated();
++                    let output: String = agent_shell_command_block_output(block);
+                     let exit_code = block.exit_code();
+                     return ActionExecution::Sync(
+                         AIAgentActionResultType::WriteToLongRunningShellCommand(
+@@ -362,7 +432,7 @@ impl ShellCommandExecutor {
+                 };
+                 if block.finished() {
+                     let command = block.command_with_secrets_unobfuscated(false);
+-                    let output: String = block.output_with_secrets_unobfuscated();
++                    let output: String = agent_shell_command_block_output(block);
+                     let exit_code = block.exit_code();
+                     return ActionExecution::Sync(AIAgentActionResultType::ReadShellCommandOutput(
+                         ReadShellCommandOutputResult::CommandFinished {
+@@ -453,7 +523,7 @@ impl ShellCommandExecutor {
+                                         if block.finished() {
+                                             ActionResult::CommandFinished {
+                                                 block_id: block.id().clone(),
+-                                                output: block.output_with_secrets_unobfuscated(),
++                                                output: agent_shell_command_block_output(block),
+                                                 exit_code: block.exit_code(),
+                                             }
+                                         } else {
+@@ -589,60 +659,123 @@ impl ShellCommandExecutor {
+ 
+             // At this point, we've either received block metadata or we've timed out.
+             // Check the current state of the block and produce a result accordingly.
+-            let model = terminal_model.lock();
+-            let result = match block_selector.get_block(&model) {
+-                Some(block) => {
+-                    if block.finished() {
+-                        ActionResult::CommandFinished {
+-                            block_id: block.id().clone(),
+-                            output: block.output_with_secrets_unobfuscated(),
+-                            exit_code: block.exit_code(),
+-                        }
+-                    } else {
+-                        let grid_contents = if model.is_alt_screen_active() {
+-                            formatted_terminal_contents_for_input(
+-                                model.alt_screen().grid_handler(),
+-                                None,
+-                                CURSOR_MARKER,
+-                            )
++            // Scope the lock so no `MutexGuard` overlaps `.await` (required for `Send`).
++            let result = {
++                let model = terminal_model.lock();
++                match block_selector.get_block(&model) {
++                    Some(block) => {
++                        if block.finished() {
++                            ActionResult::CommandFinished {
++                                block_id: block.id().clone(),
++                                output: agent_shell_command_block_output(block),
++                                exit_code: block.exit_code(),
++                            }
+                         } else {
+-                            formatted_terminal_contents_for_input(
+-                                block.output_grid().grid_handler(),
+-                                // TODO(vorporeal): This is probably too large.
+-                                Some(1000),
+-                                CURSOR_MARKER,
+-                            )
+-                        };
+-                        ActionResult::LongRunningCommandSnapshot {
+-                            block_id: block.id().clone(),
+-                            grid_contents,
+-                            cursor: CURSOR_MARKER,
+-                            is_alt_screen_active: model.is_alt_screen_active(),
+-                            is_preempted,
++                            let grid_contents = if model.is_alt_screen_active() {
++                                formatted_terminal_contents_for_input(
++                                    model.alt_screen().grid_handler(),
++                                    None,
++                                    CURSOR_MARKER,
++                                )
++                            } else {
++                                formatted_terminal_contents_for_input(
++                                    block.output_grid().grid_handler(),
++                                    // TODO(vorporeal): This is probably too large.
++                                    Some(1000),
++                                    CURSOR_MARKER,
++                                )
++                            };
++                            ActionResult::LongRunningCommandSnapshot {
++                                block_id: block.id().clone(),
++                                grid_contents,
++                                cursor: CURSOR_MARKER,
++                                is_alt_screen_active: model.is_alt_screen_active(),
++                                is_preempted,
++                            }
+                         }
+                     }
++                    None => ActionResult::BlockNotFound,
+                 }
+-                None => ActionResult::BlockNotFound,
+             };
+ 
+-            result
++            match result {
++                ActionResult::CommandFinished {
++                    output,
++                    exit_code,
++                    block_id,
++                } if output.trim().is_empty() && exit_code.was_successful() => {
++                    let mut resolved = ActionResult::CommandFinished {
++                        output,
++                        exit_code,
++                        block_id,
++                    };
++                    for _ in 0..Self::EMPTY_OUTPUT_RETRY_ATTEMPTS {
++                        Timer::after(Duration::from_millis(Self::EMPTY_OUTPUT_RETRY_INTERVAL_MS))
++                            .await;
++                        let model = terminal_model.lock();
++                        if let Some(block) = block_selector.get_block(&model) {
++                            if block.finished() {
++                                let retry = agent_shell_command_block_output(block);
++                                if !retry.trim().is_empty() {
++                                    resolved = ActionResult::CommandFinished {
++                                        block_id: block.id().clone(),
++                                        output: retry,
++                                        exit_code: block.exit_code(),
++                                    };
++                                    break;
++                                }
++                            }
++                        }
++                    }
++                    if let ActionResult::CommandFinished {
++                        ref output,
++                        exit_code,
++                        ref block_id,
++                    } = resolved
++                    {
++                        if output.trim().is_empty() && exit_code.was_successful() {
++                            log::warn!(
++                                "run_shell_command: empty output after {}ms retry; block_id={:?} exit={}",
++                                (Self::EMPTY_OUTPUT_RETRY_ATTEMPTS as u64)
++                                    .saturating_mul(Self::EMPTY_OUTPUT_RETRY_INTERVAL_MS),
++                                block_id,
++                                exit_code.value()
++                            );
++                        }
++                    }
++                    resolved
++                }
++                other => other,
++            }
+         }
+     }
+ 
+     pub(super) fn cancel_execution(&mut self, id: &AIAgentActionId, _ctx: &mut ModelContext<Self>) {
++        let by_action = BlockSelector::Action(id.clone());
++        let removed = self.block_finished_senders.remove(&by_action).is_some();
++        self.force_refresh_senders.remove(&by_action);
++        if removed {
++            return;
++        }
++
+         let terminal_model = self.terminal_model.lock();
+         let active_block = terminal_model.block_list().active_block();
+         if !active_block.is_active_and_long_running() {
+             return;
+         }
+ 
+-        let selector = if active_block
+-            .requested_command_action_id()
+-            .is_some_and(|requested_command_id| requested_command_id == id)
+-        {
+-            BlockSelector::RequestedCommandId(id.clone())
+-        } else {
+-            BlockSelector::Id(active_block.id().clone())
++        let selector = terminal_model
++            .block_list()
++            .block_for_ai_action_id(id)
++            .map(|b| BlockSelector::Id(b.id().clone()))
++            .or_else(|| {
++                active_block
++                    .requested_command_action_id()
++                    .is_some_and(|requested_command_id| requested_command_id == id)
++                    .then(|| BlockSelector::Id(active_block.id().clone()))
++            });
++        let Some(selector) = selector else {
++            return;
+         };
+         self.block_finished_senders.remove(&selector);
+         self.force_refresh_senders.remove(&selector);
+@@ -689,16 +822,17 @@ impl ShellCommandExecutor {
+ #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+ enum BlockSelector {
+     Id(BlockId),
+-    RequestedCommandId(AIAgentActionId),
++    /// Shell block that carries `requested_command_action_id` for this agent tool call.
++    Action(AIAgentActionId),
+ }
+ 
+ impl BlockSelector {
+     fn get_block<'a>(&self, model: &'a TerminalModel) -> Option<&'a Block> {
+         match self {
+             BlockSelector::Id(block_id) => model.block_list().block_with_id(block_id),
+-            BlockSelector::RequestedCommandId(requested_command_id) => model
+-                .block_list()
+-                .block_for_ai_action_id(requested_command_id),
++            BlockSelector::Action(action_id) => {
++                model.block_list().block_for_ai_action_id(action_id)
++            }
+         }
+     }
+ }
+diff --git a/app/src/terminal/model/blocks.rs b/app/src/terminal/model/blocks.rs
+index a558622..74b4183 100644
+--- a/app/src/terminal/model/blocks.rs
++++ b/app/src/terminal/model/blocks.rs
+@@ -1779,7 +1779,10 @@ impl BlockList {
+     }
+ 
+     pub fn block_for_ai_action_id(&self, id: &AIAgentActionId) -> Option<&Block> {
+-        self.blocks.iter().find(|block| {
++        // Prefer the most recently appended matching block. Older entries can still carry the same
++        // action id if metadata wasn't cleared (or on shells where an intermediate block finishes
++        // with no execution before the real PTY block appears).
++        self.blocks.iter().rev().find(|block| {
+             block.agent_interaction_metadata().is_some_and(|metadata| {
+                 metadata
+                     .requested_command_action_id()
+diff --git a/app/src/terminal/model/terminal_model.rs b/app/src/terminal/model/terminal_model.rs
+index ffb2a78..b77092f 100644
+--- a/app/src/terminal/model/terminal_model.rs
++++ b/app/src/terminal/model/terminal_model.rs
+@@ -1705,7 +1705,6 @@ impl TerminalModel {
+     ) {
+         self.start_command_execution();
+ 
+-        // If this command has AI metadata, attach it to the active block.
+         if let Some(ai_metadata) = &agent_metadata {
+             self.block_list
+                 .active_block_mut()
+diff --git a/app/src/terminal/view.rs b/app/src/terminal/view.rs
+index ad7666d..be935c8 100644
+--- a/app/src/terminal/view.rs
++++ b/app/src/terminal/view.rs
+@@ -5475,6 +5475,21 @@ impl TerminalView {
+                     *agent_has_control,
+                     ctx,
+                 );
++                if !agent_has_control {
++                    let should_focus_terminal_for_transfer = self
++                        .model
++                        .lock()
++                        .block_list()
++                        .active_block()
++                        .long_running_control_state()
++                        .and_then(|state| state.user_take_over_reason())
++                        .is_some_and(UserTakeOverReason::is_transfer_from_agent);
++                    if should_focus_terminal_for_transfer {
++                        // Password/passphrase prompts need the next keystrokes to go to the PTY,
++                        // not the agent input that may still be visible after the handoff.
++                        self.focus_terminal(ctx);
++                    }
++                }
+             }
+             CLISubagentEvent::FinishedSubagent {
+                 block_id,
+@@ -6829,6 +6844,21 @@ impl TerminalView {
+             }
+         }
+ 
++        let active_command_block = model.block_list().active_block();
++        // Agent handed the PTY to the user (ssh password, 2FA, etc.). Keep Steer / agent input
++        // hidden for the whole interval — not only while `has_expanded_running_commands` is true.
++        // Otherwise submitting the password (Enter) collapses the running-command header, that
++        // predicate becomes false, the steer field reappears, steals focus, and the session can
++        // wedge with client-side tool warnings.
++        if active_command_block.is_active_and_long_running()
++            && active_command_block
++                .long_running_control_state()
++                .and_then(|s| s.user_take_over_reason())
++                .is_some_and(UserTakeOverReason::is_transfer_from_agent)
++        {
++            return false;
++        }
++
+         let active_ai_block = self.active_ai_block(app);
+         if active_ai_block.is_some_and(|ai_block| {
+             let ai_block = ai_block.as_ref(app);
+@@ -6838,7 +6868,6 @@ impl TerminalView {
+             return false;
+         }
+ 
+-        let active_command_block = model.block_list().active_block();
+         let is_active_and_long_running = active_command_block.is_active_and_long_running();
+         let is_oz_env_startup_command = active_command_block.is_oz_environment_startup_command();
+         let is_running_in_band_command =
+@@ -19167,13 +19196,26 @@ impl TerminalView {
+ 
+             let has_bootstrapped = model.block_list().is_bootstrapping_precmd_done();
+ 
++            // Agent handed the PTY to the user for an interactive prompt (password, 2FA, etc.).
++            // Otherwise `has_active_user_terminal_command` stays false while the AI input is visible
++            // (bootstrapped), and keystrokes go to "Steer the running agent" instead of ssh/sudo.
++            let agent_transferred_pty_for_interactive_prompt = block_list
++                .active_block()
++                .is_active_and_long_running()
++                && block_list
++                    .active_block()
++                    .long_running_control_state()
++                    .and_then(|state| state.user_take_over_reason())
++                    .is_some_and(UserTakeOverReason::is_transfer_from_agent);
++
+             let has_active_user_terminal_command = block_list.active_block().is_active_and_long_running()
+                 && !block_list.active_block().is_agent_in_control()
+                 // The only case where terminal can take focus _while_ input is visible is
+                 // pre-bootstrap, for example when oh-my-zsh prompts you to update -- at this point
+                 // the input is visible but you should still be able to click into the block for the
+                 // oh-my-zsh prompt and send input directly to the pty.
+-                && (!is_input_visible || !has_bootstrapped);
++                && ((!is_input_visible || !has_bootstrapped)
++                    || agent_transferred_pty_for_interactive_prompt);
+ 
+             let is_shell_mode = !self.ai_input_model.as_ref(ctx).is_ai_input_enabled();
+             let are_blocks_selected = !self.selected_blocks.is_empty();
+diff --git a/app/src/terminal/writeable_pty/pty_controller.rs b/app/src/terminal/writeable_pty/pty_controller.rs
+index fd2a080..9dddabe 100644
+--- a/app/src/terminal/writeable_pty/pty_controller.rs
++++ b/app/src/terminal/writeable_pty/pty_controller.rs
+@@ -546,7 +546,6 @@ impl<T: EventLoopSender> PtyController<T> {
+         {
+             let mut model = self.terminal_model.lock();
+ 
+-            // Explicitly start the block now that the command is executed.
+             match source {
+                 CommandExecutionSource::AI { metadata } => {
+                     model.start_command_execution_with_ai_metadata(metadata)
+@@ -562,10 +561,9 @@ impl<T: EventLoopSender> PtyController<T> {
+                 }
+             }
+ 
+-            // Ensure that the `TerminalModel` doesn't interpret any of the PTY output from the
+-            // following commands as in-band command output. If the in-band command output is not
+-            // currently being received by the `TerminalModel`, this is a no-op.
+-            model.end_in_band_command_output(false);
++            if model.is_receiving_in_band_command_output() {
++                model.end_in_band_command_output(false);
++            }
+         }
+ 
+         self.pending_writes.clear();

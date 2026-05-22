@@ -158,6 +158,7 @@ impl CLISubagentController {
                     block_id: active_block.id().clone(),
                     requested_command_action_id: action_id,
                     agent_has_control: active_block.is_agent_in_control(),
+                    is_transfer_from_agent: false,
                 });
             }
             BlocklistAIActionEvent::ExecutingAction(..) => {
@@ -170,6 +171,7 @@ impl CLISubagentController {
                     block_id: active_block.id().clone(),
                     requested_command_action_id: action_id,
                     agent_has_control: active_block.is_agent_in_control(),
+                    is_transfer_from_agent: false,
                 });
             }
             BlocklistAIActionEvent::FinishedAction { action_id, .. } => {
@@ -292,6 +294,7 @@ impl CLISubagentController {
                     block_id: updated_control_block_id,
                     requested_command_action_id: action_id,
                     agent_has_control: updated_control_agent_has_control,
+                    is_transfer_from_agent: false,
                 });
 
                 // Updates the last snapshot timestamp for the active block after the agent has read the block output.
@@ -478,6 +481,9 @@ impl CLISubagentController {
             block_id: block_id.clone(),
             requested_command_action_id: action_id,
             agent_has_control,
+            // `should_cancel_conversation` is based on `!reason.is_transfer_from_agent()`
+            // (computed before `reason` was moved into `take_over_control_for_user`).
+            is_transfer_from_agent: !should_cancel_conversation,
         });
 
         send_telemetry_from_ctx!(
@@ -552,6 +558,7 @@ impl CLISubagentController {
             block_id: block_id.clone(),
             requested_command_action_id: action_id,
             agent_has_control,
+            is_transfer_from_agent: was_transfer_from_agent,
         });
 
         // Emit a special event if control was transferred from agent, so the executor can be notified.
@@ -647,6 +654,7 @@ impl CLISubagentController {
                     block_id: block_id.clone(),
                     requested_command_action_id: action_id.clone(),
                     agent_has_control,
+                    is_transfer_from_agent: false,
                 });
                 self.active_subagents_by_block
                     .entry(block_id.clone())
@@ -722,6 +730,11 @@ pub enum CLISubagentEvent {
         block_id: BlockId,
         requested_command_action_id: Option<AIAgentActionId>,
         agent_has_control: bool,
+        /// Whether the user takeover (when `agent_has_control` is false) was a
+        /// [`UserTakeOverReason::TransferFromAgent`] rather than Manual or Stop.
+        /// `TerminalView` uses this to reliably clear the view-level transfer
+        /// tracking flag without having to query block state (which may be stale).
+        is_transfer_from_agent: bool,
     },
     UpdatedLastSnapshot,
     ToggledHideResponses,

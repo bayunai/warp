@@ -45,6 +45,7 @@ pub mod i18n;
 mod input_classifier;
 mod interval_timer;
 mod linear;
+// In-app dropdown/context menus (crate::menu::Menu), not the macOS menu bar (app_menus).
 mod local_managed_secrets;
 mod menu;
 mod modal;

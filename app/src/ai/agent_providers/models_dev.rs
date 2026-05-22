@@ -15,6 +15,10 @@
 //! 设计取舍:**同步缓存读、异步网络拉**。读侧给 UI 用,要快;
 //! 拉侧后台 spawn,失败不弹错只 log,缓存读不到就给空数据,UI 展示
 //! "暂未拉取到 models.dev,请检查网络"。
+//!
+//! **内网 / 离线**: 设置环境变量 `OPENWARP_SKIP_MODELS_DEV=1`(或 `true` / `yes`) 可完全跳过对
+//! `https://models.dev/api.json` 的 HTTP 请求。仍会从磁盘缓存 `${cache_dir}/models-dev.json`
+//! 加载(若你手动下发过该文件)。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -30,6 +34,19 @@ const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 const CACHE_FILENAME: &str = "models-dev.json";
 const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// 内网 / 隔离环境: 为 `1` / `true` / `yes`(不区分大小写) 时不发起任何 models.dev 网络请求。
+/// 磁盘缓存仍可通过 [`load_from_disk`] 加载。
+pub fn skip_network_fetch() -> bool {
+    std::env::var("OPENWARP_SKIP_MODELS_DEV")
+        .map(|v| {
+            matches!(
+                v.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
 
 /// `models.dev` 顶层数据 — provider_id → Provider。
 pub type Catalog = BTreeMap<String, Provider>;
@@ -222,6 +239,9 @@ pub fn is_stale() -> bool {
 /// 异步拉取 models.dev 并写入磁盘缓存与内存缓存。
 /// 失败仅 log,不向上 propagate(UI 调用方按 `cached()` 是否为 `Some` 决定显示)。
 pub async fn fetch_and_cache(client: Client) -> Result<(), String> {
+    if skip_network_fetch() {
+        return Ok(());
+    }
     let resp = client
         .get(MODELS_DEV_URL)
         .timeout(FETCH_TIMEOUT)
