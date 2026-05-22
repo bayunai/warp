@@ -37,7 +37,3 @@ tokio-util = { workspace = true, features = ["compat"] }
 
 [build-dependencies]
 prost-build.workspace = true
-
-[[bin]]
-name = "remote_server_daemon"
-path = "src/main.rs"
