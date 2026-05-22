@@ -305,12 +305,17 @@ jobs:
           # 用什么名字、什么具体 uid 都行)。
           HOST_UID=$(id -u)
           HOST_GID=$(id -g)
+          # 注意:不要把 GITHUB_ACTIONS=true 透传进容器。
+          # script/bundle 看到该变量后会 `echo ... >> "$GITHUB_OUTPUT"`,
+          # 而容器里没有 GITHUB_OUTPUT,redirect 到空字符串触发 `set -e` 退出,
+          # Arch 包根本就构建不出来(见 run 26153630745)。
+          # 我们也不需要该步骤的 step outputs —— 它 continue-on-error,
+          # packages_dir 由前面 AppImage 步骤的 bundle_app.outputs 提供。
           docker run --rm \
             -v "$PWD:/work" \
             -v "$HOME/.cargo:/cargo-home" \
             -w /work \
             -e GIT_RELEASE_TAG="${{ needs.prepare_metadata.outputs.release_tag }}" \
-            -e GITHUB_ACTIONS=true \
             -e SKIP_SETTINGS_SCHEMA=1 \
             -e HOST_UID="$HOST_UID" \
             -e HOST_GID="$HOST_GID" \
@@ -321,7 +326,10 @@ jobs:
               # 不用 chown,直接 sudo -u 即可读写。
               groupadd -g "$HOST_GID" builder 2>/dev/null || true
               useradd -u "$HOST_UID" -g "$HOST_GID" -m builder
+              # 显式给 HOME=/home/builder,否则 `sudo -E` 会保留外层 HOME=/root,
+              # 导致 `git config --global` 试图写 /root/.gitconfig 报 Permission denied。
               sudo -u builder -E env \
+                HOME=/home/builder \
                 CARGO_HOME=/cargo-home \
                 PATH=/cargo-home/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin \
                 bash -c "
