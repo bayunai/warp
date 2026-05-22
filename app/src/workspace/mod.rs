@@ -112,7 +112,7 @@ pub fn init(app: &mut AppContext) {
     crate::tab_configs::remove_confirmation_dialog::init(app);
     hoa_onboarding::init(app);
     tab_configs::session_config_modal::init(app);
-    view::openwarp_launch_modal::init(app);
+    view::zap_launch_modal::init(app);
     view::codex_modal::init(app);
     view::global_search::view::GlobalSearchView::init(app);
     view::right_panel::RightPanelView::init(app);
@@ -189,15 +189,15 @@ pub fn init(app: &mut AppContext) {
                 )
                 .with_context_predicate(id!("Workspace")),
                 EditableBinding::new(
-                    "workspace:open_openwarp_launch_modal",
-                    crate::t!("keybinding-desc-workspace-open-openwarp-launch-modal"),
-                    WorkspaceAction::OpenOpenWarpLaunchModal,
+                    "workspace:open_zap_launch_modal",
+                    crate::t!("keybinding-desc-workspace-open-zap-launch-modal"),
+                    WorkspaceAction::OpenZapLaunchModal,
                 )
                 .with_context_predicate(id!("Workspace")),
                 EditableBinding::new(
-                    "workspace:reset_openwarp_launch_modal_state",
-                    crate::t!("keybinding-desc-workspace-reset-openwarp-launch-modal-state"),
-                    WorkspaceAction::ResetOpenWarpLaunchModalState,
+                    "workspace:reset_zap_launch_modal_state",
+                    crate::t!("keybinding-desc-workspace-reset-zap-launch-modal-state"),
+                    WorkspaceAction::ResetZapLaunchModalState,
                 )
                 .with_context_predicate(id!("Workspace")),
                 EditableBinding::new(
@@ -1033,7 +1033,7 @@ pub fn init(app: &mut AppContext) {
             "workspace:search_drive",
             crate::t!("keybinding-desc-workspace-search-drive"),
             WorkspaceAction::OpenPalette {
-                mode: PaletteMode::WarpDrive,
+                mode: PaletteMode::ZapDrive,
                 source: PaletteSource::Keybinding,
                 query: None,
             },
@@ -1160,7 +1160,7 @@ pub fn init(app: &mut AppContext) {
         .with_context_predicate(id!("Workspace") & id!(flags::IS_ANY_AI_ENABLED))
         .with_group(bindings::BindingGroup::WarpAi.as_str())
         // We use the same custom action as AM so that we don't have
-        // two mac menu items for AM vs Warp AI since they are mutually exclusive.
+        // two mac menu items for AM vs Zap AI since they are mutually exclusive.
         .with_custom_action(CustomAction::NewAgentModePane),
     ]);
 
@@ -1343,7 +1343,7 @@ fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {
         )
         .with_group(bindings::BindingGroup::Settings.as_str())
         .with_context_predicate(id!("Workspace")),
-        // OpenWarp Wave 6-8:`workspace:show_settings_shared_blocks_page` keybinding 随
+        // Zap Wave 6-8:`workspace:show_settings_shared_blocks_page` keybinding 随
         // `ShowBlocksView` 设置页与 `CustomAction::ViewSharedBlocks` 一同物理删。
         EditableBinding::new(
             "workspace:show_settings_keyboard_shortcuts_page",
@@ -1397,9 +1397,9 @@ fn add_open_setting_pages_as_editable_binding(app: &mut AppContext) {
         )
         .with_group(bindings::BindingGroup::Settings.as_str())
         .with_context_predicate(id!("Workspace")),
-        // OpenWarp Wave 6-8:`workspace:show_settings_referrals_page` keybinding 随
+        // Zap Wave 6-8:`workspace:show_settings_referrals_page` keybinding 随
         // `ReferralsPageView` 设置页物理删。
-        // OpenWarp Wave 7-3:`workspace:show_settings_environments_page` keybinding 随
+        // Zap Wave 7-3:`workspace:show_settings_environments_page` keybinding 随
         // ambient-agent UI 子系统物理删。
         EditableBinding::new(
             "workspace:show_mcp_servers_settings_page",

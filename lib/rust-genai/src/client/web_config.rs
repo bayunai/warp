@@ -8,7 +8,7 @@ use std::time::Duration;
 /// - HTTP/2 adaptive flow-control window
 /// - Connection pool: 4 idle connections per host
 ///
-/// **Note (OpenWarp fork)**: gzip default is **false**. Upstream genai defaults
+/// **Note (Zap fork)**: gzip default is **false**. Upstream genai defaults
 /// to `true`, but for AI streaming endpoints (Anthropic / OpenAI compatible)
 /// `Accept-Encoding: gzip` causes proxies (nginx with `gzip on; gzip_proxied any;`)
 /// to compress SSE responses. SSE over gzip forces the server to flush full
@@ -24,7 +24,7 @@ pub struct WebConfig {
 	pub read_timeout: Option<Duration>,
 	pub default_headers: Option<reqwest::header::HeaderMap>,
 	pub proxy: Option<reqwest::Proxy>,
-	/// Enable gzip response decompression. **Default: false** (OpenWarp fork
+	/// Enable gzip response decompression. **Default: false** (Zap fork
 	/// — upstream genai default is true). See struct-level docs for rationale.
 	pub gzip: bool,
 	/// Enable TCP_NODELAY (disable Nagle's algorithm). Default: true.
@@ -39,7 +39,7 @@ impl Default for WebConfig {
 			read_timeout: None,
 			default_headers: None,
 			proxy: None,
-			// OpenWarp: gzip off by default — see struct-level docs above.
+			// Zap: gzip off by default — see struct-level docs above.
 			gzip: false,
 			tcp_nodelay: true,
 		}

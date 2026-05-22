@@ -108,10 +108,10 @@ pub struct EditorModal {
     /// used for saving changes.
     same_line_prompt_enabled: bool,
 
-    /// Dropdown to select the separator for the Warp prompt, in the case of
-    /// same line prompt. This separator is added at the end of the Warp prompt.
+    /// Dropdown to select the separator for the Zap prompt, in the case of
+    /// same line prompt. This separator is added at the end of the Zap prompt.
     warp_prompt_separator_dropdown: ViewHandle<Dropdown<EditorModalAction>>,
-    /// The separator currently selected for the Warp prompt.
+    /// The separator currently selected for the Zap prompt.
     warp_prompt_separator: WarpPromptSeparator,
 
     /// True if there was any change while the modal was open.
@@ -123,7 +123,7 @@ pub struct EditorModal {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PromptType {
     PS1,
-    Warp,
+    Zap,
     WarpDefault,
 }
 
@@ -133,7 +133,7 @@ impl PromptType {
         if matches!(*session_settings.saved_prompt, PromptSelection::Default) {
             PromptType::WarpDefault
         } else {
-            PromptType::Warp
+            PromptType::Zap
         }
     }
 
@@ -170,7 +170,7 @@ impl EditorModal {
 
         let warp_prompt_separator = match SessionSettings::as_ref(ctx).saved_prompt.value() {
             PromptSelection::CustomChipSelection(config) => config.separator(),
-            // If the "default Warp prompt" i.e. no context chips, is selected, then default to no Warp prompt separator.
+            // If the "default Zap prompt" i.e. no context chips, is selected, then default to no Zap prompt separator.
             _ => WarpPromptSeparator::None,
         };
         let warp_prompt_separator_label = warp_prompt_separator.dropdown_item_label().to_owned();
@@ -287,9 +287,9 @@ impl EditorModal {
         ctx.notify();
     }
 
-    /// Updates the state of the Warp prompt separator dropdown to be enabled/disabled based on the current state of the modal.
+    /// Updates the state of the Zap prompt separator dropdown to be enabled/disabled based on the current state of the modal.
     fn update_warp_separator_dropdown_state(&mut self, ctx: &mut ViewContext<Self>) {
-        // If we are using the Warp prompt and SLP is enabled, then we enable the dropdown. Otherwise, disable it.
+        // If we are using the Zap prompt and SLP is enabled, then we enable the dropdown. Otherwise, disable it.
         if self.prompt_type != PromptType::PS1 && self.same_line_prompt_enabled {
             self.warp_prompt_separator_dropdown
                 .update(ctx, |dropdown, ctx| {
@@ -307,7 +307,7 @@ impl EditorModal {
         if self.is_dirty {
             match self.prompt_type {
                 PromptType::PS1 => {
-                    // TODO: we need to stop the Warp prompt generators from running at this point
+                    // TODO: we need to stop the Zap prompt generators from running at this point
                     SessionSettings::handle(ctx).update(ctx, |settings, ctx| {
                         report_if_error!(settings.honor_ps1.set_value(true, ctx));
                     });
@@ -317,7 +317,7 @@ impl EditorModal {
                         report_if_error!(prompt.reset(ctx));
                     });
                 }
-                PromptType::Warp => {
+                PromptType::Zap => {
                     let new_setup = self
                         .chip_configurator
                         .used_chips
@@ -351,7 +351,7 @@ impl EditorModal {
             let prompt_info = match self.prompt_type {
                 PromptType::PS1 => PromptChoice::PS1,
                 PromptType::WarpDefault => PromptChoice::Default,
-                PromptType::Warp => PromptChoice::Custom {
+                PromptType::Zap => PromptChoice::Custom {
                     builtin_chips: self
                         .chip_configurator
                         .used_chips
@@ -398,21 +398,21 @@ impl TypedActionView for EditorModal {
                 let mutated = self.chip_configurator.handle_action(chip_action, ctx);
                 if mutated {
                     self.is_dirty = true;
-                    self.prompt_type = PromptType::Warp;
+                    self.prompt_type = PromptType::Zap;
                 }
                 ctx.notify();
             }
             Self::Action::UsePS1 => {
                 self.is_dirty = true;
                 self.prompt_type = PromptType::PS1;
-                // Disable the Warp separator dropdown (only applies to Warp prompt).
+                // Disable the Zap separator dropdown (only applies to Zap prompt).
                 self.update_warp_separator_dropdown_state(ctx);
                 ctx.notify();
             }
             Self::Action::UseWarpPrompt => {
                 self.is_dirty = true;
                 self.prompt_type = PromptType::warp_prompt_from_settings(ctx);
-                // Enable the Warp separator dropdown, if SLP is on.
+                // Enable the Zap separator dropdown, if SLP is on.
                 self.update_warp_separator_dropdown_state(ctx);
                 ctx.notify();
             }
@@ -423,7 +423,7 @@ impl TypedActionView for EditorModal {
                 let default_prompt = PromptConfiguration::default_prompt();
                 self.same_line_prompt_enabled = default_prompt.same_line_prompt_enabled();
                 self.warp_prompt_separator = default_prompt.separator();
-                // Disable the Warp separator dropdown, since SLP is off for the default Warp prompt.
+                // Disable the Zap separator dropdown, since SLP is off for the default Zap prompt.
                 self.update_warp_separator_dropdown_state(ctx);
                 let restored_chips = default_prompt.chip_kinds();
                 self.update_used_chips(restored_chips, ctx);
@@ -433,9 +433,9 @@ impl TypedActionView for EditorModal {
                 self.is_dirty = true;
                 self.same_line_prompt_enabled = !self.same_line_prompt_enabled;
 
-                // In case we had previously picked default Warp prompt, but now the user toggled
+                // In case we had previously picked default Zap prompt, but now the user toggled
                 // same line prompt - it's no longer the default prompt.
-                self.prompt_type = PromptType::Warp;
+                self.prompt_type = PromptType::Zap;
 
                 self.update_warp_separator_dropdown_state(ctx);
                 ctx.notify();
@@ -589,7 +589,7 @@ impl EditorModal {
         }
     }
 
-    // TODO: consider supporting SLP with the new Warp prompt.
+    // TODO: consider supporting SLP with the new Zap prompt.
     #[allow(dead_code)]
     fn render_same_line_prompt_section(&self, appearance: &Appearance) -> Box<dyn Element> {
         let label = appearance
@@ -686,7 +686,7 @@ impl EditorModal {
 
         self.render_prompt_section(
             appearance,
-            matches!(self.prompt_type, PromptType::Warp | PromptType::WarpDefault),
+            matches!(self.prompt_type, PromptType::Zap | PromptType::WarpDefault),
             header_row,
             None,
             body,
@@ -789,9 +789,9 @@ impl EditorModal {
 
         // We disable the save button in a couple of cases:
         // - there are no changes
-        // - the Warp prompt is used but there are no chips selected
+        // - the Zap prompt is used but there are no chips selected
         let save_disabled = !self.is_dirty
-            || (matches!(self.prompt_type, PromptType::Warp)
+            || (matches!(self.prompt_type, PromptType::Zap)
                 && self.chip_configurator.used_chips.is_empty());
         let save_button = self.render_primary_button(
             crate::t!("prompt-editor-save-changes"),

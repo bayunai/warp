@@ -25,7 +25,7 @@ use warpui::{
 use warpui::{BlurContext, FocusContext};
 
 pub const WHY_INSTALL_TMUX_URL: &str =
-    "https://docs.warp.dev/terminal/warpify/ssh#why-do-i-need-tmux-on-the-remote-machine";
+    "";
 
 #[derive(Debug, Clone)]
 pub struct TmuxInstallMethod {
@@ -320,7 +320,7 @@ impl SshInstallTmuxBlock {
     ) -> Box<dyn Element> {
         let header_contents = render::build_header_row(
             "Install tmux?",
-            Icon::new(UiIcon::Warp.into(), theme.active_ui_detail()),
+            Icon::new(UiIcon::Zap.into(), theme.active_ui_detail()),
             theme,
             appearance,
         )

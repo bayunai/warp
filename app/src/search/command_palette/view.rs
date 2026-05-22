@@ -101,7 +101,7 @@ pub enum Event {
     InvokeEnvironmentVariables { id: SyncId },
     /// Open a notebook identified by `id`.
     OpenNotebook { id: SyncId },
-    /// View the relevant object in the Warp Drive sidebar.
+    /// View the relevant object in the Zap Drive sidebar.
     ViewInWarpDrive { id: ObjectTypeAndId },
     /// Open a file at the given path.
     OpenFile {
@@ -402,7 +402,7 @@ impl View {
                 | (PaletteMode::LaunchConfig, QueryFilter::LaunchConfigurations)
                 | (PaletteMode::Files, QueryFilter::Files)
                 | (PaletteMode::Conversations, QueryFilter::Conversations)
-                | (PaletteMode::WarpDrive, QueryFilter::Drive)
+                | (PaletteMode::ZapDrive, QueryFilter::Drive)
         )
     }
 

@@ -37,7 +37,7 @@ lazy_static! {
     /// of Mesa's llvmpipe software renderer.
     ///
     /// While lavapipe is theoretically Vulkan 1.3 compatible starting in version
-    /// 22.1.2, in practice, Warp windows don't render properly until 24.0.2.
+    /// 22.1.2, in practice, Zap windows don't render properly until 24.0.2.
     static ref MIN_SUPPORTED_LAVAPIPE_VERSION: Version<'static> = Version::from("24.0.2")
         .expect("should not fail to parse version");
 
@@ -507,7 +507,7 @@ fn is_intel_uhd_620_adapter_on_windows_with_vulkan_backend(
 /// window decorations (e.g. title bar height). Enabling native window decorations fixes the
 /// alignment.
 ///
-/// See: https://github.com/warpdotdev/Warp/issues/6120
+/// See: https://github.com/zerx-lab/warp/issues/6120
 pub fn adapter_has_rendering_offset_bug(adapter_info: &wgpu::AdapterInfo) -> bool {
     if !cfg!(windows) {
         return false;
@@ -519,7 +519,7 @@ pub fn adapter_has_rendering_offset_bug(adapter_info: &wgpu::AdapterInfo) -> boo
     }
 
     // Known affected Intel integrated GPU models. This list is based on user reports from
-    // https://github.com/warpdotdev/Warp/issues/6120.
+    // https://github.com/zerx-lab/warp/issues/6120.
     let affected_models = [
         "Intel(R) HD Graphics 4000",
         "Intel(R) HD Graphics 4400",
@@ -737,9 +737,7 @@ fn adapter_stability_sort_func(
     // Same with Nvidia drivers, though this is only an issue with a Wayland window server.
     } else if window_server_is_wayland && is_older_nvidia_adapter(&adapter_info) {
         log::warn!(
-            "Deprioritizing Vulkan-backed Nvidia adapter due to version < {} (unsupported).\nSee \
-            the \"Graphics\" secion of our docs here: \
-            https://docs.warp.dev/help/known-issues#linux-1",
+            "Deprioritizing Vulkan-backed Nvidia adapter due to version < {} (unsupported).",
             *MIN_SUPPORTED_NVIDIA_VERSION
         );
         AdapterSupport::Unsupported

@@ -137,7 +137,7 @@ impl ProjectSlide {
             .ui_builder()
             .paragraph(localized(
                 "onboarding-project-subtitle",
-                "Set up a project to optimize it for coding in Warp.",
+                "Set up a project to optimize it for coding in Zap.",
             ))
             .with_style(UiComponentStyles {
                 font_size: Some(20.),
@@ -298,14 +298,14 @@ impl ProjectSlide {
         );
 
         let theme_picker_last =
-            warp_core::features::FeatureFlag::OpenWarpNewSettingsModes.is_enabled();
+            warp_core::features::FeatureFlag::ZapNewSettingsModes.is_enabled();
 
         let (label, keystroke, action) = match settings {
             ProjectOnboardingSettings::Project { .. } => (
                 if theme_picker_last {
                     localized("common-next", "Next")
                 } else {
-                    localized("common-get-warping", "Get Warping")
+                    localized("common-get-warping", "Get Zapping")
                 },
                 Keystroke::parse("enter").unwrap_or_default(),
                 ProjectSlideAction::NextClicked,
@@ -496,7 +496,7 @@ impl ProjectSlide {
         }
 
         self.onboarding_state.update(ctx, |model, ctx| {
-            if warp_core::features::FeatureFlag::OpenWarpNewSettingsModes.is_enabled() {
+            if warp_core::features::FeatureFlag::ZapNewSettingsModes.is_enabled() {
                 model.next(ctx);
             } else {
                 model.complete(ctx);
@@ -507,7 +507,7 @@ impl ProjectSlide {
     fn skip(&mut self, ctx: &mut ViewContext<Self>) {
         self.onboarding_state.update(ctx, |model, ctx| {
             model.set_project_selected_local_folder(None, ctx);
-            if warp_core::features::FeatureFlag::OpenWarpNewSettingsModes.is_enabled() {
+            if warp_core::features::FeatureFlag::ZapNewSettingsModes.is_enabled() {
                 model.next(ctx);
             } else {
                 model.complete(ctx);

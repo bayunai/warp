@@ -1,17 +1,13 @@
-Package: oz@@CHANNEL_SUFFIX@@
+Package: @@PACKAGE_NAME@@
 Version: @@VERSION@@
 Section: devel
 Depends: zlib1g
 Priority: optional
 Architecture: @@ARCH@@
-Maintainer: OpenWarp Maintainers <openwarp-maintainers@localhost>
-Homepage: https://warp.dev/
-Replaces: warp-cli@@CHANNEL_SUFFIX@@ (<< @@VERSION@@), oz (= 0.2026.02.09.06.06.stable.00), oz (= 0.2026.02.09.06.06.stable.02), oz (= 0.2026.02.10.11.37.stable.00), oz (= 0.2026.02.10.11.37.stable.01), oz (= 0.2026.02.11.08.23.stable.00)
-Conflicts: warp-cli@@CHANNEL_SUFFIX@@ (<< @@VERSION@@), oz (= 0.2026.02.09.06.06.stable.00), oz (= 0.2026.02.09.06.06.stable.02), oz (= 0.2026.02.10.11.37.stable.00), oz (= 0.2026.02.10.11.37.stable.01), oz (= 0.2026.02.11.08.23.stable.00)
-Description: The local orchestration platform for coding agents
- The Oz CLI is a tool for running, managing, and orchestrating coding agents at scale.
- Use the CLI to:
- * Launch and inspect local agent runs
- * Manage local agent workflows
- * Configure local agent environments
- * Use local secret materialization for agent runs
+Maintainer: Zap Maintainers <zap-maintainers@localhost>
+Homepage: https://github.com/zerx-lab/warp
+Replaces: warp-cli (<< @@VERSION@@)
+Conflicts: warp-cli (<< @@VERSION@@)
+Description: Zap CLI — community fork of Warp's local orchestration platform
+ Zap CLI is a tool for running, managing, and orchestrating coding agents
+ locally. It is the CLI half of the Zap community fork of Warp.

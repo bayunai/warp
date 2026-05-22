@@ -219,12 +219,12 @@ pub struct AIConversation {
     /// Legacy cloud event cursor retained only for deserializing older conversations.
     last_event_sequence: Option<i64>,
 
-    /// OpenWarp BYOP 本地会话压缩 sidecar — 与 warp protobuf message 解耦,
+    /// Zap BYOP 本地会话压缩 sidecar — 与 warp protobuf message 解耦,
     /// 通过 message_id 索引挂"is_summary / tool_output_compacted_at / synthetic_continue"等元数据。
     /// 默认空表 = 未压缩状态,完全无侵入。
     /// 详见 [`crate::ai::byop_compaction`]。
     pub(crate) compaction_state: crate::ai::byop_compaction::state::CompactionState,
-    /// OpenWarp BYOP repair sidecar。invalid sidecar 必须原样保留,避免保存时
+    /// Zap BYOP repair sidecar。invalid sidecar 必须原样保留,避免保存时
     /// 静默授权 repair 或抹掉损坏元数据。
     pub(crate) byop_repair_state: RepairStateStatus,
 }
@@ -1157,7 +1157,7 @@ impl AIConversation {
         });
     }
 
-    /// Updates the notebook_uid for a plan artifact when it's synced to Warp Drive.
+    /// Updates the notebook_uid for a plan artifact when it's synced to Zap Drive.
     pub fn update_plan_notebook_uid(
         &mut self,
         document_uid: AIDocumentId,
@@ -2507,7 +2507,7 @@ impl AIConversation {
                     })
                     .ok_or(UpdateConversationError::ExchangeNotFound)?;
 
-                // OpenWarp 优化 1:文本/推理流的 fast path。
+                // Zap 优化 1:文本/推理流的 fast path。
                 // mask 为 `agent_output.text` 或 `agent_reasoning.reasoning` 时
                 // 不会触发 todos_op(只有 UpdateTodos message 才会),
                 // current_todo_list / current_comment_state 在
@@ -2693,7 +2693,7 @@ impl AIConversation {
         new_task_id
     }
 
-    /// OpenWarp BYOP 专用:agent 自起 LRC 收到 snapshot 时,在 conversation 直接落地
+    /// Zap BYOP 专用:agent 自起 LRC 收到 snapshot 时,在 conversation 直接落地
     /// 一个 Server-backed cli subagent task。
     ///
     /// 不走 `create_optimistic_cli_subagent_task`(它产出 `TaskImpl::Optimistic`,且
@@ -3480,7 +3480,7 @@ impl AIConversation {
     }
 }
 
-/// OpenWarp 优化 1: 检测 AppendToMessageContent 的 mask 是不是纯
+/// Zap 优化 1: 检测 AppendToMessageContent 的 mask 是不是纯
 /// 文本/推理 append。这两类 mask path:
 /// - `agent_output.text` —— BYOP / 云路径文本 chunk
 /// - `agent_reasoning.reasoning` —— BYOP / 云路径思考 chunk
@@ -3706,7 +3706,7 @@ pub enum AIAgentSerializedBlockFormat {
 /// Describes the format capabilities of a conversation.
 #[derive(Debug, Clone)]
 pub struct AIAgentConversationFormat {
-    /// Whether there is a Warp MAA task list available for this conversation.
+    /// Whether there is a Zap MAA task list available for this conversation.
     pub has_task_list: bool,
     /// The format of the TUI serialized block, if available.
     pub block_snapshot: Option<AIAgentSerializedBlockFormat>,

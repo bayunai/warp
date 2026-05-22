@@ -18,7 +18,7 @@ pub struct WebClient {
 // in `client/builder.rs::build()`. Keep `gzip` here in sync with `WebConfig::Default`
 // to avoid surprising behavior if someone constructs `WebClient::default()` directly.
 //
-// **OpenWarp fork**: gzip is **off** (upstream genai had `gzip(true)`). See
+// **Zap fork**: gzip is **off** (upstream genai had `gzip(true)`). See
 // `client/web_config.rs::WebConfig` struct-level docs for full rationale.
 impl Default for WebClient {
 	fn default() -> Self {

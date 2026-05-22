@@ -834,7 +834,7 @@ impl TypedActionView for ConversationListView {
                         ));
                     }
 
-                    // OpenWarp Phase 2a: conversation share menu item removed
+                    // Zap Phase 2a: conversation share menu item removed
                     // (cloud-conversation sharing was already retired upstream).
 
                     let fork_items: Option<[MenuItem<ConversationListViewAction>; 2]> =

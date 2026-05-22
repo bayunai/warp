@@ -1,4 +1,4 @@
-//! General-purpose administrative commands in the Warp CLI.
+//! General-purpose administrative commands in the Zap CLI.
 
 use anyhow::{Context, Result};
 use serde::Serialize;

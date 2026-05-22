@@ -16,9 +16,9 @@ Param (
     [String]$RELEASE_TAG = '',
     [String]$FEATURES = 'release_bundle,crash_reporting,gui',
 
-    # Builds only the Warp binary, skips the installer.
+    # Builds only the Zap binary, skips the installer.
     [Switch]$SKIP_BUILD_INSTALLER = $False,
-    # Builds only the installer, skips the Warp binary. Use this if the Warp
+    # Builds only the installer, skips the Zap binary. Use this if the Zap
     # binary has already been built.
     [Switch]$SKIP_BUILD_BINARY = $False,
 
@@ -106,13 +106,13 @@ if ("$CHANNEL" -eq 'local') {
 } elseif ("$CHANNEL" -eq 'stable') {
     $WARP_BIN = 'stable'
     $BINARY_NAME = 'warp.exe'
-    $APP_NAME = 'Warp'
+    $APP_NAME = 'Zap'
     # TODO(vorporeal): Remove this once we get tests passing with this default enabled.
     $FEATURES = "$FEATURES,nld_improvements"
 } elseif ("$CHANNEL" -eq 'oss') {
-    $WARP_BIN = 'warp-oss'
-    $BINARY_NAME = 'warp-oss.exe'
-    $APP_NAME = 'OpenWarp'
+    $WARP_BIN = 'zap-oss'
+    $BINARY_NAME = 'zap-oss.exe'
+    $APP_NAME = 'Zap'
     # OSS channel 使用本地 crash reporting,不启用 release 默认特性集合。
     # autoupdate 走 GitHub Release(zerx-lab/warp),仅下载到 Downloads,不调 Inno Setup。
     $FEATURES = 'release_bundle,gui,nld_improvements,autoupdate'
@@ -121,10 +121,10 @@ if ("$CHANNEL" -eq 'local') {
 $BINARY_PATH = "$CARGO_TARGET_OUTPUT_DIR\$BINARY_NAME"
 # AUMID(Windows AppUserModel ID)—— 必须与进程端 `ChannelState::app_id()` 生成的完全一致,
 # 否则 Windows ToastNotificationManager 会在 Start Menu 快捷方式 / 进程 AUMID 不匹配时
-# 静默吞掉 toast。OSS(OpenWarp)在 `app/src/bin/oss.rs` 里是 `dev.openwarp.OpenWarp`,
+# 静默吞掉 toast。OSS(Zap)在 `app/src/bin/oss.rs` 里是 `dev.zap.Zap`,
 # 其他官方 channel 是 `dev.warp.<Name>`。
 if ("$CHANNEL" -eq 'oss') {
-    $AUMID = "dev.openwarp.$APP_NAME"
+    $AUMID = "dev.zap.$APP_NAME"
 } else {
     $AUMID = "dev.warp.$APP_NAME"
 }
@@ -148,19 +148,19 @@ if ($DEBUG_BUILD) {
 if ($CHECK_ONLY) {
     cargo check -p warp --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --features "$FEATURES" --target $PLATFORM_TARGET
     if (-Not $?) {
-        Write-Error "Failed to verify Warp $WARP_BIN compilation with profile $CARGO_PROFILE"
+        Write-Error "Failed to verify Zap $WARP_BIN compilation with profile $CARGO_PROFILE"
         exit 1
     }
     exit 0
 }
 
 if (-Not $SKIP_BUILD_BINARY) {
-    Write-Output "Building Warp for channel $CHANNEL and bundle id $BUNDLE_ID"
+    Write-Output "Building Zap for channel $CHANNEL and bundle id $BUNDLE_ID"
     $env:CARGO_BIN_NAME = $CHANNEL
     $env:WARP_APP_NAME = $APP_NAME
     cargo build -p warp --profile "$CARGO_PROFILE" --bin "$WARP_BIN" --features "$FEATURES" --target $PLATFORM_TARGET
     if (-Not $?) {
-        Write-Error "Failed to build Warp $WARP_BIN binary with profile $CARGO_PROFILE"
+        Write-Error "Failed to build Zap $WARP_BIN binary with profile $CARGO_PROFILE"
         exit 1
     }
 
@@ -211,7 +211,15 @@ if (-Not $?) {
     exit 1
 }
 
-Write-Output 'Building Warp installer'
+Write-Output 'Building Zap installer'
+# Inno Setup `AppId` 决定注册表 Uninstall 条目与升级跟踪键。OSS 下固定为 `zap-oss`,
+# 避免留在默认的 `warp-terminal-oss` 上。其他 channel 走 .iss 里的默认
+# `warp-terminal-{ReleaseChannel}`。
+if ("$CHANNEL" -eq 'oss') {
+    $INNO_APP_ID = 'zap-oss'
+} else {
+    $INNO_APP_ID = "warp-terminal-$CHANNEL"
+}
 $ISCC_ARGS = @(
     "$WINDOWS_INSTALLER_DIR\windows-installer.iss",
     "/DReleaseChannel=$CHANNEL",
@@ -221,7 +229,8 @@ $ISCC_ARGS = @(
     "/DMyAppVersion=$env:GIT_RELEASE_TAG",
     "/DArch=$ARCH",
     "/DOutputName=$INSTALLER_NAME",
-    "/DAppUserModelId=$AUMID"
+    "/DAppUserModelId=$AUMID",
+    "/DInnoAppId=$INNO_APP_ID"
 )
 # Also accept the sign tool command via env var
 if (-not $SIGN_TOOL_CMD -and $env:SIGN_TOOL_CMD) {

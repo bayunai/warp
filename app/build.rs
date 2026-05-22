@@ -1,5 +1,5 @@
 // We can use `std::process:Command` here because this is invoked within a build script,
-// _not_ within the Warp binary (where it could cause a terminal to temporarily flash on
+// _not_ within the Zap binary (where it could cause a terminal to temporarily flash on
 // Windows).
 #![allow(clippy::disallowed_types)]
 
@@ -46,8 +46,8 @@ fn main() -> Result<()> {
             .compile("warp_objc");
 
         // Build the dock tile plugin
-        println!("cargo:rerun-if-changed=DockTilePlugin/WarpDockTilePlugin.m");
-        println!("cargo:rerun-if-changed=DockTilePlugin/WarpDockTilePlugin.h");
+        println!("cargo:rerun-if-changed=DockTilePlugin/ZapDockTilePlugin.m");
+        println!("cargo:rerun-if-changed=DockTilePlugin/ZapDockTilePlugin.h");
         println!("cargo:rerun-if-changed=DockTilePlugin/Info.plist");
         println!("cargo:rerun-if-changed=DockTilePlugin/Makefile");
 
@@ -65,8 +65,8 @@ fn main() -> Result<()> {
         // Copy the dock tile plugin to the output directory
         let profile = get_build_profile_name();
         let target_dir = app_target_dir(&profile).expect("Failed to get app target directory");
-        let plugin_src = Path::new("DockTilePlugin/WarpDockTilePlugin.docktileplugin");
-        let plugin_dst = target_dir.join("WarpDockTilePlugin.docktileplugin");
+        let plugin_src = Path::new("DockTilePlugin/ZapDockTilePlugin.docktileplugin");
+        let plugin_dst = target_dir.join("ZapDockTilePlugin.docktileplugin");
 
         if !status.success() {
             fs::remove_dir_all(plugin_src).expect("Failed to clean up plugin directory");
@@ -158,7 +158,7 @@ fn generate_channel_config_if_needed(target_family: &str, target_os: &str) {
     let config_bin = "warp-channel-config";
 
     // Check if the config binary is available on PATH. If not, we can't generate embedded
-    // configs. This is expected for external contributors building Warp OSS.
+    // configs. This is expected for external contributors building Zap OSS.
     if Command::new(config_bin)
         .arg("--help")
         .stdout(std::process::Stdio::null())
@@ -276,7 +276,7 @@ fn copy_async_assets() {
     }
 }
 
-/// Copies the DLLs needed to run Warp on Windows.
+/// Copies the DLLs needed to run Zap on Windows.
 ///
 /// They are organized as follows:
 /// - `conpty.dll`
@@ -357,19 +357,19 @@ fn embed_resource_file(target_dir: &Path) {
     use std::io::Write;
 
     let version = env::var("GIT_RELEASE_TAG").unwrap_or("v0".to_owned());
-    // 默认值与 publisher 一致定为「OpenWarp」,与 `script/windows/bundle.ps1` OSS 分支
-    // (`$APP_NAME = 'OpenWarp'`) + AUMID `dev.openwarp.OpenWarp` + Cargo bundle
+    // 默认值与 publisher 一致定为「Zap」,与 `script/windows/bundle.ps1` OSS 分支
+    // (`$APP_NAME = 'Zap'`) + AUMID `dev.zap.Zap` + Cargo bundle
     // metadata 全局对齐。Windows 任务管理器的进程分组名实际取自 PE 资源中的
-    // `FileDescription` / `ProductName`(不是窗口标题),所以这里若回退默认 "Warp",
-    // 直接 `cargo build` 出来的 dev 二进制在任务管理器里会显示成 `Warp(N)`。
+    // `FileDescription` / `ProductName`(不是窗口标题),所以这里若回退默认 "Zap",
+    // 直接 `cargo build` 出来的 dev 二进制在任务管理器里会显示成 `Zap(N)`。
     // 上游官方流水线在调用前会显式 `export WARP_APP_NAME=...` 覆盖,不受影响。
-    let app_name = env::var("WARP_APP_NAME").unwrap_or_else(|_| "OpenWarp".to_owned());
+    let app_name = env::var("WARP_APP_NAME").unwrap_or_else(|_| "Zap".to_owned());
     let bin_name = env::var("CARGO_BIN_NAME").unwrap_or("local".to_owned());
-    // 以 `WARP_APP_PUBLISHER` 覆盖;默认与 installer / AUMID 一致为「OpenWarp」。
+    // 以 `WARP_APP_PUBLISHER` 覆盖;默认与 installer / AUMID 一致为「Zap」。
     // 保持 installer `MyAppPublisher`、Cargo bundle metadata `copyright`、
-    // 进程 AUMID `dev.openwarp.OpenWarp` 三处全局对齐，避免 Windows Shell
+    // 进程 AUMID `dev.zap.Zap` 三处全局对齐，避免 Windows Shell
     // 因 publisher / product name fingerprint 不一致而 miss 掉 icon cache。
-    let publisher = env::var("WARP_APP_PUBLISHER").unwrap_or_else(|_| "OpenWarp".to_owned());
+    let publisher = env::var("WARP_APP_PUBLISHER").unwrap_or_else(|_| "Zap".to_owned());
     let (ver_major, ver_minor, ver_patch, ver_build) = parse_file_version_quad(&version);
 
     let icon_path = Path::new("channels")

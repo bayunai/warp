@@ -22,7 +22,7 @@ lazy_static! {
     static ref INSTALLER_PATH: Arc<Mutex<Option<TempPath>>> = Default::default();
 }
 
-/// Download the Inno Setup install wizard, the same one users run on the first Warp install, and
+/// Download the Inno Setup install wizard, the same one users run on the first Zap install, and
 /// place it into the "data dir".
 pub(super) async fn download_update_and_cleanup(
     version_info: &VersionInfo,
@@ -204,7 +204,7 @@ pub(super) fn relaunch() -> Result<()> {
         }
     };
 
-    // The Inno Setup install wizard will run without user input. It will re-launch Warp after
+    // The Inno Setup install wizard will run without user input. It will re-launch Zap after
     // installing the update files.
     // https://jrsoftware.org/ishelp/index.php?topic=setupcmdline
     Command::new(&installer_path)
@@ -221,8 +221,8 @@ pub(super) fn relaunch() -> Result<()> {
             "/NORESTART",
             &log_arg,
             "/update=1",
-            // Do not forcibly kill Warp via RestartManager. The installer will wait for
-            // Warp to exit naturally by polling the single-instance mutex instead.
+            // Do not forcibly kill Zap via RestartManager. The installer will wait for
+            // Zap to exit naturally by polling the single-instance mutex instead.
             "/NOCLOSEAPPLICATIONS",
             &format!("/DIR={}", install_dir.display()),
         ])
@@ -257,13 +257,13 @@ fn installer_file_name() -> Result<String> {
 
 fn app_name_prefix(channel: Channel) -> &'static str {
     match channel {
-        Channel::Stable => "Warp",
+        Channel::Stable => "Zap",
         Channel::Preview => "WarpPreview",
         Channel::Local => "warp",
         Channel::Integration => "integration",
         Channel::Dev => "WarpDev",
-        // 与 script/windows/bundle.ps1 OSS 分支 INSTALLER_NAME=OpenWarp+Setup 对齐,
-        // 这样 GitHub Release 资产名 OpenWarpSetup.exe 能被 installer_file_name() 正确生成。
-        Channel::Oss => "OpenWarp",
+        // 与 script/windows/bundle.ps1 OSS 分支 INSTALLER_NAME=Zap+Setup 对齐,
+        // 这样 GitHub Release 资产名 ZapSetup.exe 能被 installer_file_name() 正确生成。
+        Channel::Oss => "Zap",
     }
 }

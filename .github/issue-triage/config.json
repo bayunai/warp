@@ -30,7 +30,7 @@
     },
     "needs-mocks": {
       "color": "f48c06",
-      "description": "The issue requires UI mocks from from Warp's design team before implementation can begin."
+      "description": "The issue requires UI mocks from from Zap's design team before implementation can begin."
     },
     "ready-to-implement": {
       "color": "0e8a16",
@@ -150,11 +150,11 @@
     },
     "area:ui-framework": {
       "color": "5319e7",
-      "description": "Core Warp UI framework, rendering, layout, and windowing infrastructure."
+      "description": "Core Zap UI framework, rendering, layout, and windowing infrastructure."
     },
     "area:warp-drive": {
       "color": "0e8a16",
-      "description": "Warp Drive objects, sync, sharing, cloud object management, and persisted artifacts."
+      "description": "Zap Drive objects, sync, sharing, cloud object management, and persisted artifacts."
     },
     "area:window-tabs-panes": {
       "color": "fef2c0",

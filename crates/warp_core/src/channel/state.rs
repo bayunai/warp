@@ -37,7 +37,7 @@ pub struct ChannelState {
 impl ChannelState {
     pub fn init() -> Self {
         let channel = Channel::Oss;
-        let app_id = AppId::new("dev", "openwarp", "OpenWarp");
+        let app_id = AppId::new("dev", "zap", "Zap");
         Self {
             channel,
             additional_features: Default::default(),
@@ -89,7 +89,7 @@ impl ChannelState {
     /// Returns a profile name for isolating user data. This should be used to
     /// sandbox how user data is stored.
     ///
-    /// This is a debugging tool for isolating development instances of Warp, and is not
+    /// This is a debugging tool for isolating development instances of Zap, and is not
     /// supported in release builds.
     pub fn data_profile() -> Option<String> {
         if cfg!(debug_assertions) {
@@ -245,12 +245,12 @@ impl ChannelState {
             // Dummy value--integration tests shouldn't support URL schemes.
             Channel::Integration => "warpintegration",
             Channel::Local => "warplocal",
-            Channel::Oss => "openwarp",
+            Channel::Oss => "zap",
         }
     }
 }
 
-/// OpenWarp Wave 5-5：`derive_http_origin_from_ws_url` 随 `rtc_http_url()` 一同物理删。
+/// Zap Wave 5-5：`derive_http_origin_from_ws_url` 随 `rtc_http_url()` 一同物理删。
 
 #[cfg(all(test, not(feature = "test-util")))]
 #[path = "state_tests.rs"]

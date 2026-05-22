@@ -68,7 +68,7 @@ pub trait AITip: Clone {
 /// Kinds of agent tips for organizing and filtering.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AgentTipKind {
-    WarpDrive,
+    ZapDrive,
     General,
     Mcp,
     SlashCommands,
@@ -82,28 +82,28 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
     vec![
         AgentTip {
             description: crate::t!("agent-tip-slash-menu"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/slash-commands".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::SlashCommands,
         },
         AgentTip {
             description: crate::t!("agent-tip-toggle-input-mode"),
-            link: Some("https://docs.warp.dev/terminal/input/universal-input#input-modes".to_string()),
+            link: Some("".to_string()),
             binding_name: Some(SET_INPUT_MODE_AGENT_ACTION_NAME),
             action: None,
             kind: AgentTipKind::General,
         },
         AgentTip {
             description: crate::t!("agent-tip-plan"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/planning".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::SlashCommands,
         },
         AgentTip {
             description: crate::t!("agent-tip-command-palette"),
-            link: Some("https://docs.warp.dev/terminal/command-palette".to_string()),
+            link: Some("".to_string()),
             binding_name: Some(TOGGLE_COMMAND_PALETTE_KEYBINDING_NAME),
             action: Some(WorkspaceAction::OpenPalette {
                 mode: PaletteMode::Command,
@@ -114,10 +114,10 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
         },
         AgentTip {
             description: crate::t!("agent-tip-warp-drive"),
-            link: Some("https://docs.warp.dev/knowledge-and-collaboration/warp-drive".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
-            action: Some(WorkspaceAction::OpenWarpDrive),
-            kind: AgentTipKind::WarpDrive,
+            action: Some(WorkspaceAction::ZapDrive),
+            kind: AgentTipKind::ZapDrive,
         },
         AgentTip {
             description: crate::t!("agent-tip-redirect-running-agent"),
@@ -128,14 +128,14 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
         },
         AgentTip {
             description: crate::t!("agent-tip-add-context"),
-            link: Some("https://docs.warp.dev/agent-platform/local-agents/agent-context/using-to-add-context".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::Context,
         },
         AgentTip {
             description: crate::t!("agent-tip-attach-prior-output"),
-            link: Some("https://docs.warp.dev/agent-platform/local-agents/agent-context/blocks-as-context#attaching-blocks-as-context".to_string()),
+            link: Some("".to_string()),
             binding_name: Some(SELECT_PREVIOUS_BLOCK_ACTION_NAME),
             action: None,
             kind: AgentTipKind::Context,
@@ -143,49 +143,49 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
 
         AgentTip {
             description: crate::t!("agent-tip-agent-profiles"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/agent-profiles-permissions".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::General,
         },
         AgentTip {
             description: crate::t!("agent-tip-fork-block"),
-            link: Some("https://docs.warp.dev/agent-platform/local-agents/interacting-with-agents/conversation-forking".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::General,
         },
         AgentTip {
             description: crate::t!("agent-tip-copy-output"),
-            link: Some("https://docs.warp.dev/terminal/blocks/block-actions#copy-input-output-of-block".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::General,
         },
         AgentTip {
             description: crate::t!("agent-tip-drag-image"),
-            link: Some("https://docs.warp.dev/agent-platform/local-agents/agent-context/images-as-context".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::Context,
         },
         AgentTip {
             description: crate::t!("agent-tip-interactive-tools"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/full-terminal-use".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::General,
         },
         AgentTip {
             description: crate::t!("agent-tip-code-review-panel"),
-            link: Some("https://docs.warp.dev/code/code-review".to_string()),
+            link: Some("".to_string()),
             binding_name: Some(TOGGLE_RIGHT_PANEL_BINDING_NAME),
             action: None,
             kind: AgentTipKind::Code,
         },
         AgentTip {
             description: crate::t!("agent-tip-add-mcp"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/mcp".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::Mcp,
@@ -202,18 +202,18 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
             link: None,
             binding_name: None,
             action: None,
-            kind: AgentTipKind::WarpDrive,
+            kind: AgentTipKind::ZapDrive,
         },
         AgentTip {
             description: crate::t!("agent-tip-add-rule"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/rules".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::Context,
         },
         AgentTip {
             description: crate::t!("agent-tip-fork"),
-            link: Some("https://docs.warp.dev/agent-platform/local-agents/interacting-with-agents/conversation-forking".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::SlashCommands,
@@ -227,7 +227,7 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
         },
         AgentTip {
             description: crate::t!("agent-tip-new-conversation"),
-            link: Some("https://docs.warp.dev/agent-platform/local-agents/interacting-with-agents".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::SlashCommands,
@@ -248,56 +248,56 @@ static DEFAULT_TIPS: LazyLock<Vec<AgentTip>> = LazyLock::new(|| {
         },
         AgentTip {
             description: crate::t!("agent-tip-oz-headless"),
-            link: Some("https://docs.warp.dev/reference/cli".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::General,
         },
         AgentTip {
             description: crate::t!("agent-tip-selected-text-context"),
-            link: Some("https://docs.warp.dev/agent-platform/local-agents/agent-context/blocks-as-context#attaching-blocks-as-context".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::Context,
         },
         AgentTip {
             description: crate::t!("agent-tip-project-rules"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/rules#project-rules-1".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::Context,
         },
         AgentTip {
             description: crate::t!("agent-tip-url-context"),
-            link: Some("https://docs.warp.dev/agent-platform/local-agents/agent-context/urls-as-context".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::Context,
         },
         AgentTip {
             description: crate::t!("agent-tip-warpify-ssh"),
-            link: Some("https://docs.warp.dev/terminal/warpify".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::General,
         },
         AgentTip {
             description: crate::t!("agent-tip-switch-profiles"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/agent-profiles-permissions".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::General,
         },
         AgentTip {
             description: crate::t!("agent-tip-init-rules"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/rules".to_string()),
+            link: Some("".to_string()),
             binding_name: None,
             action: None,
             kind: AgentTipKind::SlashCommands,
         },
         AgentTip {
             description: crate::t!("agent-tip-auto-approve"),
-            link: Some("https://docs.warp.dev/agent-platform/capabilities/full-terminal-use#session-level-approvals".to_string()),
+            link: Some("".to_string()),
             binding_name: Some(TOGGLE_AUTOEXECUTE_MODE_KEYBINDING),
             action: None,
             kind: AgentTipKind::General,
@@ -394,7 +394,7 @@ impl WorkspaceAction {
     pub fn display_text(&self) -> Option<String> {
         match self {
             WorkspaceAction::OpenPalette { .. } => Some(crate::t!("agent-tip-action-open-palette")),
-            WorkspaceAction::OpenWarpDrive => Some(crate::t!("agent-tip-action-warp-drive")),
+            WorkspaceAction::ZapDrive => Some(crate::t!("agent-tip-action-warp-drive")),
             WorkspaceAction::ToggleRightPanel => Some(crate::t!("agent-tip-action-show-diff-view")),
             _ => None,
         }
@@ -412,7 +412,7 @@ pub fn get_agent_tips(ctx: &AppContext) -> Vec<AgentTip> {
         tips.push(AgentTip {
             description: crate::t!("agent-tip-voice-input"),
             link: Some(
-                "https://docs.warp.dev/agent-platform/local-agents/interacting-with-agents/voice"
+                ""
                     .to_string(),
             ),
             binding_name: Some("FN"),

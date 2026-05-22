@@ -1,7 +1,7 @@
 [package]
-authors = ["Warp Team <dev@warp.dev>"]
-default-run = "warp-oss"
-description = "The local-first terminal for individuals and teams"
+authors = ["Zap Team"]
+default-run = "zap-oss"
+description = "The local-first agentic terminal"
 edition = "2021"
 autobins = false
 name = "warp"
@@ -13,34 +13,12 @@ license.workspace = true
 name = "warp"
 path = "src/lib.rs"
 
-# We define separate targets for each channel (stable, preview, dev) so that we can
-# bundle with its own icon, app name, and channel-specific configuration (such as
-# flag overrides). Otherwise these binaries are exactly identical to our main binary.
+# Zap 只保留两个 bin:打包用的 zap-oss,以及构建期工具 generate_settings_schema。
+# 原 warp 多渠道发布的 dev/stable/preview/local bin 已删除。
 
 [[bin]]
-name = "warp-oss"
-path = "src/bin/oss.rs"
-test = false
-
-[[bin]]
-name = "warp"
-path = "src/bin/local.rs"
-test = false
-
-[[bin]]
-name = "stable"
-path = "src/bin/stable.rs"
-test = false
-
-[[bin]]
-name = "dev"
-path = "src/bin/dev.rs"
-test = false
-
-[[bin]]
-name = "preview"
-path = "src/bin/preview.rs"
-required-features = ["preview_channel"]
+name = "zap-oss"
+path = "src/bin/zap_oss.rs"
 test = false
 
 [[bin]]
@@ -109,7 +87,7 @@ genai.workspace = true
 getset.workspace = true
 handlebars.workspace = true
 hex.workspace = true
-# OpenWarp BYOP webfetch:HTML→Markdown(Turndown 的 Rust 端口)。
+# Zap BYOP webfetch:HTML→Markdown(Turndown 的 Rust 端口)。
 htmd.workspace = true
 # BYOP system prompt 模板渲染。轻量(运行时引擎),Jinja2 子集。
 # 默认 features(builtins / serde / multi_template / macros / debug ...)够用。
@@ -852,46 +830,14 @@ hoa_remote_control = []
 codex_notifications = []
 configurable_context_window = []
 
-[package.metadata.bundle.bin.warp-oss]
+[package.metadata.bundle.bin.zap-oss]
 category = "public.app-category.developer-tools"
-copyright = "© 2025-2026, OpenWarp"
-identifier = "dev.openwarp.OpenWarp"
-name = "OpenWarp"
+copyright = "© 2025-2026, Zap"
+identifier = "dev.zap.Zap"
+name = "Zap"
 resources = ["assets/onboarding"]
 icon = ["channels/oss/icon/no-padding/512x512.png", "channels/oss/icon/no-padding/icon.ico"]
-short_description = "The open-source, local-first terminal for individuals and teams."
-
-[package.metadata.bundle.bin.stable]
-category = "public.app-category.developer-tools"
-copyright = "© 2025, Denver Technologies, Inc"
-identifier = "dev.warp.Warp-Stable"
-name = "Warp"
-resources = ["assets/onboarding"]
-short_description = "The local-first terminal for individuals and teams, stable build."
-
-[package.metadata.bundle.bin.preview]
-category = "public.app-category.developer-tools"
-copyright = "© 2025, Denver Technologies, Inc"
-identifier = "dev.warp.Warp-Preview"
-name = "WarpPreview"
-resources = ["assets/onboarding"]
-short_description = "The local-first terminal for individuals and teams, feature preview build."
-
-[package.metadata.bundle.bin.dev]
-category = "public.app-category.developer-tools"
-copyright = "© 2025, Denver Technologies, Inc"
-identifier = "dev.warp.Warp-Dev"
-name = "WarpDev"
-resources = ["assets/onboarding"]
-short_description = "The local-first terminal for individuals and teams, developer build."
-
-[package.metadata.bundle.bin.warp]
-category = "public.app-category.developer-tools"
-copyright = "© 2025, Denver Technologies, Inc"
-identifier = "dev.warp.Warp-Local"
-name = "WarpLocal"
-resources = ["assets/onboarding"]
-short_description = "The local-first terminal for individuals and teams, developer build."
+short_description = "The open-source, local-first agentic terminal."
 
 [package.metadata.cargo-udeps.ignore]
 normal = ["embed_plist"]

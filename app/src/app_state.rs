@@ -13,7 +13,7 @@ use crate::ai::ambient_agents::AmbientAgentTaskId;
 use crate::ai::blocklist::InputConfig;
 use crate::ai::blocklist::SerializedBlockListItem;
 use crate::code::editor_management::CodeSource;
-use crate::drive::OpenWarpDriveObjectSettings;
+use crate::drive::ZapDriveObjectSettings;
 use crate::root_view::quake_mode_window_id;
 use crate::server::ids::SyncId;
 use crate::settings_view::SettingsSection;
@@ -123,7 +123,7 @@ pub enum LeafContents {
     AIDocument(AIDocumentPaneSnapshot),
     Code(CodePaneSnapShot),
     EnvVarCollection(EnvVarCollectionPaneSnapshot),
-    // OpenWarp Wave 7-3:`EnvironmentManagement` LeafContents variant 随 Ambient Agent UI
+    // Zap Wave 7-3:`EnvironmentManagement` LeafContents variant 随 Ambient Agent UI
     // 子系统物理删。
     Workflow(WorkflowPaneSnapshot),
     Settings(SettingsPaneSnapshot),
@@ -158,7 +158,7 @@ impl LeafContents {
     /// restoration to fail and the whole tab to disappear on restart.
     pub(crate) fn is_persisted(&self) -> bool {
         match self {
-            // OpenWarp Wave 7-3:`EnvironmentManagement` arm 随 variant 一同物理删。
+            // Zap Wave 7-3:`EnvironmentManagement` arm 随 variant 一同物理删。
             // SSH server editor:数据(host/user/...)持久化在 ssh_servers 表里,
             // pane 本身只是 view,关掉再打开没差别。
             LeafContents::SshServer { .. } => false,
@@ -223,7 +223,7 @@ pub enum NotebookPaneSnapshot {
         ///    server ID.
         notebook_id: Option<SyncId>,
         // Settings for the notebook pane when it's opened (such as a folder to focus upon opening)
-        settings: OpenWarpDriveObjectSettings,
+        settings: ZapDriveObjectSettings,
     },
     LocalFileNotebook {
         /// The path to the local file that was open in this pane. This may be `None` if
@@ -262,7 +262,7 @@ pub enum WorkflowPaneSnapshot {
     WorkflowObject {
         workflow_id: Option<SyncId>,
         // Settings for the workflow pane when it's opened (such as a folder to focus upon opening)
-        settings: OpenWarpDriveObjectSettings,
+        settings: ZapDriveObjectSettings,
     },
 }
 
@@ -275,7 +275,7 @@ pub enum EnvVarCollectionPaneSnapshot {
     },
 }
 
-// OpenWarp Wave 7-3:`EnvironmentManagementPaneSnapshot` 随 LeafContents variant 一同物理删。
+// Zap Wave 7-3:`EnvironmentManagementPaneSnapshot` 随 LeafContents variant 一同物理删。
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SettingsPaneSnapshot {
@@ -302,7 +302,7 @@ pub enum CodeReviewPaneSnapshot {
 pub enum LeftPanelDisplayedTab {
     FileTree,
     GlobalSearch,
-    WarpDrive,
+    ZapDrive,
     ConversationListView,
     SshManager,
     SkillManager,
@@ -313,7 +313,7 @@ impl From<ToolPanelView> for LeftPanelDisplayedTab {
         match view {
             ToolPanelView::ProjectExplorer => LeftPanelDisplayedTab::FileTree,
             ToolPanelView::GlobalSearch { .. } => LeftPanelDisplayedTab::GlobalSearch,
-            ToolPanelView::WarpDrive => LeftPanelDisplayedTab::WarpDrive,
+            ToolPanelView::ZapDrive => LeftPanelDisplayedTab::ZapDrive,
             ToolPanelView::ConversationListView => LeftPanelDisplayedTab::ConversationListView,
             ToolPanelView::SshManager => LeftPanelDisplayedTab::SshManager,
             ToolPanelView::SkillManager => LeftPanelDisplayedTab::SkillManager,

@@ -13,7 +13,7 @@ Relevant code today:
   - handler: `ToggleLoginItem => ...` (~l1855-1857)
   - widget: `LoginItemWidget` (~l4488-4533), rendered only when `add_app_as_login_item.is_supported_on_current_platform()` returns true (~l2481-2486). Label is hard-coded to `"Start Warp at login (requires macOS 13+)"`.
 - `crates/settings/src/lib.rs:161-219` — `SupportedPlatforms` enum and `matches_current_platform`. Supports `OR(…, …)` so `MAC` + `WINDOWS` can be expressed without adding a new variant.
-- `crates/warp_core/src/channel/state.rs:119-125, 40` — `ChannelState::app_id()` returns the current channel's `AppId` (e.g. `dev.openwarp.OpenWarp`, `dev.warp.Warp`, `dev.warp.WarpPreview`, `dev.warp.WarpDev`). We can reuse `application_name()` for the channel-specific registry value name on Windows.
+- `crates/warp_core/src/channel/state.rs:119-125, 40` — `ChannelState::app_id()` returns the current channel's `AppId` (e.g. `dev.zap.Zap`, `dev.warp.Warp`, `dev.warp.WarpPreview`, `dev.warp.WarpDev`). We can reuse `application_name()` for the channel-specific registry value name on Windows.
 - `app/Cargo.toml:356-377` — Windows-only dependency block. `winreg`, `windows-registry`, and `windows` are already pulled in and available for a new module. `winreg` is already used for reading registry values (`crates/warpui/src/windowing/winit/windows/registry.rs`), so we should follow that pattern for consistency.
 ## Proposed changes
 ### 1. Loosen the setting's platform gate
@@ -48,7 +48,7 @@ Add `login_item/windows.rs` with the Windows implementation:
   const RUN_SUBKEY: &str =
       r"Software\Microsoft\Windows\CurrentVersion\Run";
   fn value_name() -> String {
-      // e.g. "Warp", "WarpPreview", "WarpDev", "OpenWarp"
+      // e.g. "Warp", "WarpPreview", "WarpDev", "Zap"
       ChannelState::app_id().application_name().to_owned()
   }
   fn register(exe: &Path) -> std::io::Result<()> {
@@ -72,7 +72,7 @@ Add `login_item/windows.rs` with the Windows implementation:
   }
   ```
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` is the user-scope per-login key; it does not require admin, and is what Windows 10/11's **Settings → Apps → Startup** and **Task Manager → Startup apps** surface. This satisfies Behavior invariants 3–4, 7, 11.
-- The per-channel value name from `application_name()` keeps Dev/Preview/Stable isolated (Behavior 7): `Warp`, `WarpPreview`, `WarpDev`, `OpenWarp`.
+- The per-channel value name from `application_name()` keeps Dev/Preview/Stable isolated (Behavior 7): `Warp`, `WarpPreview`, `WarpDev`, `Zap`.
 - Behavior 10 ("moving the install") is partially covered: the short-circuit `add_app_as_login_item && app_added_as_login_item` intentionally prevents re-registration on every launch, so a moved install keeps the stale path until the user toggles the setting off and back on (which rewrites against the new `current_exe()`). Automatic detection + rewrite when the stored path differs is tracked as a follow-up.
 ### 3. Rewire startup
 Replace the existing `#[cfg(target_os = "macos")]` block in `app/src/lib.rs:2229-2239` with a block gated on `cfg(any(target_os = "macos", target_os = "windows"))`, calling the new cross-platform `login_item::maybe_register_app_as_login_item`. The subscription to `GeneralSettingsChangedEvent::LoginItem` stays identical. Delete the old `maybe_register_app_as_login_item` body from `lib.rs:2279-2362`.

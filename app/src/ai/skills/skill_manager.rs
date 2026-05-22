@@ -97,7 +97,7 @@ pub struct SkillManager {
     /// Reverse lookup: skill name → set of paths with that name.
     /// This allows efficient lookup by skill name without scanning all paths.
     skills_by_name: HashMap<String, HashSet<PathBuf>>,
-    /// Skills bundled into Warp, each with activation condition and icon.
+    /// Skills bundled into Zap, each with activation condition and icon.
     bundled_skills: HashMap<String, BundledSkill>,
     #[allow(dead_code)]
     skill_watcher: ModelHandle<SkillWatcher>, // Can't remove this or it'll get cleaned up after new()
@@ -479,7 +479,7 @@ impl SkillManager {
         }
     }
 
-    /// Load skill definitions bundled with Warp.
+    /// Load skill definitions bundled with Zap.
     async fn load_bundled_skills() -> HashMap<String, BundledSkill> {
         let Some(resources_dir) = warp_core::paths::bundled_resources_dir() else {
             return HashMap::new();
@@ -585,7 +585,7 @@ async fn read_bundled_skills(skills_dir: &Path) -> HashMap<String, ParsedSkill> 
 /// Builds the context map for bundled skill variable substitution.
 ///
 /// Supported variables:
-/// - `{{warp_server_url}}` - Empty in OpenWarp; retained for bundled skill compatibility.
+/// - `{{warp_server_url}}` - Empty in Zap; retained for bundled skill compatibility.
 /// - `{{warp_cli_binary_name}}` - The CLI binary name (e.g., `warp` or `warp-cli`)
 /// - `{{warp_url_scheme}}` - The URL scheme (e.g., `warp`, `warpdev`, `warppreview`)
 /// - `{{settings_schema_path}}` - Path to the bundled JSON settings schema
@@ -623,7 +623,7 @@ fn build_bundled_skill_context() -> HashMap<String, String> {
 
 /// Returns the icon for a bundled skill, given its directory-based ID.
 /// Skills with a known brand (e.g. `pr-comments` → GitHub) get a
-/// branded icon; everything else falls back to the Warp logo.
+/// branded icon; everything else falls back to the Zap logo.
 fn icon_for_bundled_skill(skill_id: &str) -> Icon {
     match skill_id {
         "pr-comments" => Icon::Github,

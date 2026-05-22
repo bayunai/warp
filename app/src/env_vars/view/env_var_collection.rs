@@ -75,7 +75,7 @@ const SECTION_SPACING: f32 = 16.;
 
 // Variable rows
 pub(super) const ROW_SPACING: f32 = 8.;
-pub const EDUCATION_TEXT: &str = "Add secret or command. Warp never stores external secrets";
+pub const EDUCATION_TEXT: &str = "Add secret or command. Zap never stores external secrets";
 const VARIABLE_FONT_SIZE: f32 = 13.;
 const DESCRIPTION_EDITOR_CUTOFF: f32 = 30.;
 const DESCRIPTION_BOTTOM_MARGIN: f32 = 12.;
@@ -675,7 +675,7 @@ impl EnvVarCollectionView {
             title
         };
         self.set_pane_title(&title, ctx);
-        // TODO(openwarp-cloud-removal Phase 5): sharing UI 已退役,
+        // TODO(zap-cloud-removal Phase 5): sharing UI 已退役,
         // env_var_collection 的 ShareableObject 注入移除;ServerId 路径保留待
         // cloud_object 整体退役。
         let _ = env_var_collection.id;

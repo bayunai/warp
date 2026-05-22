@@ -123,7 +123,7 @@ pub fn run_server(socket_path: &Path) -> anyhow::Result<()> {
             std::fs::create_dir_all(&dump_dir)?;
 
             let dump_path =
-                dump_dir.join(format!("openwarp-minidump-{}.dmp", Uuid::new_v4().simple()));
+                dump_dir.join(format!("zap-minidump-{}.dmp", Uuid::new_v4().simple()));
             let file = File::create(&dump_path)?;
             *self.pending_dump_path.lock() = Some(dump_path.clone());
             Ok((file, dump_path))
@@ -249,7 +249,7 @@ impl MinidumpGuard {
         })
         .context("Failed to attach crash signal handler")?;
 
-        // Ensure that the crash server process can ptrace Warp.
+        // Ensure that the crash server process can ptrace Zap.
         #[cfg(target_os = "linux")]
         crash_handler.set_ptracer(Some(child.id()));
 

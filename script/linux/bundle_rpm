@@ -15,29 +15,37 @@
 
 set -e
 
-# Extract channel suffix from BINARY_NAME
-if [ "$ARTIFACT" = "cli" ]; then
+# Extract channel suffix from BINARY_NAME (other channels) or use oss-specific naming.
+if [ "$RELEASE_CHANNEL" = "oss" ]; then
+  CHANNEL_SUFFIX=""
+  if [ "$ARTIFACT" = "app" ]; then
+    PACKAGE_NAME="zap"
+  else
+    PACKAGE_NAME="zap-cli"
+  fi
+  REPO_NAME="zap"
+  OPT_DIR="/opt/$PACKAGE_NAME"
+elif [ "$ARTIFACT" = "cli" ]; then
   CHANNEL_SUFFIX="${BINARY_NAME#oz}"
+  PACKAGE_NAME="oz$CHANNEL_SUFFIX"
+  REPO_NAME="warpdotdev$CHANNEL_SUFFIX"
+  OPT_DIR="/opt/warpdotdev/$PACKAGE_NAME"
 else
   CHANNEL_SUFFIX="${BINARY_NAME#warp}"
+  PACKAGE_NAME="warp-terminal$CHANNEL_SUFFIX"
+  REPO_NAME="warpdotdev$CHANNEL_SUFFIX"
+  OPT_DIR="/opt/warpdotdev/$PACKAGE_NAME"
 fi
-REPO_NAME="warpdotdev$CHANNEL_SUFFIX"
 
 # On Linux, we keep the `-stable` suffix for stable to avoid package conflicts.
 # The binary name is still `oz`, and the repo name is still `warpdotdev`.
 if [ "$ARTIFACT" = "cli" -a "$RELEASE_CHANNEL" = "stable" ]; then
   CHANNEL_SUFFIX="-stable"
+  PACKAGE_NAME="oz$CHANNEL_SUFFIX"
+  OPT_DIR="/opt/warpdotdev/$PACKAGE_NAME"
 fi
 
 ARTIFACT="${ARTIFACT:-app}"
-if [ "$ARTIFACT" = "app" ]; then
-  PACKAGE_NAME="warp-terminal$CHANNEL_SUFFIX"
-elif [ "$ARTIFACT" = "cli" ]; then
-  PACKAGE_NAME="oz$CHANNEL_SUFFIX"
-else
-  echo "::error ::Unknown ARTIFACT: $ARTIFACT (expected 'app' or 'cli')"
-  exit 1
-fi
 
 BUILD_ARCH="${BUILD_ARCH:-$(uname -m)}"
 if [ "$BUILD_ARCH" = "aarch64" ]; then
@@ -74,6 +82,8 @@ VERSION="${GIT_RELEASE_TAG#v}"
 RELEASE="1"
 sed \
     "s#@@CHANNEL_SUFFIX@@#$CHANNEL_SUFFIX#g; \
+     s#@@PACKAGE_NAME@@#$PACKAGE_NAME#g; \
+     s#@@OPT_DIR@@#$OPT_DIR#g; \
      s#@@BINARY_NAME@@#$BINARY_NAME#g; \
      s#@@VERSION@@#$VERSION#g; \
      s#@@RELEASE@@#$RELEASE#g; \
@@ -92,9 +102,9 @@ fakeroot rpmbuild -v -bb "$RPMBUILD_DIR/SPEC/warp.spec" --target="$ARCH" --defin
 RPM_NAME="$PACKAGE_NAME-$VERSION-$RELEASE.$ARCH.rpm"
 cp "$RPMBUILD_DIR/RPMS/$ARCH/$RPM_NAME" "$OUT_DIR"
 
-# OpenWarp 不使用上游 Warp 的 RPM 签名 key；GitHub 构建只产出未签名本地包。
+# Zap 不使用上游 Zap 的 RPM 签名 key；GitHub 构建只产出未签名本地包。
 if [ "${GITHUB_ACTIONS}" == "true" ]; then
-  echo "Skipping upstream Warp RPM signing for OpenWarp."
+  echo "Skipping upstream Zap RPM signing for Zap."
 fi
 
 echo "Successfully built .rpm package at $OUT_DIR/$RPM_NAME!"

@@ -20,7 +20,7 @@ fn test_search_cjk_literal() {
     // CJK literal search
     App::test((), |mut app| async move {
         let (buffer, _selection) = Buffer::mock_from_markdown(
-            "OpenWarp 是基于 Warp 的社区分支，保留账户与同步能力。",
+            "Zap 是基于 Zap 的社区分支，保留账户与同步能力。",
             None,
             Box::new(|_, _| IndentBehavior::Ignore),
             &mut app,

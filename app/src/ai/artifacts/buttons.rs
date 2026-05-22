@@ -177,7 +177,7 @@ fn collect_buttons(
                 description: _,
                 size_bytes: _,
             } => {
-                // OpenWarp no longer has cloud artifact storage, so file and screenshot
+                // Zap no longer has cloud artifact storage, so file and screenshot
                 // artifacts cannot be fetched. Keep deserialization for legacy history,
                 // but do not render buttons that can only fail.
             }

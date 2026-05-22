@@ -156,7 +156,7 @@ impl WorkspaceState {
             || self.is_remove_tab_config_dialog_open
             || {
                 let one_time_modal = OneTimeModalModel::as_ref(app);
-                one_time_modal.is_openwarp_launch_modal_open()
+                one_time_modal.is_zap_launch_modal_open()
             }
     }
 
@@ -269,7 +269,7 @@ pub enum TerminalSessionFallbackBehavior {
 /// Given a [`WindowId`], see if its [`Workspace`] contains an active [`TerminalView`] and return
 /// that.
 ///
-/// Note that "active" is not the same as "focused" in Warp's pane management.
+/// Note that "active" is not the same as "focused" in Zap's pane management.
 pub fn active_terminal_in_window<T, F>(
     window_id: WindowId,
     ctx: &mut AppContext,

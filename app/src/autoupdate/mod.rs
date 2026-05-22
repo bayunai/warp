@@ -69,7 +69,7 @@ pub enum AutoupdateStage {
     },
     /// A relaunch was initiated to use the new version, but failed.
     UnableToLaunchNewVersion { new_version: VersionInfo },
-    /// A new version was installed, but Warp hasn't restarted yet.
+    /// A new version was installed, but Zap hasn't restarted yet.
     ///
     /// This state is only used on macOS, where the update isn't fully applied until right before
     /// restarting.
@@ -312,7 +312,7 @@ impl AutoupdateState {
         // 在 OSS 分支由 `github::GithubRelease::version()` 提供,已经 `trim_start_matches('v')`
         // 去掉了 `v`(如 `2026.05.10.preview`)。直接做字符串相等比较会永远 false,导致
         // "已是最新"被错判为"发现新版本"。这里做幂等的前缀归一化:
-        // - 官方 Warp:tag 一律带 `v`,两边 trim 后仍相等,行为不变。
+        // - 官方 Zap:tag 一律带 `v`,两边 trim 后仍相等,行为不变。
         // - openWarp:trim 后才相等,正确识别同版本。
         if version.version.trim_start_matches('v') == current_version.trim_start_matches('v') {
             log::info!("Already up to date with {}", version.version);
@@ -744,7 +744,7 @@ pub fn accessibility_content(
         // Found autoupdate
         (RequestType::ManualCheck, Ok(UpdateReady::Yes { .. })) => Some(AccessibilityContent::new(
             "Update available.",
-            "Use the command palette to install and relaunch Warp",
+            "Use the command palette to install and relaunch Zap",
             WarpA11yRole::HelpRole,
         )),
         // Any non-successful autoupdate check
@@ -782,7 +782,7 @@ async fn fetch_version(
     update_id: &str,
     http_client: Arc<http_client::Client>,
 ) -> Result<VersionInfo> {
-    // openWarp 走 GitHub Releases(zerx-lab/warp),完全旁路 Warp 官方
+    // openWarp 走 GitHub Releases(zerx-lab/warp),完全旁路 Zap 官方
     // channel_versions / GCS。提前返回避免后续 fetch_channel_versions 必然失败。
     if matches!(channel, Channel::Oss) {
         let release = github::fetch_latest_release(http_client.as_ref()).await?;
@@ -876,7 +876,7 @@ pub fn apply_update(
     }
 }
 
-/// Relaunch Warp to apply an update.
+/// Relaunch Zap to apply an update.
 ///
 /// This will:
 /// 1. Perform any last update steps.
