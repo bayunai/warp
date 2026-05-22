@@ -6897,19 +6897,23 @@ impl Workspace {
     }
 
     fn cd_to_directory(&mut self, path: PathBuf, ctx: &mut ViewContext<Self>) {
+        let Some(path_str) = path.to_str() else {
+            log::warn!("Could not convert path to string for cd command");
+            return;
+        };
+        self.cd_to_remote_directory(path_str, ctx);
+    }
+
+    fn cd_to_remote_directory(&mut self, path: &str, ctx: &mut ViewContext<Self>) {
         let Some(input_handle) = self.get_active_input_view_handle(ctx) else {
             log::warn!("No active input view when trying to cd to directory");
             return;
         };
 
-        let Some(path_str) = path.to_str() else {
-            log::warn!("Could not convert path to string for cd command");
-            return;
-        };
-
-        let cd_command = format!("cd {}", shell_words::quote(path_str));
+        let quoted_dir = shell_words::quote(path);
+        let cd_command = format!("cd -- {quoted_dir}");
         input_handle.update(ctx, |input_view, ctx| {
-            input_view.replace_buffer_content(&cd_command, ctx);
+            input_view.try_execute_command(&cd_command, ctx);
         });
     }
 
