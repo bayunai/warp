@@ -179,7 +179,7 @@ impl ShellCommandExecutor {
                         .insert(block_selector, block_finished_tx);
                 }
             } else {
-                // e.g. `BlockSelector::Action` before the agent command block exists in the list
+                // e.g. `BlockSelector::RequestedCommandId` before the agent command block exists in the list
                 self.block_finished_senders
                     .insert(block_selector, block_finished_tx);
             }
@@ -373,7 +373,7 @@ impl ShellCommandExecutor {
                 // Resolve stdout via `block_for_ai_action_id`, not `active_block_id`. On bash with
                 // precmd hooks, the active block at dispatch can be a synthetic `precmd-*` block
                 // that finishes with exit 0 and empty output before the real command block exists.
-                let block_selector = BlockSelector::Action(action_id.clone());
+                let block_selector = BlockSelector::RequestedCommandId(action_id.clone());
                 let command = command.clone();
                 drop(model);
 
@@ -1083,17 +1083,16 @@ fn command_basename(command_token: &str) -> &str {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 enum BlockSelector {
     Id(BlockId),
-    /// Shell block that carries `requested_command_action_id` for this agent tool call.
-    Action(AIAgentActionId),
+    RequestedCommandId(AIAgentActionId),
 }
 
 impl BlockSelector {
     fn get_block<'a>(&self, model: &'a TerminalModel) -> Option<&'a Block> {
         match self {
             BlockSelector::Id(block_id) => model.block_list().block_with_id(block_id),
-            BlockSelector::Action(action_id) => {
-                model.block_list().block_for_ai_action_id(action_id)
-            }
+            BlockSelector::RequestedCommandId(requested_command_id) => model
+                .block_list()
+                .block_for_ai_action_id(requested_command_id),
         }
     }
 }
