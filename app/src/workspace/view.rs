@@ -6904,19 +6904,6 @@ impl Workspace {
         self.cd_to_remote_directory(path_str, ctx);
     }
 
-    fn cd_to_remote_directory(&mut self, path: &str, ctx: &mut ViewContext<Self>) {
-        let Some(input_handle) = self.get_active_input_view_handle(ctx) else {
-            log::warn!("No active input view when trying to cd to directory");
-            return;
-        };
-
-        let quoted_dir = shell_words::quote(path);
-        let cd_command = format!("cd -- {quoted_dir}");
-        input_handle.update(ctx, |input_view, ctx| {
-            input_view.try_execute_command(&cd_command, ctx);
-        });
-    }
-
     // 远端文件浏览器的 cd:与本地 cd_to_directory 不同,这里直接执行命令而不是
     // 填入输入框。原因是远端会话切换工作目录后需要立即反馈到会话状态,且面板
     // 是右键菜单触发的明确意图,不需要再让用户二次确认。
@@ -6926,7 +6913,8 @@ impl Workspace {
             return;
         };
 
-        let cd_command = format!("cd -- {}", shell_words::quote(path));
+        let quoted_dir = shell_words::quote(path);
+        let cd_command = format!("cd -- {quoted_dir}");
         input_handle.update(ctx, |input_view, ctx| {
             input_view.try_execute_command(&cd_command, ctx);
         });
